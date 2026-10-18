@@ -43,6 +43,8 @@ class MainActivity: Activity() {
     private var web:WebView?=null
     private var active=-1
     private var previousChannelUrl:String?=null
+    private var alternativeAttempted=mutableSetOf<String>()
+    private var alternativeSessionKey:String?=null
     private var youtubeUnmuteTask:Runnable?=null
     private lateinit var root:LinearLayout
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
@@ -87,6 +89,38 @@ class MainActivity: Activity() {
                 if(active<0)settings()
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
+    }
+    private fun sameChannel(a:Channel,b:Channel)=a.name.trim().equals(b.name.trim(),true) && a.group.trim().equals(b.group.trim(),true)
+    private fun alternateIndices(index:Int):List<Int>{
+        val channel=channels.getOrNull(index) ?:return emptyList()
+        return channels.indices.filter{sameChannel(channels[it],channel)}.distinctBy{channels[it].url}
+    }
+    private fun selectAlternative(index:Int){
+        val options=alternateIndices(index)
+        if(options.size<=1){
+            Toast.makeText(this,"No alternative URL for this channel",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
+            .setItems(options.mapIndexed{n,i->
+                "Source "+(n+1)+(if(i==active)"  •  Playing" else "")+"  ·  "+(try{Uri.parse(channels[i].url).host?:"Stream"}catch(_:Exception){"Stream"})
+            }.toTypedArray()){_,choice->
+                val target=options[choice]
+                alternativeAttempted.clear()
+                alternativeSessionKey=null
+                playIndex(target)
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
+    }
+    private fun tryNextAlternative(index:Int):Boolean{
+        if(index !in channels.indices)return false
+        val options=alternateIndices(index)
+        alternativeAttempted.add(channels[index].url)
+        val next=options.firstOrNull{!alternativeAttempted.contains(channels[it].url)}
+            ?:return false
+        showBanner("Trying alternative source for "+channels[index].name)
+        handler.post{if(active==index)playIndex(next)}
+        return true
     }
     private fun isLocked(c:Channel)=lockIds.contains(id(c)) || lockGroups.contains(c.group)
     private fun visibleIndices()=channels.indices.filter{!isLocked(channels[it])}
@@ -176,7 +210,7 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)",if(isSkipped(c))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)",if(isSkipped(c))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -190,6 +224,7 @@ class MainActivity: Activity() {
                 8->chooseChannelEngine(i)
                 9->selectQuality(i)
                 10->{toggleChannelSkip(c);if(active<0)allChannels()}
+                11->selectAlternative(i)
             }
         }.show()
     }
@@ -723,7 +758,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine",if(isSkipped(channel))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine",if(isSkipped(channel))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -739,6 +774,7 @@ class MainActivity: Activity() {
                     9->audioTracks()
                     10->chooseChannelEngine(active)
                     11->toggleChannelSkip(channel)
+                    12->selectAlternative(active)
                 }
             }.setNegativeButton("Close",null).show()
     }
@@ -1069,7 +1105,7 @@ class MainActivity: Activity() {
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine",
-            "Date & time overlay","Home screen","Full settings"
+            "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -1099,8 +1135,9 @@ class MainActivity: Activity() {
                 4->audioTracks()
                 5->if(active>=0)chooseChannelEngine(active)
                 6->clockSettings()
-                7->showHome()
-                8->liveSettings()
+                7->selectAlternative(active)
+                8->showHome()
+                9->liveSettings()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -1291,7 +1328,9 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
-        if(active in channels.indices && active!=index)previousChannelUrl=channels[active].url
+        if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
+        val sessionKey=c.name.trim().lowercase()+"|"+c.group.trim().lowercase()
+        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey}
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
@@ -1465,11 +1504,8 @@ class MainActivity: Activity() {
                         }
                         return
                     }
-                    val alternative=channels.indexOfFirst{other->other.name.equals(c.name,true) && other.url!=c.url && !fallbackAttempted.contains(other.url)}
-                    if(alternative>=0){
-                        fallbackAttempted.add(c.url)
-                        showBanner("Trying another stream for ${c.name}")
-                        handler.post{playIndex(alternative)}
+                    if(tryNextAlternative(index)){
+                        // Move to the next URL for the same channel before retrying.
                     }else if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
                         retryCount++
                         showBanner("Reconnecting "+c.name)
@@ -1541,13 +1577,7 @@ class MainActivity: Activity() {
                     failed=true
                     android.util.Log.w("HomeTV","LibVLC startup timeout for "+c.name)
                     showBanner(c.name+" did not start. Trying another stream.",true)
-                    val alternative=channels.indexOfFirst{
-                        it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)
-                    }
-                    if(alternative>=0){
-                        fallbackAttempted.add(c.url)
-                        playIndex(alternative)
-                    }else showBanner(c.name+" could not load. Check the stream URL or try Media3.",true)
+                    if(!tryNextAlternative(index))showBanner(c.name+" could not load. Check the stream URL or try Media3.",true)
                 }
             }
             vlc.setEventListener{event->
