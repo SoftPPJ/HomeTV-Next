@@ -802,7 +802,7 @@ class MainActivity: Activity() {
             "Text size: "+prefs.getInt("clock_size",18)+" sp",
             "Position: "+(prefs.getString("clock_position","Top right") ?: "Top right")
         )
-        AlertDialog.Builder(this).setTitle("Date & time overlay · dd MMM yy")
+        val clockDialog=AlertDialog.Builder(this).setTitle("Date & time overlay · dd MMM yy")
             .setItems(choices){_,which->
                 when(which){
                     0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",false)).apply();updateClock();clockSettings()}
@@ -822,7 +822,8 @@ class MainActivity: Activity() {
                             }.setNegativeButton("Cancel",null).show()
                     }
                 }
-            }.setNegativeButton("Close",null).show()
+            }.setNegativeButton("Close",null).create()
+        showSideDialog(clockDialog)
     }
     private var channelDigits=""
     private var channelDigitTask:Runnable?=null
@@ -1345,6 +1346,12 @@ class MainActivity: Activity() {
                     }
                     youtubeUnmuteTask=task
                     handler.postDelayed(task,1200L)
+                }
+                override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
+                    if(request.isForMainFrame && web===view){
+                        android.util.Log.w("HomeTV","YouTube page error: "+error.description)
+                        showBanner("YouTube connection issue. Remote and channel controls remain available.",true)
+                    }
                 }
                 override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
                     val target=request.url
