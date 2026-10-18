@@ -129,7 +129,7 @@ class MainActivity: Activity() {
         AlertDialog.Builder(this).setTitle("Playback buffer")
             .setSingleChoiceItems(bufferProfiles,bufferProfiles.indexOf(bufferProfile()).coerceAtLeast(0)){dialog,i->
                 prefs.edit().putString("buffer_profile",bufferProfiles[i]).apply()
-                dialog.dismiss();settings()
+                dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
     private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","LibVLC") ?: "LibVLC")
