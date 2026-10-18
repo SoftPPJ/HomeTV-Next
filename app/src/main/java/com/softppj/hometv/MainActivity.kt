@@ -63,8 +63,19 @@ class MainActivity: Activity() {
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private fun allChannels(){
-        // Preserve the exact sequence from enabled playlists and their M3U entries.
-        channelCollection("All channels",channels.indices.toList())
+        val available=playlists().filter{it.enabled}
+        if(available.isEmpty()){
+            AlertDialog.Builder(this).setTitle("All channels").setMessage("Enable or add a playlist first.").setPositiveButton("Manage playlists"){_,_->managePlaylists()}.setNegativeButton("Cancel",null).show()
+            return
+        }
+        val choices=available.map{it.name}.toMutableList()
+        if(available.size>1)choices.add(0,"Combined playlists")
+        AlertDialog.Builder(this).setTitle("Select playlist")
+            .setItems(choices.toTypedArray()){_,choice->
+                val selected=if(available.size>1 && choice==0)null else available[if(available.size>1)choice-1 else choice]
+                val indices=channels.indices.filter{i->selected==null || channels[i].source==selected.name}
+                channelCollection(selected?.name ?: "All channels · Combined",indices)
+            }.setNegativeButton("Cancel",null).show()
     }
     private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
     private fun channelCollection(title:String,indices:List<Int>){
