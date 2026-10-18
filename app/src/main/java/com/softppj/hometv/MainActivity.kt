@@ -492,13 +492,66 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private fun showOverlayList(){
+    private var previewIndex=-1
+    private var previewTask:Runnable?=null
+    private fun previewChannel(delta:Int){
         if(channels.isEmpty())return
-        val labels=channels.mapIndexed{i,c->"${i+1}. ${c.name}  •  ${c.group}"}.toTypedArray()
-        val selected=active.coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle("Select channel")
-            .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
-            .setNegativeButton("Close",null).show()
+        previewTask?.let{handler.removeCallbacks(it)}
+        previewIndex=((if(previewIndex>=0)previewIndex else active)+delta+channels.size)%channels.size
+        showBanner("▶ "+(previewIndex+1)+"  "+channels[previewIndex].name+"   •   OK to play")
+        val task=Runnable{previewIndex=-1}
+        previewTask=task
+        handler.postDelayed(task,8000)
+    }
+    private fun confirmPreview(){
+        val target=previewIndex
+        previewIndex=-1
+        previewTask?.let{handler.removeCallbacks(it)}
+        previewTask=null
+        if(target in channels.indices)playIndex(target) else showBanner("Use ▲ / ▼ to preview channels")
+    }
+    private fun showOverlayList(){
+        val screen=videoScreen ?:return
+        if(channels.isEmpty())return
+        val drawer=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(0xF015283C.toInt())
+            isFocusableInTouchMode=true
+        }
+        drawer.addView(TextView(this).apply{
+            text="CHANNELS  •  OK to play"
+            textSize=19f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(16,16,8,12)
+        })
+        val list=ListView(this)
+        val names=channels.mapIndexed{i,c->(i+1).toString()+". "+c.name}
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,names)
+        drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
+        screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
+        fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemClickListener{_,_,position,_->close();playIndex(position)}
+        list.setOnKeyListener{_,code,event->
+            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
+                close();true
+            }else false
+        }
+        list.setSelection(active.coerceAtLeast(0))
+        list.requestFocus()
+    }
+    private fun showPlaybackSettings(){
+        val options=arrayOf("Aspect ratio / Screen size","Picture quality","Buffering","Audio tracks","Playback engine")
+        AlertDialog.Builder(this).setTitle("Playback settings")
+            .setItems(options){_,choice->
+                when(choice){
+                    0->selectScreenMode(active.takeIf{it>=0})
+                    1->selectQuality(active.takeIf{it>=0})
+                    2->chooseBufferProfile()
+                    3->audioTracks()
+                    4->if(active>=0)chooseChannelEngine(active)
+                }
+            }.setNegativeButton("Close",null).show()
     }
     private val qualityModes=arrayOf("Auto","Data Saver (360p)","Standard (480p)","HD (720p)","Full HD (1080p)","Best Available")
     private fun qualityMode(index:Int?=active.takeIf{it>=0}):String{
@@ -807,12 +860,13 @@ class MainActivity: Activity() {
     override fun onKeyDown(keyCode:Int,event:KeyEvent?):Boolean{
         if(active>=0){
             when(keyCode){
-                KeyEvent.KEYCODE_DPAD_LEFT->{sideAction("left");return true}
-                KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,KeyEvent.KEYCODE_MEDIA_REWIND,KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
-                KeyEvent.KEYCODE_DPAD_RIGHT->{sideAction("right");return true}
-                KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
-                KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{showOverlayList();return true}
-                KeyEvent.KEYCODE_MENU->{toggleScreenMode();return true}
+                KeyEvent.KEYCODE_DPAD_UP->{previewChannel(-1);return true}
+                KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(1);return true}
+                KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
+                KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
+                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
+                KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS->{previewChannel(-1);return true}
+                KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT->{previewChannel(1);return true}
                 KeyEvent.KEYCODE_BACK->{showChannels();return true}
             }
         }
@@ -820,6 +874,9 @@ class MainActivity: Activity() {
     }
     override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()!="HomeTV")showHome() else confirmExit()}
     private fun stopPlayback(){
+        previewIndex=-1
+        previewTask?.let{handler.removeCallbacks(it)}
+        previewTask=null
         bannerTask?.let{handler.removeCallbacks(it)}
         retryTask?.let{handler.removeCallbacks(it)}
         retryTask=null
