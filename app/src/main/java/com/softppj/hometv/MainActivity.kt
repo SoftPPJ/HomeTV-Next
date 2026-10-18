@@ -1152,30 +1152,51 @@ class MainActivity: Activity() {
             }else null
         }catch(_:Exception){null}
         if(youtubeUri!=null){
-            // Use a real browser rather than the YouTube app or restricted WebView embed.
-            // Full-screen video is controlled by the browser's YouTube player.
-            val browserIntent=Intent(Intent.ACTION_VIEW,youtubeUri).apply{
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Open the regular YouTube watch page within HomeTV, not an iframe.
+            // YouTube controls whether its site permits autoplay or full-screen video.
+            val viewer=WebView(this)
+            web=viewer
+            viewer.setBackgroundColor(android.graphics.Color.BLACK)
+            viewer.settings.javaScriptEnabled=true
+            viewer.settings.domStorageEnabled=true
+            viewer.settings.mediaPlaybackRequiresUserGesture=false
+            viewer.settings.useWideViewPort=true
+            viewer.settings.loadWithOverviewMode=true
+            viewer.webChromeClient=object:WebChromeClient(){
+                private var fullscreenView:View?=null
+                override fun onShowCustomView(view:View,callback:CustomViewCallback){
+                    fullscreenView=view
+                    screen.addView(view,FrameLayout.LayoutParams(-1,-1))
+                    viewer.visibility=View.GONE
+                }
+                override fun onHideCustomView(){
+                    fullscreenView?.let{screen.removeView(it)}
+                    fullscreenView=null
+                    viewer.visibility=View.VISIBLE
+                }
             }
-            var opened=false
-            for(pkg in listOf("com.android.chrome","com.microsoft.emmx",
-                "org.mozilla.firefox","com.amazon.cloud9","com.android.browser")){
-                try{
-                    startActivity(Intent(browserIntent).apply{setPackage(pkg)})
-                    opened=true
-                    break
-                }catch(_:Exception){}
+            viewer.webViewClient=object:WebViewClient(){
+                override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
+                    val target=request.url
+                    return if(target.scheme=="http" || target.scheme=="https")false
+                    else true
+                }
             }
-            if(!opened){
-                try{
-                    startActivity(browserIntent)
-                    opened=true
-                }catch(_:Exception){}
+            screen.addView(viewer,FrameLayout.LayoutParams(-1,-1))
+            val back=TextView(this).apply{
+                text="← HomeTV"
+                textSize=16f
+                setTextColor(android.graphics.Color.WHITE)
+                setBackgroundColor(0xCC10243A.toInt())
+                setPadding(22,14,22,14)
+                isFocusable=true
+                setOnClickListener{allChannels()}
             }
-            if(!opened)Toast.makeText(this,"Install a browser to open YouTube links",Toast.LENGTH_LONG).show()
-            // Returning from the browser should show HomeTV, not a blank video surface.
-            showHome()
+            screen.addView(back,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.LEFT).apply{
+                leftMargin=12;topMargin=12
+            })
+            viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("autoplay","1").build().toString())
+            viewer.requestFocus()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
@@ -1457,6 +1478,14 @@ class MainActivity: Activity() {
         root.addView(button("Home"){showHome()})
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        if(active>=0 && web!=null && event.action==KeyEvent.ACTION_DOWN){
+            if(event.keyCode==KeyEvent.KEYCODE_BACK || event.keyCode==KeyEvent.KEYCODE_ESCAPE){allChannels();return true}
+            if(event.keyCode==KeyEvent.KEYCODE_MENU){
+                videoScreen?.findViewById<View>(android.R.id.content)?.requestFocus()
+                return true
+            }
+            return super.dispatchKeyEvent(event)
+        }
         if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
             val digit=when(event.keyCode){
                 in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9->event.keyCode-KeyEvent.KEYCODE_0
