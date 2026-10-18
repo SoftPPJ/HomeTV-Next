@@ -568,9 +568,9 @@ class MainActivity: Activity() {
         map[name]=java.net.URLDecoder.decode(value,"UTF-8")
     }
     private fun showChannels(){
-        reset("Channels (${channels.size})")
+        reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
-        val groups=channels.map{it.group}.distinct()
+        val groups=visibleIndices().map{channels[it].group}.distinct()
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
             list.addView(button("▸ $group"){showGroup(group)})
@@ -580,15 +580,38 @@ class MainActivity: Activity() {
     }
     private fun showGroup(group:String){
         reset(group)
-        root.addView(button(if(lockGroups.contains(group))"Unlock group settings" else "Lock group settings"){toggleLock(group,true)})
+        root.addView(button("Lock group"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        channels.forEachIndexed { i,c->if(c.group==group){
+        channels.forEachIndexed { i,c->if(c.group==group && !isLocked(c)){
             list.addView(button((if(favoriteIds.contains(id(c)))"★ " else "☆ ")+c.name){playIndex(i)})
             list.addView(button("⋮ Options"){channelOptions(i)})
-            list.addView(button(if(lockIds.contains(id(c)))"🔒 Unlock channel" else "Lock channel"){toggleLock(id(c),false)})
+            list.addView(button("Lock channel"){toggleLock(id(c),false)})
         }}
         scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Groups"){showChannels()})
+    }
+    private fun manageLockedChannels(){
+        requirePin{
+            val locked=channels.indices.filter{isLocked(channels[it])}
+            if(locked.isEmpty()){
+                Toast.makeText(this,"No locked channels",Toast.LENGTH_SHORT).show()
+            }else{
+                AlertDialog.Builder(this).setTitle("Unlock channel or group")
+                    .setItems(locked.map{channels[it].name+" ("+(it+1)+")"}.toTypedArray()){_,position->
+                        val c=channels[locked[position]]
+                        if(lockIds.contains(id(c))){
+                            val set=lockIds.toMutableSet();set.remove(id(c))
+                            prefs.edit().putStringSet("locked_channels",set).apply()
+                        }
+                        if(lockGroups.contains(c.group)){
+                            val set=lockGroups.toMutableSet();set.remove(c.group)
+                            prefs.edit().putStringSet("locked_groups",set).apply()
+                        }
+                        Toast.makeText(this,"Unlocked "+c.name,Toast.LENGTH_SHORT).show()
+                        if(active<0)settings()
+                    }.setNegativeButton("Cancel",null).show()
+            }
+        }
     }
     private fun id(c:Channel)=c.source+"|"+c.name+"|"+c.url
     private fun toggleLock(value:String,group:Boolean){
@@ -1591,6 +1614,7 @@ class MainActivity: Activity() {
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
+        root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Set / change lock password"){
             val field=EditText(this).apply{
                 hint="Any letters or digits (no minimum length)"
