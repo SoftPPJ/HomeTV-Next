@@ -1835,8 +1835,8 @@ class MainActivity: Activity() {
             if(!drawerOpen){
                 when(event.keyCode){
                     KeyEvent.KEYCODE_LAST_CHANNEL->{returnToPreviousChannel();return true}
-                    KeyEvent.KEYCODE_DPAD_UP->{switchChannel(1);return true}
-                    KeyEvent.KEYCODE_DPAD_DOWN->{switchChannel(-1);return true}
+                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
                     KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
