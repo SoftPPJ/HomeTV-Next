@@ -89,8 +89,13 @@ class MainActivity: Activity() {
         showHome()
         if(prefs.getBoolean("resume",true)) refresh { resumeLast() }
     }
-    private fun label(s:String)=TextView(this).apply { text=s; textSize=18f; setPadding(8,12,8,12); setTextColor(-1) }
-    private fun button(s:String, action:()->Unit)=Button(this).apply { text=s; setOnClickListener{action()} }
+    private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
+    private fun button(s:String, action:()->Unit)=Button(this).apply {
+        text=s;isAllCaps=false;textSize=17f
+        setTextColor(android.graphics.Color.WHITE)
+        backgroundTintList=android.content.res.ColorStateList.valueOf(0xFF254466.toInt())
+        setOnClickListener{action()}
+    }
     private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(root); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
@@ -108,7 +113,7 @@ class MainActivity: Activity() {
         root.addView(button("Refresh playlists"){refresh{showChannels()}})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Settings"){settings()})
-        root.addView(button("Resume last channel"){resumeLast()})
+        root.addView(button("Resume last channel"){if(channels.isEmpty())refresh{resumeLast()}else resumeLast()})
         root.addView(button("Exit HomeTV"){confirmExit()})
     }
     private fun managePlaylists(){
@@ -458,7 +463,7 @@ class MainActivity: Activity() {
         }
         return super.onKeyDown(keyCode,event)
     }
-    override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else confirmExit()}
+    override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()!="HomeTV")showHome() else confirmExit()}
     private fun stopPlayback(){
         bannerTask?.let{handler.removeCallbacks(it)}
         retryTask?.let{handler.removeCallbacks(it)}
