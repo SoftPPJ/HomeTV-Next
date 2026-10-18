@@ -1162,6 +1162,8 @@ class MainActivity: Activity() {
             viewer.settings.mediaPlaybackRequiresUserGesture=false
             viewer.settings.useWideViewPort=true
             viewer.settings.loadWithOverviewMode=true
+            viewer.settings.setSupportZoom(false)
+            viewer.settings.userAgentString=viewer.settings.userAgentString.replace("Mobile","").replace(" wv","")
             viewer.webChromeClient=object:WebChromeClient(){
                 private var fullscreenView:View?=null
                 override fun onShowCustomView(view:View,callback:CustomViewCallback){
@@ -1176,6 +1178,16 @@ class MainActivity: Activity() {
                 }
             }
             viewer.webViewClient=object:WebViewClient(){
+                override fun onPageFinished(view:WebView,url:String){
+                    super.onPageFinished(view,url)
+                    view.evaluateJavascript("""(function(){
+                      if(document.getElementById('hometv-video-style'))return;
+                      var css=document.createElement('style');
+                      css.id='hometv-video-style';
+                      css.textContent='html,body{margin:0!important;background:#000!important;overflow:hidden!important} video{position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483000!important;background:#000!important}';
+                      document.head.appendChild(css);
+                    })();""",null)
+                }
                 override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
                     val target=request.url
                     return if(target.scheme=="http" || target.scheme=="https")false
@@ -1194,6 +1206,28 @@ class MainActivity: Activity() {
             }
             screen.addView(back,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.LEFT).apply{
                 leftMargin=12;topMargin=12
+            })
+            val sound=TextView(this).apply{
+                text="Unmute / Play"
+                textSize=16f
+                setTextColor(android.graphics.Color.WHITE)
+                setBackgroundColor(0xCC10243A.toInt())
+                setPadding(22,14,22,14)
+                isFocusable=true
+                setOnClickListener{
+                    viewer.evaluateJavascript("""(function(){
+                      var v=document.querySelector('video');
+                      if(!v)return 'Video not ready';
+                      v.muted=false;v.volume=1;
+                      if(v.paused)v.play().catch(function(){});
+                      return v.muted?'Muted by browser':'Sound enabled';
+                    })();"""){result->
+                        Toast.makeText(this,result.trim('"'),Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            screen.addView(sound,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.RIGHT).apply{
+                rightMargin=12;topMargin=12
             })
             viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("autoplay","1").build().toString())
             viewer.requestFocus()
