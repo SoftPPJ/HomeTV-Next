@@ -515,6 +515,8 @@ class MainActivity: Activity() {
     private fun showOverlayList(){
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
+        screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it);return}
+        screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it)}
         val drawer=LinearLayout(this).apply{
             tag="channel_drawer"
             orientation=LinearLayout.VERTICAL
@@ -544,22 +546,49 @@ class MainActivity: Activity() {
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
+        val screen=videoScreen ?:return
+        screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
+        screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val options=arrayOf(
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine"
         )
-        AlertDialog.Builder(this).setTitle("Playback settings")
-            .setItems(options){_,choice->
-                when(choice){
-                    0->selectScreenMode(null)
-                    1->selectScreenMode(active.takeIf{it>=0})
-                    2->selectQuality(active.takeIf{it>=0})
-                    3->chooseBufferProfile()
-                    4->audioTracks()
-                    5->if(active>=0)chooseChannelEngine(active)
-                }
-            }.setNegativeButton("Close",null).show()
+        val drawer=LinearLayout(this).apply{
+            tag="settings_drawer"
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(0xF015283C.toInt())
+            isFocusableInTouchMode=true
+        }
+        drawer.addView(TextView(this).apply{
+            text="PLAYBACK SETTINGS"
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(20,18,12,16)
+        })
+        val list=ListView(this)
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
+        drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
+        screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.END))
+        fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemClickListener{_,_,choice,_->
+            close()
+            when(choice){
+                0->selectScreenMode(null)
+                1->selectScreenMode(active.takeIf{it>=0})
+                2->selectQuality(active.takeIf{it>=0})
+                3->chooseBufferProfile()
+                4->audioTracks()
+                5->if(active>=0)chooseChannelEngine(active)
+            }
+        }
+        list.setOnKeyListener{_,code,event->
+            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_LEFT)){
+                close();true
+            }else false
+        }
+        list.requestFocus()
     }
     private val qualityModes=arrayOf("Auto","Data Saver (360p)","Standard (480p)","HD (720p)","Full HD (1080p)","Best Available")
     private fun qualityMode(index:Int?=active.takeIf{it>=0}):String{
@@ -896,7 +925,7 @@ class MainActivity: Activity() {
         if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
             // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
             // Let an open channel drawer handle its own list navigation.
-            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null
+            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null
             if(!drawerOpen){
                 when(event.keyCode){
                     KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_CHANNEL_DOWN,
