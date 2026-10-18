@@ -38,10 +38,53 @@ class MainActivity: Activity() {
     private var banner:TextView?=null
     private var bannerTask:Runnable?=null
     private var fallbackAttempted=mutableSetOf<String>()
+    private val favoriteIds get()=prefs.getStringSet("favorites",emptySet()) ?: emptySet()
+    private var retryCount=0
+    private var retryUrl:String?=null
+    private var retryTask:Runnable?=null
+    private fun favorite(c:Channel){
+        val set=favoriteIds.toMutableSet()
+        if(!set.add(id(c)))set.remove(id(c))
+        prefs.edit().putStringSet("favorites",set).apply()
+        Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
+    }
+    private fun allChannels(){channelCollection("All channels",channels.indices.toList())}
+    private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
+    private fun channelCollection(title:String,indices:List<Int>){
+        reset(title+" ("+indices.size+")")
+        val scroll=ScrollView(this)
+        val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
+        indices.forEach{i->
+            val c=channels[i]
+            list.addView(button((if(favoriteIds.contains(id(c)))"★ " else "☆ ")+c.name+" · "+c.group){playIndex(i)})
+            list.addView(button("⋮ Channel options"){channelOptions(i)})
+        }
+        scroll.addView(list)
+        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        root.addView(button("Back"){showHome()})
+    }
+    private fun channelOptions(i:Int){
+        if(i !in channels.indices)return
+        val c=channels[i]
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit")
+        AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
+            when(v){
+                0->playIndex(i)
+                1->{favorite(c);if(active<0)allChannels()}
+                2->toggleLock(id(c),false)
+                3->toggleScreenMode()
+                4->allChannels()
+                5->settings()
+                6->confirmExit()
+            }
+        }.show()
+    }
+
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
+        root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(root)
         showHome()
         if(prefs.getBoolean("resume",true)) refresh { resumeLast() }
@@ -59,7 +102,9 @@ class MainActivity: Activity() {
     }
     private fun showHome() {
         reset("HomeTV")
-        root.addView(button("Channels"){showChannels()})
+        root.addView(button("All channels"){allChannels()})
+        root.addView(button("Channel groups"){showChannels()})
+        root.addView(button("★ Favorites"){favorites()})
         root.addView(button("Refresh playlists"){refresh{showChannels()}})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Settings"){settings()})
@@ -194,7 +239,8 @@ class MainActivity: Activity() {
         root.addView(button(if(lockGroups.contains(group))"Unlock group settings" else "Lock group settings"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         channels.forEachIndexed { i,c->if(c.group==group){
-            list.addView(button(c.name){playIndex(i)})
+            list.addView(button((if(favoriteIds.contains(id(c)))"★ " else "☆ ")+c.name){playIndex(i)})
+            list.addView(button("⋮ Options"){channelOptions(i)})
             list.addView(button(if(lockIds.contains(id(c)))"🔒 Unlock channel" else "Lock channel"){toggleLock(id(c),false)})
         }}
         scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -247,7 +293,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -258,6 +304,8 @@ class MainActivity: Activity() {
                     4->toggleLock(id(channel),false)
                     5->settings()
                     6->confirmExit()
+                    7->favorite(channel)
+                    8->allChannels()
                 }
             }.setNegativeButton("Close",null).show()
     }
@@ -301,6 +349,8 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        if(retryUrl!=c.url)retryCount=0
+        retryUrl=c.url
         stopPlayback()
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
@@ -338,6 +388,12 @@ class MainActivity: Activity() {
                         fallbackAttempted.add(c.url)
                         showBanner("Trying another stream for ${c.name}")
                         handler.post{playIndex(alternative)}
+                    }else if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
+                        retryCount++
+                        showBanner("Reconnecting "+c.name)
+                        val task=Runnable{if(active==index)playIndex(index)}
+                        retryTask=task
+                        handler.postDelayed(task,2500L*retryCount)
                     }else showBanner("Cannot play ${c.name}: ${error.errorCodeName}. Press OK for channels.",true)
                 }
             })
@@ -359,6 +415,10 @@ class MainActivity: Activity() {
     private fun settings(){
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
+        root.addView(button("Favorites"){favorites()})
+        root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
+            prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
+        })
         root.addView(button("Set / change parental PIN"){
             val field=EditText(this).apply{hint="New 4–6 digit PIN";inputType=2}
             val save={
@@ -401,6 +461,8 @@ class MainActivity: Activity() {
     override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else confirmExit()}
     private fun stopPlayback(){
         bannerTask?.let{handler.removeCallbacks(it)}
+        retryTask?.let{handler.removeCallbacks(it)}
+        retryTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         player?.release();player=null
         web?.onPause();web?.destroy();web=null
