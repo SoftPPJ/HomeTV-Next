@@ -522,22 +522,48 @@ class MainActivity: Activity() {
         previewTask=null
         if(target in channels.indices)playIndex(target) else showBanner("Use ▲ / ▼ to preview channels")
     }
+    private val logoCache=android.util.LruCache<String,android.graphics.Bitmap>(80)
+    private val logoLoading=mutableSetOf<String>()
+    private val logoWaiting=mutableMapOf<String,MutableList<ImageView>>()
     private fun logoView(channel:Channel,size:Int=52):ImageView{
+        val pixels=(size*resources.displayMetrics.density).toInt()
         val view=ImageView(this).apply{
-            layoutParams=LinearLayout.LayoutParams(size*resources.displayMetrics.density.toInt().coerceAtLeast(1),size*resources.displayMetrics.density.toInt().coerceAtLeast(1))
+            layoutParams=LinearLayout.LayoutParams(pixels,pixels)
             scaleType=ImageView.ScaleType.FIT_CENTER
             setPadding(4,4,4,4)
+            setImageResource(android.R.drawable.ic_menu_gallery)
+            imageTintList=android.content.res.ColorStateList.valueOf(0xFFB6C9DD.toInt())
         }
-        if(channel.logo.isNotBlank()){
-            val url=channel.logo
-            thread{
-                val bmp=try{
-                    val connection=URL(url).openConnection().apply{connectTimeout=4000;readTimeout=4000}
-                    connection.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
-                }catch(_:Exception){null}
-                if(bmp!=null)runOnUiThread{if(view.tag==url)view.setImageBitmap(bmp)}
+        val url=channel.logo.trim()
+        if(!url.startsWith("http://") && !url.startsWith("https://"))return view
+        view.tag=url
+        val cached=logoCache.get(url)
+        if(cached!=null){
+            view.imageTintList=null
+            view.setImageBitmap(cached)
+            return view
+        }
+        logoWaiting.getOrPut(url){mutableListOf()}.add(view)
+        if(!logoLoading.add(url))return view
+        thread{
+            val bmp=try{
+                val conn=URL(url).openConnection().apply{
+                    connectTimeout=5000
+                    readTimeout=5000
+                    setRequestProperty("User-Agent","Mozilla/5.0 (Android TV; HomeTV)")
+                }
+                conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
+            }catch(_:Exception){null}
+            runOnUiThread{
+                logoLoading.remove(url)
+                if(bmp!=null)logoCache.put(url,bmp)
+                logoWaiting.remove(url)?.forEach{target->
+                    if(target.tag==url && bmp!=null){
+                        target.imageTintList=null
+                        target.setImageBitmap(bmp)
+                    }
+                }
             }
-            view.tag=url
         }
         return view
     }
@@ -692,14 +718,14 @@ class MainActivity: Activity() {
     private fun resizeMode():Int=when(screenMode()){
         "Fit","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         "Stretch"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
-        "Original"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+        "Original"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     }
     private fun applyVideoSize(){
         val mode=screenMode()
         currentPlayerView?.let{view->
             view.resizeMode=resizeMode()
-            // Zoom the video surface, not the entire player view and its controls.
+            // Apply resize mode to the actual video content.
             val zoom=when(mode){
                 "Zoom 110%"->1.1f
                 "Zoom 125%"->1.25f
@@ -738,12 +764,18 @@ class MainActivity: Activity() {
                     else->null
                 })
                 val scale=when(mode){
-                    "Fill / Crop"->1.35f
+                    "Fill / Crop"->0f
                     "Zoom 110%"->1.1f
                     "Zoom 125%"->1.25f
                     "Zoom 150%"->1.5f
                     "Original"->1f
                     else->0f
+                }
+                if(mode=="Fill / Crop"){
+                    val display=resources.displayMetrics
+                    val width=display.widthPixels
+                    val height=display.heightPixels
+                    if(width>0 && height>0)vlc.setAspectRatio("$width:$height")
                 }
                 if(scale>0f)vlc.setScale(scale)
             }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
@@ -831,10 +863,12 @@ class MainActivity: Activity() {
             }
             currentPlayerView=view
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
+            applyVideoSize()
             exo.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_READY){
                         retryCount=0
+                        applyVideoSize()
                         retryTask?.let{handler.removeCallbacks(it)}
                         retryTask=null
                     }
@@ -1003,10 +1037,12 @@ class MainActivity: Activity() {
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null
             if(!drawerOpen){
                 when(event.keyCode){
-                    KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_CHANNEL_DOWN,
-                    KeyEvent.KEYCODE_MEDIA_PREVIOUS->{previewChannel(-1);return true}
-                    KeyEvent.KEYCODE_DPAD_DOWN,KeyEvent.KEYCODE_CHANNEL_UP,
-                    KeyEvent.KEYCODE_MEDIA_NEXT->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(-1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+                    KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
+                    KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
+                    KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
