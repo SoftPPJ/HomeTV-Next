@@ -786,7 +786,7 @@ class MainActivity: Activity() {
             try{
                 vlc.setScale(0f)
                 vlc.setAspectRatio(when(mode){
-                    "16:9","Stretch"->"16:9"
+                    "16:9"->"16:9"
                     "4:3"->"4:3"
                     else->null
                 })
@@ -798,11 +798,14 @@ class MainActivity: Activity() {
                     "Original"->1f
                     else->0f
                 }
-                if(mode=="Fill / Crop"){
-                    val display=resources.displayMetrics
-                    val width=display.widthPixels
-                    val height=display.heightPixels
-                    if(width>0 && height>0)vlc.setAspectRatio("$width:$height")
+                // The VLC output window must match the TV surface, not the source video. 
+                // For Fill / Crop use a full-size window and zoom instead of forcing
+                // the display aspect ratio (which caused a small offset picture).
+                if(mode=="Fill / Crop")vlc.setScale(1.5f)
+                if(mode=="Stretch"){
+                    val metrics=resources.displayMetrics
+                    if(metrics.widthPixels>0 && metrics.heightPixels>0)
+                        vlc.setAspectRatio("${metrics.widthPixels}:${metrics.heightPixels}")
                 }
                 if(scale>0f)vlc.setScale(scale)
             }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
@@ -951,6 +954,14 @@ class MainActivity: Activity() {
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             vlc.vlcVout.setVideoView(surface)
             vlc.vlcVout.attachViews()
+            surface.post{
+                if(vlcPlayer===vlc){
+                    val w=screen.width.takeIf{it>0} ?: resources.displayMetrics.widthPixels
+                    val h=screen.height.takeIf{it>0} ?: resources.displayMetrics.heightPixels
+                    vlc.vlcVout.setWindowSize(w,h)
+                    applyVideoSize()
+                }
+            }
             var started=false
             var failed=false
             val watchdog=Runnable{
