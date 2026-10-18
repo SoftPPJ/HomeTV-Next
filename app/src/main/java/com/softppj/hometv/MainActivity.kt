@@ -102,6 +102,16 @@ class MainActivity: Activity() {
         }
         list.setOnItemClickListener{_,_,position,_->playIndex(indices[position])}
         list.setOnItemLongClickListener{_,_,position,_->channelOptions(indices[position]);true}
+        if(title=="All channels"){
+            val last=prefs.getString("last_url",null)
+            val previous=indices.firstOrNull{channels[it].url==last}
+            if(previous!=null){
+                root.addView(button("▶ Resume last channel: "+channels[previous].name){playIndex(previous)})
+                val position=indices.indexOf(previous)
+                list.setSelection(position)
+                list.post{list.setSelection(position)}
+            }
+        }
         root.addView(label("Select a channel · Long press for options"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
