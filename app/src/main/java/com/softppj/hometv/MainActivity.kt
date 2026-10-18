@@ -7,6 +7,8 @@ import android.view.*
 import android.widget.*
 import android.webkit.*
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
@@ -28,6 +30,10 @@ class MainActivity: Activity() {
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
     private val lockGroups get() = prefs.getStringSet("locked_groups", emptySet()) ?: emptySet()
     private var unlockedChannel:String?=null
+    private var videoScreen:FrameLayout?=null
+    private val handler=Handler(Looper.getMainLooper())
+    private var banner:TextView?=null
+    private var bannerTask:Runnable?=null
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -38,7 +44,7 @@ class MainActivity: Activity() {
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=18f; setPadding(8,12,8,12); setTextColor(-1) }
     private fun button(s:String, action:()->Unit)=Button(this).apply { text=s; setOnClickListener{action()} }
-    private fun reset(title:String) { stopPlayback(); root.removeAllViews(); root.addView(label(title)) }
+    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(root); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
         return MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }
@@ -165,6 +171,33 @@ class MainActivity: Activity() {
             if(hash(field.text.toString())==saved)action() else Toast.makeText(this,"Incorrect PIN",Toast.LENGTH_SHORT).show()
         }.setNegativeButton("Cancel",null).show()
     }
+    private fun showBanner(message:String, error:Boolean=false){
+        val screen=videoScreen ?: return
+        bannerTask?.let{handler.removeCallbacks(it)}
+        banner?.let{screen.removeView(it)}
+        val text=TextView(this).apply {
+            this.text=message
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(if(error) 0xDD842020.toInt() else 0xDD15283C.toInt())
+            setPadding(24,18,24,18)
+        }
+        banner=text
+        screen.addView(text,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
+        if(!error){
+            val task=Runnable{if(banner===text){screen.removeView(text);banner=null}}
+            bannerTask=task
+            handler.postDelayed(task,2500)
+        }
+    }
+    private fun showOverlayList(){
+        if(channels.isEmpty())return
+        val labels=channels.mapIndexed{i,c->"${i+1}. ${c.name}  •  ${c.group}"}.toTypedArray()
+        val selected=active.coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Select channel")
+            .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
+            .setNegativeButton("Close",null).show()
+    }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -172,28 +205,47 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
-        stopPlayback();root.removeAllViews()
+        stopPlayback()
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
-        val videoId=Regex("(?:youtube\\.com/(?:live/|watch\\?v=|embed/)|youtu\\.be/)([A-Za-z0-9_-]{11})").find(c.url)?.groupValues?.get(1)
+        window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+        val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
+        videoScreen=screen
+        setContentView(screen)
+        val videoId=Regex("(?:youtube\\\\.com/(?:live/|watch\\\\?v=|embed/)|youtu\\\\.be/)([A-Za-z0-9_-]{11})").find(c.url)?.groupValues?.get(1)
         if(videoId!=null){
             web=WebView(this).apply {
+                setBackgroundColor(android.graphics.Color.BLACK)
                 settings.javaScriptEnabled=true
                 settings.domStorageEnabled=true
                 webChromeClient=WebChromeClient()
-                loadDataWithBaseURL("https://www.youtube.com", "<html><body style='margin:0;background:black'><iframe width='100%' height='100%' src='https://www.youtube.com/embed/$videoId?autoplay=1' frameborder='0' allow='autoplay; encrypted-media; fullscreen' allowfullscreen></iframe></body></html>","text/html","UTF-8",null)
+                loadDataWithBaseURL("https://www.youtube.com", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='margin:0;background:black;overflow:hidden'><iframe style='position:absolute;top:0;left:0;width:100%;height:100%;border:0' src='https://www.youtube.com/embed/$videoId?autoplay=1' allow='autoplay; encrypted-media; fullscreen' allowfullscreen></iframe></body></html>","text/html","UTF-8",null)
             }
-            root.addView(web,LinearLayout.LayoutParams(-1,0,1f))
+            screen.addView(web,FrameLayout.LayoutParams(-1,-1))
         }else{
-            player=ExoPlayer.Builder(this).build()
-            val view=PlayerView(this).apply{player=this@MainActivity.player;useController=false}
-            root.addView(view,LinearLayout.LayoutParams(-1,0,1f))
-            try{player?.setMediaItem(MediaItem.fromUri(c.url));player?.prepare();player?.play()}catch(_:Exception){Toast.makeText(this,"Stream failed",Toast.LENGTH_LONG).show()}
+            val exo=ExoPlayer.Builder(this).build()
+            player=exo
+            val view=PlayerView(this).apply{
+                player=exo
+                useController=false
+                resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setBackgroundColor(android.graphics.Color.BLACK)
+            }
+            screen.addView(view,FrameLayout.LayoutParams(-1,-1))
+            exo.addListener(object:Player.Listener{
+                override fun onPlayerError(error:PlaybackException){
+                    showBanner("Cannot play ${c.name}: ${error.errorCodeName}. Press OK for channels.",true)
+                }
+            })
+            try{
+                exo.setMediaItem(MediaItem.fromUri(c.url))
+                exo.prepare()
+                exo.play()
+            }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true)}
         }
-        root.addView(button("◀ Previous"){switchChannel(-1)})
-        root.addView(button("Next ▶"){switchChannel(1)})
-        root.addView(button("Channel list"){showChannels()})
+        screen.requestFocus()
+        showBanner("${index+1}  •  ${c.name}")
     }
     private fun switchChannel(delta:Int){if(channels.isNotEmpty())playIndex((active+delta+channels.size)%channels.size)}
     private fun resumeLast(){
@@ -223,15 +275,27 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
         })
         root.addView(label("Boot launching is device-dependent. The TV power key cannot be overridden by an ordinary app."))
-        root.addView(label("Remote: Left/Right = previous/next while playing; Back = channel list."))
+        root.addView(label("Remote: Left/Right or CH+/- = switch; OK = channel picker; Back = groups."))
         root.addView(button("Home"){showHome()})
     }
     override fun onKeyDown(keyCode:Int,event:KeyEvent?):Boolean{
-        if(active>=0 && (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_CHANNEL_DOWN)){switchChannel(-1);return true}
-        if(active>=0 && (keyCode==KeyEvent.KEYCODE_DPAD_RIGHT || keyCode==KeyEvent.KEYCODE_CHANNEL_UP)){switchChannel(1);return true}
+        if(active>=0){
+            when(keyCode){
+                KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_CHANNEL_DOWN->{switchChannel(-1);return true}
+                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_CHANNEL_UP->{switchChannel(1);return true}
+                KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{showOverlayList();return true}
+                KeyEvent.KEYCODE_BACK->{showChannels();return true}
+            }
+        }
         return super.onKeyDown(keyCode,event)
     }
-    override fun onBackPressed(){active=-1;unlockedChannel=null;showChannels()}
-    private fun stopPlayback(){player?.release();player=null;web?.destroy();web=null;active=-1}
+    override fun onBackPressed(){unlockedChannel=null;showChannels()}
+    private fun stopPlayback(){
+        bannerTask?.let{handler.removeCallbacks(it)}
+        bannerTask=null;banner=null;videoScreen=null
+        player?.release();player=null
+        web?.onPause();web?.destroy();web=null
+        active=-1
+    }
     override fun onDestroy(){stopPlayback();super.onDestroy()}
 }
