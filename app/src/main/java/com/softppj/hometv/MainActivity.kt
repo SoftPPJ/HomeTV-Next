@@ -65,6 +65,29 @@ class MainActivity: Activity() {
         prefs.edit().putStringSet("favorites",set).apply()
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
+    private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
+    private fun isSkipped(c:Channel)=skippedIds.contains(id(c))
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it])}
+    private fun toggleChannelSkip(c:Channel){
+        val values=skippedIds.toMutableSet()
+        val skipped=values.add(id(c))
+        if(!skipped)values.remove(id(c))
+        prefs.edit().putStringSet("skip_channel_surfing",values).apply()
+        Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
+    }
+    private fun manageSkippedChannels(){
+        val skipped=channels.indices.filter{isSkipped(channels[it]) && !isLocked(channels[it])}
+        if(skipped.isEmpty()){
+            Toast.makeText(this,"No channels are skipped",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("Restore skipped channels")
+            .setItems(skipped.map{(it+1).toString()+". "+channels[it].name}.toTypedArray()){_,position->
+                toggleChannelSkip(channels[skipped[position]])
+                if(active<0)settings()
+            }.setNegativeButton("Close",null).create()
+        showSideDialog(dialog)
+    }
     private fun isLocked(c:Channel)=lockIds.contains(id(c)) || lockGroups.contains(c.group)
     private fun visibleIndices()=channels.indices.filter{!isLocked(channels[it])}
     private fun allChannels(){
@@ -118,7 +141,7 @@ class MainActivity: Activity() {
                 list.post{list.setSelection(position)}
             }
         }
-        root.addView(label("Select a channel · Long press for options"))
+        root.addView(label("Select a channel · Long press for Favorite, Lock or Skip during channel surfing"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
@@ -153,7 +176,7 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)",if(isSkipped(c))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -166,6 +189,7 @@ class MainActivity: Activity() {
                 7->audioTracks()
                 8->chooseChannelEngine(i)
                 9->selectQuality(i)
+                10->{toggleChannelSkip(c);if(active<0)allChannels()}
             }
         }.show()
     }
@@ -699,7 +723,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine",if(isSkipped(channel))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -714,6 +738,7 @@ class MainActivity: Activity() {
                     8->allChannels()
                     9->audioTracks()
                     10->chooseChannelEngine(active)
+                    11->toggleChannelSkip(channel)
                 }
             }.setNegativeButton("Close",null).show()
     }
@@ -849,9 +874,9 @@ class MainActivity: Activity() {
     private var previewIndex=-1
     private var previewTask:Runnable?=null
     private fun previewChannel(delta:Int){
-        if(channels.isEmpty() || visibleIndices().isEmpty())return
+        if(channels.isEmpty() || surfingIndices().isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
-        val available=visibleIndices()
+        val available=surfingIndices()
         val from=available.indexOf(if(previewIndex>=0)previewIndex else active)
         previewIndex=available[((if(from<0)0 else from)+delta+available.size)%available.size]
         showChannelInfo(previewIndex)
@@ -1572,7 +1597,7 @@ class MainActivity: Activity() {
         }
     }
     private fun switchChannel(delta:Int){
-        val available=visibleIndices()
+        val available=surfingIndices()
         if(available.isEmpty())return
         val from=available.indexOf(active)
         playIndex(available[((if(from<0)0 else from)+delta+available.size)%available.size])
@@ -1650,6 +1675,7 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
+        root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
         root.addView(button("Set / change lock password"){
             val field=EditText(this).apply{
                 hint="Any letters or digits (no minimum length)"
