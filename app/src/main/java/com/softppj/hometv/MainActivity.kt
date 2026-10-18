@@ -1539,6 +1539,23 @@ class MainActivity: Activity() {
             currentPlayerView=view
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             applyVideoSize()
+            val startupTimeout=Runnable{
+                if(active==index && videoScreen===screen && player===exo &&
+                    exo.playbackState!=Player.STATE_READY){
+                    android.util.Log.w("HomeTV","Stream startup timeout: "+c.name)
+                    if(!tryNextAlternative(index)){
+                        if(engineFor(c)=="Auto" && !vlcAttempted){
+                            vlcAttempted=true
+                            player?.release();player=null
+                            currentPlayerView?.let{screen.removeView(it)}
+                            currentPlayerView=null
+                            startVlc(c,index,screen)
+                        }else showBanner("Stream is not responding. Choose another source.",true)
+                    }
+                }
+            }
+            startupWatchdog=startupTimeout
+            handler.postDelayed(startupTimeout,10000L)
             exo.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_READY){
@@ -1593,7 +1610,7 @@ class MainActivity: Activity() {
         if(tryNextAlternative(index))return
         if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
             retryCount++
-            showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/3)")
+            showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/2)")
             val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
             retryTask=task
             handler.postDelayed(task,2000L*retryCount)
