@@ -215,7 +215,7 @@ class MainActivity: Activity() {
         root.addView(button("★  My favorites"){favorites()})
         root.addView(button("☷  Browse by category"){showChannels()})
         root.addView(label("LIBRARY & CONTROLS"))
-        root.addView(button("↻  Refresh channel lists"){refresh{showHome()}})
+        root.addView(button("↻  Rebuild channel playlists"){refresh({showHome()},true)})
         root.addView(button("＋  Manage playlists"){managePlaylists()})
         root.addView(button("⚙  Player & TV settings"){settings()})
         root.addView(button("⏻  Exit HomeTV"){confirmExit()})
@@ -270,45 +270,72 @@ class MainActivity: Activity() {
         }
         return found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
     }
-    private fun refresh(done:()->Unit){
+    private fun refresh(done:()->Unit,forceRebuild:Boolean=false){
         val sources=playlists().filter{it.enabled}
-        if(sources.isEmpty()){channels.clear();done();return}
+        if(sources.isEmpty()){
+            channels.clear()
+            Toast.makeText(this,"No enabled playlists to refresh",Toast.LENGTH_LONG).show()
+            done()
+            return
+        }
+        if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
         thread {
             val results=Array(sources.size){emptyList<Channel>()}
+            val refreshed=BooleanArray(sources.size)
             val workers=sources.mapIndexed{index,p->
-                thread {
+                thread{
                     try{
-                        val conn=URL(p.url).openConnection().apply{
-                            connectTimeout=5000
-                            readTimeout=7000
+                        val connection=URL(p.url).openConnection().apply{
+                            connectTimeout=12000
+                            readTimeout=15000
+                            useCaches=false
+                            setRequestProperty("Cache-Control","no-cache, no-store, max-age=0")
+                            setRequestProperty("Pragma","no-cache")
+                            setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
                         }
-                        val body=conn.getInputStream().bufferedReader().use{it.readText()}
+                        val body=connection.getInputStream().bufferedReader().use{it.readText()}
                         val parsed=parseM3u(body,p.name)
-                        if(parsed.isNotEmpty()){
-                            results[index]=parsed
-                            val file=cacheFile(p)
-                            val temp=java.io.File(file.absolutePath+".tmp")
-                            temp.writeText(body)
-                            if(!temp.renameTo(file)){
-                                temp.copyTo(file,overwrite=true)
-                                temp.delete()
-                            }
+                        if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                        results[index]=parsed
+                        refreshed[index]=true
+                        val file=cacheFile(p)
+                        val temp=java.io.File(file.absolutePath+".tmp")
+                        temp.writeText(body)
+                        if(!temp.renameTo(file)){
+                            temp.copyTo(file,overwrite=true)
+                            temp.delete()
                         }
                     }catch(e:Exception){
-                        android.util.Log.w("HomeTV","Playlist download failed: "+p.name,e)
-                    }
-                    if(results[index].isEmpty()){
-                        try{
-                            val file=cacheFile(p)
-                            if(file.exists())results[index]=parseM3u(file.readText(),p.name)
-                        }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
+                        android.util.Log.w("HomeTV","Playlist rebuild failed: "+p.name,e)
+                        if(!forceRebuild){
+                            try{
+                                val file=cacheFile(p)
+                                if(file.exists())results[index]=parseM3u(file.readText(),p.name)
+                            }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
+                        }
                     }
                 }
             }
             workers.forEach{it.join()}
+            val updated=refreshed.count{it}
             val found=results.flatMap{it}.distinctBy{it.name.lowercase()+"|"+it.url}
             runOnUiThread{
-                channels=found.toMutableList()
+                if(forceRebuild && updated==0){
+                    Toast.makeText(this,"Refresh failed: could not download any playlist. Saved channels unchanged.",Toast.LENGTH_LONG).show()
+                }else{
+                    if(forceRebuild && updated<sources.size){
+                        val combined=mutableListOf<Channel>()
+                        sources.forEachIndexed{index,p->
+                            if(refreshed[index])combined.addAll(results[index])
+                            else try{
+                                val file=cacheFile(p)
+                                if(file.exists())combined.addAll(parseM3u(file.readText(),p.name))
+                            }catch(_:Exception){}
+                        }
+                        channels=combined.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
+                    }else channels=found.toMutableList()
+                    if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
+                }
                 done()
             }
         }
@@ -374,7 +401,7 @@ class MainActivity: Activity() {
     }
     private fun showChannels(){
         reset("Channels (${channels.size})")
-        root.addView(button("Refresh"){refresh{showChannels()}})
+        root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
         val groups=channels.map{it.group}.distinct()
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
