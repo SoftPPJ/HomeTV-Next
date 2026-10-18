@@ -147,13 +147,13 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit","Audio tracks","Playback engine")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
                 1->{favorite(c);if(active<0)allChannels()}
                 2->toggleLock(id(c),false)
-                3->toggleScreenMode()
+                3->selectScreenMode(i)
                 4->allChannels()
                 5->settings()
                 6->confirmExit()
@@ -499,8 +499,15 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
             .setNegativeButton("Close",null).show()
     }
-    private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original")
-    private fun screenMode()=prefs.getString("screen_mode","Fill / Crop") ?: "Fill / Crop"
+    private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original","Zoom 110%","Zoom 125%","Zoom 150%")
+    private fun screenMode():String{
+        val url=channels.getOrNull(active)?.url
+        if(url!=null){
+            val saved=prefs.getString("screen_channel_"+hash(url),null)
+            if(saved!=null)return saved
+        }
+        return prefs.getString("screen_mode","Fit") ?: "Fit"
+    }
     private fun resizeMode():Int=when(screenMode()){
         "Fit"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         "Stretch","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
@@ -508,35 +515,61 @@ class MainActivity: Activity() {
         else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     }
     private fun applyVideoSize(){
-        currentPlayerView?.resizeMode=resizeMode()
+        val mode=screenMode()
+        currentPlayerView?.let{view->
+            view.resizeMode=resizeMode()
+            val zoom=when(mode){"Zoom 110%"->1.1f;"Zoom 125%"->1.25f;"Zoom 150%"->1.5f;else->1f}
+            view.scaleX=zoom
+            view.scaleY=zoom
+        }
         vlcPlayer?.let{vlc->
             try{
                 vlc.setScale(0f)
-                vlc.setAspectRatio(when(screenMode()){
-                    "16:9"->"16:9"
+                vlc.setAspectRatio(when(mode){
+                    "16:9","Stretch"->"16:9"
                     "4:3"->"4:3"
-                    "Stretch"->"16:9"
                     else->null
                 })
-                if(screenMode()=="Fill / Crop")vlc.setScale(1.35f)
-                if(screenMode()=="Original")vlc.setScale(1f)
+                val scale=when(mode){
+                    "Fill / Crop"->1.35f
+                    "Zoom 110%"->1.1f
+                    "Zoom 125%"->1.25f
+                    "Zoom 150%"->1.5f
+                    "Original"->1f
+                    else->0f
+                }
+                if(scale>0f)vlc.setScale(scale)
             }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
         }
     }
-    private fun selectScreenMode(){
-        AlertDialog.Builder(this).setTitle("Screen size and aspect ratio")
-            .setSingleChoiceItems(screenModes,screenModes.indexOf(screenMode()).coerceAtLeast(0)){dialog,i->
-                prefs.edit().putString("screen_mode",screenModes[i]).apply()
+    private fun selectScreenMode(channelIndex:Int?=null){
+        val current=if(channelIndex!=null){
+            prefs.getString("screen_channel_"+hash(channels[channelIndex].url),null)
+                ?:prefs.getString("screen_mode","Fit") ?: "Fit"
+        }else prefs.getString("screen_mode","Fit") ?: "Fit"
+        val labels=if(channelIndex!=null)arrayOf("Use universal default")+screenModes else screenModes
+        val selected=if(channelIndex!=null && !prefs.contains("screen_channel_"+hash(channels[channelIndex].url)))0
+            else labels.indexOf(current).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle(if(channelIndex!=null)"Screen size · "+channels[channelIndex].name else "Universal screen size")
+            .setSingleChoiceItems(labels,selected){dialog,i->
+                val edit=prefs.edit()
+                if(channelIndex!=null){
+                    val key="screen_channel_"+hash(channels[channelIndex].url)
+                    if(i==0)edit.remove(key) else edit.putString(key,labels[i])
+                }else edit.putString("screen_mode",labels[i])
+                edit.apply()
                 dialog.dismiss()
                 applyVideoSize()
-                if(active>=0)showBanner("Screen: "+screenModes[i]) else settings()
+                if(active>=0)showBanner("Screen: "+screenMode()) else if(channelIndex==null)settings()
             }.setNegativeButton("Cancel",null).show()
     }
     private fun toggleScreenMode(){
         val next=if(screenMode()=="Fill / Crop")"Fit" else "Fill / Crop"
-        prefs.edit().putString("screen_mode",next).apply()
+        val url=channels.getOrNull(active)?.url
+        if(url!=null)prefs.edit().putString("screen_channel_"+hash(url),next).apply()
+        else prefs.edit().putString("screen_mode",next).apply()
         applyVideoSize()
-        showBanner("Screen: "+next)
+        if(active>=0)showBanner("Screen: "+next)
     }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
@@ -723,7 +756,7 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
         })
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
-        root.addView(button("Screen size: "+screenMode()){selectScreenMode()})
+        root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
         root.addView(label("Remote: Left/Right, CH+/-, Previous/Next, Rewind/Fast Forward = switch. OK = channel list; Back = groups; Menu = toggle Fit/Fill."))
         root.addView(button("Home"){showHome()})
     }
