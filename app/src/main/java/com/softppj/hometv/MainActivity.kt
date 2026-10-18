@@ -204,7 +204,8 @@ class MainActivity: Activity() {
     private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme){
         val now=System.currentTimeMillis()
         if(programme.start<=now){
-            playIndex(preferredChannel(channels.indexOfFirst{sameChannel(it,channel)}))
+            val index=channels.indexOfFirst{sameChannel(it,channel)}
+            if(index>=0)playIndex(preferredChannel(index))
             return
         }
         val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
@@ -391,7 +392,7 @@ class MainActivity: Activity() {
                                 val programme=entries[selected]
                                 showSideDialog(AlertDialog.Builder(this)
                                     .setTitle(programme.title)
-                                    .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\\n"+programme.description)
+                                    .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\n"+programme.description)
                                     .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch at start"){_,_->scheduleEpgTune(c,programme)}
                                     .setNegativeButton("Cancel",null).create())
                             }
