@@ -172,10 +172,10 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        stopPlayback();root.removeAllViews()
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
-        stopPlayback();root.removeAllViews()
         val videoId=Regex("(?:youtube\\.com/(?:live/|watch\\?v=|embed/)|youtu\\.be/)([A-Za-z0-9_-]{11})").find(c.url)?.groupValues?.get(1)
         if(videoId!=null){
             web=WebView(this).apply {
