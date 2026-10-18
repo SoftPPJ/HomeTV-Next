@@ -837,7 +837,11 @@ class MainActivity: Activity() {
                 // The VLC output window must match the TV surface, not the source video. 
                 // For Fill / Crop use a full-size window and zoom instead of forcing
                 // the display aspect ratio (which caused a small offset picture).
-                if(mode=="Fill / Crop")vlc.setScale(1.5f)
+                if(mode=="Fill / Crop"){
+                    // Preserve source aspect ratio and use the native VLC fit/crop mode.
+                    vlc.setAspectRatio(null)
+                    vlc.setScale(0f)
+                }
                 if(mode=="Stretch"){
                     val metrics=resources.displayMetrics
                     if(metrics.widthPixels>0 && metrics.heightPixels>0)
@@ -992,10 +996,6 @@ class MainActivity: Activity() {
         try{
             val cache=bufferValues()[0].coerceAtLeast(300)
             val options=arrayListOf("--network-caching="+cache,"--live-caching="+cache,"--http-reconnect","--no-video-title-show")
-            // HDR10/HEVC streams can produce audio/video decoder black screens on older Android TVs.
-            // Allow LibVLC software decoding for these streams instead of relying on TV hardware.
-            val hdrStream=c.url.contains("HDR10",ignoreCase=true) || c.url.contains("HEVC",ignoreCase=true)
-            if(hdrStream)options.add("--avcodec-hw=none")
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
@@ -1055,7 +1055,6 @@ class MainActivity: Activity() {
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
             media.addOption(":network-caching="+cache)
-            if(hdrStream)media.addOption(":codec=avcodec")
             vlc.media=media
             media.release()
             vlc.play()
