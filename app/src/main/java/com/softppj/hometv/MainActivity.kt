@@ -155,7 +155,7 @@ class MainActivity: Activity() {
                 2->toggleLock(id(c),false)
                 3->selectScreenMode(i)
                 4->allChannels()
-                5->settings()
+                5->liveSettings()
                 6->confirmExit()
                 7->audioTracks()
                 8->chooseChannelEngine(i)
@@ -875,7 +875,7 @@ class MainActivity: Activity() {
                 4->audioTracks()
                 5->if(active>=0)chooseChannelEngine(active)
                 6->showHome()
-                7->settings()
+                7->liveSettings()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -1245,6 +1245,50 @@ class MainActivity: Activity() {
         val index=channels.indexOfFirst{it.url==url}
         playIndex(if(index>=0)index else 0)
     }
+    private fun liveSettings(){
+        if(active<0){settings();return}
+        val items=arrayOf(
+            "Playback engine: "+(prefs.getString("engine","LibVLC")?:"LibVLC"),
+            "Buffering: "+bufferProfile(),
+            "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
+            "Universal screen size: "+(prefs.getString("screen_mode","Fit")?:"Fit"),
+            "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
+            "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
+            "Manage playlists (leave playback)",
+            "Home screen (stop playback)",
+            "Back to TV"
+        )
+        AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
+            .setItems(items){_,choice->
+                when(choice){
+                    0->{
+                        val choices=arrayOf("Auto","Media3","LibVLC")
+                        AlertDialog.Builder(this).setTitle("Default playback engine")
+                            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","LibVLC")).coerceAtLeast(0)){dialog,i->
+                                prefs.edit().putString("engine",choices[i]).apply()
+                                dialog.dismiss()
+                                showBanner("Playback engine saved for next channel")
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                    1->chooseBufferProfile()
+                    2->selectQuality(null)
+                    3->selectScreenMode(null)
+                    4->{
+                        prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply()
+                        showBanner("Auto-reconnect setting saved")
+                    }
+                    5->{
+                        prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply()
+                        showBanner("Resume setting saved")
+                    }
+                    6->AlertDialog.Builder(this).setTitle("Leave live TV?")
+                        .setMessage("Managing playlists will stop the current channel.")
+                        .setPositiveButton("Continue"){_,_->managePlaylists()}
+                        .setNegativeButton("Stay on TV",null).show()
+                    7->showHome()
+                }
+            }.setNegativeButton("Close",null).show()
+    }
     private fun settings(){
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
@@ -1289,7 +1333,7 @@ class MainActivity: Activity() {
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
         root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
-        root.addView(label("Remote: Up/Down preview channel; OK plays highlighted channel; Left opens channel list; Right/Menu opens playback settings; Back returns."))
+        root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
