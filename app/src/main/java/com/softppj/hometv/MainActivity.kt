@@ -6,6 +6,10 @@ import android.content.*
 import android.view.*
 import android.widget.*
 import android.webkit.*
+import android.net.Uri
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media as VlcMedia
+import org.videolan.libvlc.MediaPlayer as VlcPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.C
 import androidx.media3.common.TrackSelectionOverride
@@ -32,6 +36,10 @@ class MainActivity: Activity() {
     private val prefs by lazy { getSharedPreferences("hometv", MODE_PRIVATE) }
     private var channels = mutableListOf<Channel>()
     private var player:ExoPlayer?=null
+    private var vlcCore:LibVLC?=null
+    private var vlcPlayer:VlcPlayer?=null
+    private var vlcAttempted=false
+    private var engineChannelUrl:String?=null
     private var web:WebView?=null
     private var active=-1
     private lateinit var root:LinearLayout
@@ -388,6 +396,7 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
@@ -408,6 +417,8 @@ class MainActivity: Activity() {
                 loadDataWithBaseURL("https://www.youtube.com", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='margin:0;background:black;overflow:hidden'><iframe style='position:absolute;top:0;left:0;width:100%;height:100%;border:0' src='https://www.youtube.com/embed/$videoId?autoplay=1' allow='autoplay; encrypted-media; fullscreen' allowfullscreen></iframe></body></html>","text/html","UTF-8",null)
             }
             screen.addView(web,FrameLayout.LayoutParams(-1,-1))
+        }else if(prefs.getString("engine","Auto")=="LibVLC"){
+            startVlc(c,index,screen)
         }else{
             val factory=DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
@@ -439,6 +450,19 @@ class MainActivity: Activity() {
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
+                    if(prefs.getString("engine","Auto")=="Auto" && !vlcAttempted){
+                        vlcAttempted=true
+                        handler.post{
+                            if(active==index && videoScreen===screen){
+                                player?.release();player=null
+                                currentPlayerView?.let{screen.removeView(it)}
+                                currentPlayerView=null
+                                showBanner("Trying LibVLC for "+c.name)
+                                startVlc(c,index,screen)
+                            }
+                        }
+                        return
+                    }
                     val alternative=channels.indexOfFirst{other->other.name.equals(c.name,true) && other.url!=c.url && !fallbackAttempted.contains(other.url)}
                     if(alternative>=0){
                         fallbackAttempted.add(c.url)
@@ -462,6 +486,43 @@ class MainActivity: Activity() {
         screen.requestFocus()
         showBanner("${index+1}  •  ${c.name}")
     }
+    private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
+        try{
+            val options=arrayListOf("--network-caching=1200","--live-caching=1200","--http-reconnect","--no-video-title-show")
+            val core=LibVLC(this,options)
+            val vlc=VlcPlayer(core)
+            vlcCore=core
+            vlcPlayer=vlc
+            val surface=SurfaceView(this)
+            screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
+            vlc.vlcVout.setVideoView(surface)
+            vlc.vlcVout.attachViews()
+            vlc.setEventListener{event->
+                if(event.type==VlcPlayer.Event.EncounteredError && active==index && vlcPlayer===vlc){
+                    handler.post{
+                        if(active==index && vlcPlayer===vlc){
+                            showBanner("LibVLC could not play "+c.name+". Trying another source.",true)
+                            val alternative=channels.indexOfFirst{it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)}
+                            if(alternative>=0){
+                                fallbackAttempted.add(c.url)
+                                playIndex(alternative)
+                            }
+                        }
+                    }
+                }
+            }
+            val media=VlcMedia(core,Uri.parse(c.url))
+            c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
+            c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+            media.addOption(":network-caching=1200")
+            vlc.media=media
+            media.release()
+            vlc.play()
+        }catch(e:Exception){
+            android.util.Log.e("HomeTV","LibVLC startup failed",e)
+            showBanner("LibVLC error: "+(e.message?:"unknown"),true)
+        }
+    }
     private fun switchChannel(delta:Int){if(channels.isNotEmpty())playIndex((active+delta+channels.size)%channels.size)}
     private fun resumeLast(){
         val url=prefs.getString("last_url",null)?:return
@@ -472,6 +533,13 @@ class MainActivity: Activity() {
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
+        root.addView(button("Playback engine: "+(prefs.getString("engine","Auto")?:"Auto")){
+            val choices=arrayOf("Auto","Media3","LibVLC")
+            AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Auto"))){dialog,i->
+                prefs.edit().putString("engine",choices[i]).apply()
+                dialog.dismiss();settings()
+            }.setNegativeButton("Cancel",null).show()
+        })
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
@@ -521,6 +589,11 @@ class MainActivity: Activity() {
         retryTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         player?.release();player=null
+        vlcPlayer?.let{v->
+            try{v.stop();v.vlcVout.detachViews();v.release()}catch(_:Exception){}
+        }
+        vlcPlayer=null
+        vlcCore?.release();vlcCore=null
         web?.onPause();web?.destroy();web=null
         active=-1
     }
