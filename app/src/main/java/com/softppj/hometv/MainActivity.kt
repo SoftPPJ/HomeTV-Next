@@ -219,14 +219,24 @@ class MainActivity: Activity() {
         if(sources.isEmpty()){channels.clear();done();return}
         Toast.makeText(this,"Loading playlists…",Toast.LENGTH_SHORT).show()
         thread {
-            val found=mutableListOf<Channel>()
-            sources.forEach { p ->
-                try {
-                    val conn=URL(p.url).openConnection().apply { connectTimeout=10000;readTimeout=15000 }
-                    val body=conn.getInputStream().bufferedReader().use{it.readText()}
-                    found.addAll(parseM3u(body,p.name))
-                } catch(_:Exception){}
+            // Fetch concurrently, but merge results in the configured playlist order.
+            val results=Array(sources.size){emptyList<Channel>()}
+            val workers=sources.mapIndexed { index,p ->
+                thread {
+                    try {
+                        val conn=URL(p.url).openConnection().apply {
+                            connectTimeout=5000
+                            readTimeout=7000
+                        }
+                        val body=conn.getInputStream().bufferedReader().use{it.readText()}
+                        results[index]=parseM3u(body,p.name)
+                    } catch(e:Exception){
+                        android.util.Log.w("HomeTV","Could not load playlist "+p.name,e)
+                    }
+                }
             }
+            workers.forEach{it.join()}
+            val found=results.flatMap{it}
             runOnUiThread {
                 // Kotlin distinctBy keeps the first occurrence and its original playlist position.
                 // Never alphabetically sort the merged channel list.
