@@ -811,26 +811,33 @@ class MainActivity: Activity() {
     }
     private fun showChannelOptions(){
         if(active !in channels.indices)return
-        val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel",if(isSkipped(channel))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine","Alternative stream / URL")
-        AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
-            .setItems(options){_,index->
-                when(index){
-                    0->showOverlayList()
-                    1->switchChannel(-1)
-                    2->switchChannel(1)
-                    3->toggleScreenMode()
-                    4->toggleLock(id(channel),false)
-                    5->toggleChannelSkip(channel)
-                    6->settings()
-                    7->confirmExit()
-                    8->favorite(channel)
-                    9->allChannels()
-                    10->audioTracks()
-                    11->chooseChannelEngine(active)
-                    12->selectAlternative(active)
+        val c=channels[active]
+        val opts=arrayOf(
+            if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"Remove favorite" else "Add favorite",
+            if(isSkipped(c))"Unhide channel" else "Hide channel",
+            if(isLocked(c))"Unlock channel" else "Lock channel",
+            "Alternative URL / Source",
+            "Screen size for this channel",
+            "Picture quality for this channel",
+            "Audio tracks",
+            "Playback engine for this channel",
+            "Channel list"
+        )
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Channel options")
+            .setItems(opts){_,choice->
+                when(choice){
+                    0->favorite(c)
+                    1->toggleChannelSkip(c)
+                    2->toggleLock(id(c),false)
+                    3->selectAlternative(active)
+                    4->selectScreenMode(active)
+                    5->selectQuality(active)
+                    6->audioTracks()
+                    7->chooseChannelEngine(active)
+                    8->showOverlayList()
                 }
-            }.setNegativeButton("Close",null).show()
+            }.setNegativeButton("Close",null).create()
+        showSideDialog(dialog)
     }
     private fun sideAction(side:String){
         when(prefs.getString("side_"+side,if(side=="left")"Channel list" else "Channel settings")){
@@ -986,7 +993,7 @@ class MainActivity: Activity() {
         val width=(resources.displayMetrics.widthPixels*0.28f).toInt().coerceAtLeast(220)
         val height=(width*9/16).coerceAtLeast(120)
         val panel=FrameLayout(this).apply{
-            setBackgroundColor(android.graphics.Color.BLACK)
+            setBackgroundColor(0xFF101E31.toInt())
             elevation=12f
         }
         previewPanel=panel
@@ -996,7 +1003,7 @@ class MainActivity: Activity() {
         }
         screen.addView(panel,params)
         panel.addView(TextView(this).apply{
-            text="PREVIEW  •  "+c.name
+            text="LIVE PREVIEW  •  "+c.name
             textSize=13f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(8,8,8,8)
@@ -1009,11 +1016,15 @@ class MainActivity: Activity() {
                     .setConnectTimeoutMs(4500).setReadTimeoutMs(6000)
                     .setAllowCrossProtocolRedirects(true)
                     .setDefaultRequestProperties(c.headers)
+                val previewBuffer=DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(500,2500,250,500).build()
                 val exo=ExoPlayer.Builder(this)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+                    .setLoadControl(previewBuffer)
                     .build()
                 previewPlayer=exo
                 exo.volume=0f
+                exo.setAudioAttributes(AudioAttributes.DEFAULT,false)
                 val view=PlayerView(this).apply{
                     player=exo
                     useController=false
@@ -1034,7 +1045,7 @@ class MainActivity: Activity() {
             }
         }
         previewVideoTask=task
-        handler.postDelayed(task,650L)
+        handler.postDelayed(task,900L)
     }
     private fun previewChannel(delta:Int){
         if(channels.isEmpty() || surfingIndices().isEmpty())return
@@ -1202,14 +1213,14 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="HOMETV  •  SETTINGS & HOME"
+            text="HOMETV  •  UNIVERSAL SETTINGS"
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(20,18,12,16)
         })
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,
-            arrayOf("⚙  Settings (keep watching)","⌂  Home screen","←  Back to channels","▶  Return to TV"))
+            arrayOf("⚙  Universal playback settings","◷  Live preview ON / OFF","⌂  Home screen","☰  Channel list","▶  Return to TV"))
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
@@ -1218,8 +1229,9 @@ class MainActivity: Activity() {
             close()
             when(choice){
                 0->liveSettings()
-                1->showHome()
-                2->showOverlayList()
+                1->{prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply();showBanner("Live preview "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF")}
+                2->showHome()
+                3->showOverlayList()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -1922,8 +1934,8 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
-                    KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
-                    KeyEvent.KEYCODE_DPAD_RIGHT->{selectAlternative(active);return true}
+                    KeyEvent.KEYCODE_DPAD_LEFT->{showLeftNavigation();return true}
+                    KeyEvent.KEYCODE_DPAD_RIGHT->{showChannelOptions();return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
                     KeyEvent.KEYCODE_BACK->{if(previewIndex>=0){previewIndex=-1;closeVideoPreview();return true};onBackPressed();return true}
                 }
