@@ -184,7 +184,17 @@ class MainActivity: Activity() {
     private fun button(s:String, action:()->Unit)=Button(this).apply {
         text=s;isAllCaps=false;textSize=17f
         setTextColor(android.graphics.Color.WHITE)
-        backgroundTintList=android.content.res.ColorStateList.valueOf(0xFF254466.toInt())
+        backgroundTintList=android.content.res.ColorStateList(
+            arrayOf(
+                intArrayOf(android.R.attr.state_focused),
+                intArrayOf(android.R.attr.state_pressed),
+                intArrayOf()
+            ),
+            intArrayOf(0xFFFFB300.toInt(),0xFFFFB300.toInt(),0xFF254466.toInt())
+        )
+        setOnFocusChangeListener{view,focused->
+            (view as Button).setTextColor(if(focused)android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+        }
         setOnClickListener{action()}
     }
     private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(root); root.removeAllViews(); root.addView(label(title)) }
