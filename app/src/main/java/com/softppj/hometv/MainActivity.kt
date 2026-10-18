@@ -1152,24 +1152,29 @@ class MainActivity: Activity() {
             }else null
         }catch(_:Exception){null}
         if(youtubeUri!=null){
-            val packages=listOf("com.google.android.youtube.tv","com.google.android.youtube")
+            // Use a real browser rather than the YouTube app or restricted WebView embed.
+            // Full-screen video is controlled by the browser's YouTube player.
+            val browserIntent=Intent(Intent.ACTION_VIEW,youtubeUri).apply{
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             var opened=false
-            for(pkg in packages){
+            for(pkg in listOf("com.android.chrome","com.microsoft.emmx",
+                "org.mozilla.firefox","com.amazon.cloud9","com.android.browser")){
                 try{
-                    startActivity(Intent(Intent.ACTION_VIEW,youtubeUri).apply{setPackage(pkg)})
+                    startActivity(Intent(browserIntent).apply{setPackage(pkg)})
                     opened=true
                     break
-                }catch(_:android.content.ActivityNotFoundException){}
-                catch(_:SecurityException){}
+                }catch(_:Exception){}
             }
             if(!opened){
                 try{
-                    startActivity(Intent(Intent.ACTION_VIEW,youtubeUri))
+                    startActivity(browserIntent)
                     opened=true
                 }catch(_:Exception){}
             }
-            if(!opened)Toast.makeText(this,"YouTube app or compatible browser required",Toast.LENGTH_LONG).show()
-            // Leave HomeTV in its normal channel browser when returning from YouTube.
+            if(!opened)Toast.makeText(this,"Install a browser to open YouTube links",Toast.LENGTH_LONG).show()
+            // Returning from the browser should show HomeTV, not a blank video surface.
             showHome()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
