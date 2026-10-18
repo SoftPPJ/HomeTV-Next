@@ -718,6 +718,23 @@ class MainActivity: Activity() {
         if(url!=null)prefs.getString("quality_channel_"+hash(url),null)?.let{return it}
         return prefs.getString("quality_global","Auto") ?: "Auto"
     }
+    private var qualityUpgradeTask:Runnable?=null
+    private fun scheduleQualityUpgrade(){
+        qualityUpgradeTask?.let{handler.removeCallbacks(it)}
+        qualityUpgradeTask=null
+        val exo=player ?:return
+        if(qualityMode()!="Auto" && qualityMode()!="Best Available")return
+        val task=Runnable{
+            if(player===exo && active>=0 && exo.playbackState==Player.STATE_READY){
+                exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                    .setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
+                    .setForceHighestSupportedBitrate(false)
+                    .build()
+            }
+        }
+        qualityUpgradeTask=task
+        handler.postDelayed(task,8000)
+    }
     private fun applyQuality(){
         val exo=player ?:return
         val mode=qualityMode()
@@ -730,8 +747,8 @@ class MainActivity: Activity() {
         }
         val builder=exo.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
-        if(mode=="Best Available")builder.setForceHighestSupportedBitrate(true)
-        else builder.setForceHighestSupportedBitrate(false)
+        if(mode=="Auto" || mode=="Best Available")builder.setMaxVideoSize(Int.MAX_VALUE,720)
+        builder.setForceHighestSupportedBitrate(false)
         exo.trackSelectionParameters=builder.build()
     }
     private fun selectQuality(index:Int?=null){
@@ -927,6 +944,7 @@ class MainActivity: Activity() {
                     if(state==Player.STATE_READY){
                         retryCount=0
                         applyVideoSize()
+                        scheduleQualityUpgrade()
                         retryTask?.let{handler.removeCallbacks(it)}
                         retryTask=null
                     }
@@ -1154,6 +1172,8 @@ class MainActivity: Activity() {
         bannerTask?.let{handler.removeCallbacks(it)}
         retryTask?.let{handler.removeCallbacks(it)}
         retryTask=null
+        qualityUpgradeTask?.let{handler.removeCallbacks(it)}
+        qualityUpgradeTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         player?.release();player=null
         vlcPlayer?.let{v->
