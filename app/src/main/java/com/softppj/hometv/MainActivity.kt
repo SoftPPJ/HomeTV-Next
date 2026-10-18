@@ -68,17 +68,17 @@ class MainActivity: Activity() {
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
-    private fun isSkipped(c:Channel)=skippedIds.contains(id(c))
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it])}
+    private fun isSkipped(c:Channel)=channels.any{sameChannel(it,c) && skippedIds.contains(id(it))}
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it])}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
-        val skipped=values.add(id(c))
-        if(!skipped)values.remove(id(c))
+        val skipped=!isSkipped(c)
+        channels.filter{sameChannel(it,c)}.forEach{if(skipped)values.add(id(it)) else values.remove(id(it))}
         prefs.edit().putStringSet("skip_channel_surfing",values).apply()
         Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
     }
     private fun manageSkippedChannels(){
-        val skipped=channels.indices.filter{isSkipped(channels[it]) && !isLocked(channels[it])}
+        val skipped=visibleIndices().filter{isSkipped(channels[it])}
         if(skipped.isEmpty()){
             Toast.makeText(this,"No channels are skipped",Toast.LENGTH_SHORT).show()
             return
@@ -94,6 +94,16 @@ class MainActivity: Activity() {
     private fun alternateIndices(index:Int):List<Int>{
         val channel=channels.getOrNull(index) ?:return emptyList()
         return channels.indices.filter{sameChannel(channels[it],channel)}.distinctBy{channels[it].url}
+    }
+    private fun switchAlternative(){
+        if(active !in channels.indices)return
+        val options=alternateIndices(active)
+        if(options.size<=1){showBanner("No alternative stream");return}
+        val current=options.indexOf(active)
+        alternativeAttempted.clear()
+        alternativeSessionKey=null
+        playIndex(options[(current+1)%options.size])
+        showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
     private fun selectAlternative(index:Int){
         val options=alternateIndices(index)
@@ -122,8 +132,15 @@ class MainActivity: Activity() {
         handler.post{if(active==index)playIndex(next)}
         return true
     }
-    private fun isLocked(c:Channel)=lockIds.contains(id(c)) || lockGroups.contains(c.group)
-    private fun visibleIndices()=channels.indices.filter{!isLocked(channels[it])}
+    private fun isLocked(c:Channel)=lockGroups.contains(c.group) || channels.any{sameChannel(it,c) && lockIds.contains(id(it))}
+    private fun channelNumbers()=channels.indices.filter{i->channels.indices.none{j->j<i && sameChannel(channels[j],channels[i])}}
+    private fun numberFor(index:Int)=channelNumbers().indexOfFirst{sameChannel(channels[it],channels[index])}+1
+    private fun visibleIndices()=channelNumbers()
+    private fun channelLabel(index:Int):String{
+        val c=channels[index]
+        val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
+        return marks+numberFor(index)+". "+c.name
+    }
     private fun allChannels(){
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
@@ -132,9 +149,9 @@ class MainActivity: Activity() {
         }
         channelCollection("All channels",visibleIndices())
     }
-    private fun favorites(){channelCollection("Favorites",visibleIndices().filter{favoriteIds.contains(id(channels[it]))})}
+    private fun favorites(){channelCollection("Favorites",visibleIndices().filter{i->channels.any{sameChannel(it,channels[i]) && favoriteIds.contains(id(it))}})}
     private fun channelCollection(title:String,indices:List<Int>){
-        val indices=indices.filter{it in channels.indices && !isLocked(channels[it])}
+        val indices=indices.filter{it in channels.indices}.distinctBy{numberFor(it)}
         reset(title+" ("+indices.size+")")
         val list=ListView(this).apply{
             dividerHeight=1
@@ -144,7 +161,7 @@ class MainActivity: Activity() {
         }
         val names=indices.map{i->
             val c=channels[i]
-            (if(favoriteIds.contains(id(c)))"★ " else "")+c.name+"  ·  "+c.group
+            channelLabel(i)+"  ·  "+c.group
         }
         list.adapter=object:android.widget.BaseAdapter(){
             override fun getCount()=names.size
@@ -210,20 +227,20 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)",if(isSkipped(c))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−","Alternative stream / URL")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Unhide" else "Hide","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
                 1->{favorite(c);if(active<0)allChannels()}
                 2->toggleLock(id(c),false)
-                3->selectScreenMode(i)
-                4->allChannels()
-                5->liveSettings()
-                6->confirmExit()
-                7->audioTracks()
-                8->chooseChannelEngine(i)
-                9->selectQuality(i)
-                10->{toggleChannelSkip(c);if(active<0)allChannels()}
+                3->{toggleChannelSkip(c);if(active<0)allChannels()}
+                4->selectScreenMode(i)
+                5->allChannels()
+                6->liveSettings()
+                7->confirmExit()
+                8->audioTracks()
+                9->chooseChannelEngine(i)
+                10->selectQuality(i)
                 11->selectAlternative(i)
             }
         }.show()
@@ -643,8 +660,8 @@ class MainActivity: Activity() {
         reset(group)
         root.addView(button("Lock group"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        channels.forEachIndexed { i,c->if(c.group==group && !isLocked(c)){
-            list.addView(button((if(favoriteIds.contains(id(c)))"★ " else "☆ ")+c.name){playIndex(i)})
+        visibleIndices().forEach { i->val c=channels[i];if(c.group==group){
+            list.addView(button(channelLabel(i)){playIndex(i)})
             list.addView(button("⋮ Options"){channelOptions(i)})
             list.addView(button("Lock channel"){toggleLock(id(c),false)})
         }}
@@ -758,7 +775,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine",if(isSkipped(channel))"Include in Up/Down and CH+/−" else "Skip during Up/Down and CH+/−","Alternative stream / URL")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel",if(isSkipped(channel))"Unhide" else "Hide","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -767,13 +784,13 @@ class MainActivity: Activity() {
                     2->switchChannel(1)
                     3->toggleScreenMode()
                     4->toggleLock(id(channel),false)
-                    5->settings()
-                    6->confirmExit()
-                    7->favorite(channel)
-                    8->allChannels()
-                    9->audioTracks()
-                    10->chooseChannelEngine(active)
-                    11->toggleChannelSkip(channel)
+                    5->toggleChannelSkip(channel)
+                    6->settings()
+                    7->confirmExit()
+                    8->favorite(channel)
+                    9->allChannels()
+                    10->audioTracks()
+                    11->chooseChannelEngine(active)
                     12->selectAlternative(active)
                 }
             }.setNegativeButton("Close",null).show()
@@ -892,7 +909,7 @@ class MainActivity: Activity() {
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
         val typed=channelDigits.toIntOrNull()
-        if(typed!=null && typed in 1..channels.size && !isLocked(channels[typed-1]))showChannelInfo(typed-1)
+        if(typed!=null && typed in 1..channelNumbers().size && !isLocked(channels[channelNumbers()[typed-1]]))showChannelInfo(channelNumbers()[typed-1])
         else showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
         channelDigitTask=task
@@ -904,7 +921,7 @@ class MainActivity: Activity() {
         val number=channelDigits.toIntOrNull()
         channelDigits=""
         if(number==null)return
-        if(number in 1..channels.size)playIndex(number-1)
+        if(number in 1..channelNumbers().size)playIndex(channelNumbers()[number-1])
         else showBanner("Channel "+number+" is not available",true)
     }
     private var previewIndex=-1
@@ -913,8 +930,10 @@ class MainActivity: Activity() {
         if(channels.isEmpty() || surfingIndices().isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
         val available=surfingIndices()
-        val from=available.indexOf(if(previewIndex>=0)previewIndex else active)
-        previewIndex=available[((if(from<0)0 else from)+delta+available.size)%available.size]
+        val current=if(previewIndex>=0)previewIndex else active
+        val anchor=channels.getOrNull(current)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
+        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
+        previewIndex=next
         showChannelInfo(previewIndex)
         val task=Runnable{previewIndex=-1}
         previewTask=task
@@ -936,7 +955,7 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            text=(index+1).toString()+"  "+channel.name
+            text=numberFor(index).toString()+"  "+channel.name
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -1039,7 +1058,7 @@ class MainActivity: Activity() {
             override fun getItem(position:Int):Any=channels[available[position]]
             override fun getItemId(position:Int)=available[position].toLong()
             override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View=
-                logoRow(channels[available[position]],(available[position]+1).toString()+". "+channels[available[position]].name)
+                logoRow(channels[available[position]],channelLabel(available[position]))
         }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
 
@@ -1622,8 +1641,9 @@ class MainActivity: Activity() {
     private fun switchChannel(delta:Int){
         val available=surfingIndices()
         if(available.isEmpty())return
-        val from=available.indexOf(active)
-        playIndex(available[((if(from<0)0 else from)+delta+available.size)%available.size])
+        val anchor=channels.getOrNull(active)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
+        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
+        playIndex(next)
     }
     private fun resumeLast(){
         if(channels.isEmpty()){showHome();return}
@@ -1761,7 +1781,8 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
-                    KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
+                    KeyEvent.KEYCODE_DPAD_RIGHT->{switchAlternative();return true}
+                    KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
                     KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
                 }
             }
