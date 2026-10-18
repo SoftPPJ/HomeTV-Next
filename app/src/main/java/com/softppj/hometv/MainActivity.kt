@@ -132,7 +132,7 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Auto") ?: "Auto")
+    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","LibVLC") ?: "LibVLC")
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
@@ -1058,9 +1058,9 @@ class MainActivity: Activity() {
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
-        root.addView(button("Playback engine: "+(prefs.getString("engine","Auto")?:"Auto")){
+        root.addView(button("Playback engine: "+(prefs.getString("engine","LibVLC")?:"LibVLC")){
             val choices=arrayOf("Auto","Media3","LibVLC")
-            AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Auto"))){dialog,i->
+            AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","LibVLC"))){dialog,i->
                 prefs.edit().putString("engine",choices[i]).apply()
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
