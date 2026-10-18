@@ -730,7 +730,7 @@ class MainActivity: Activity() {
             val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
             val date=java.text.SimpleDateFormat("dd MMM yy",java.util.Locale.ENGLISH).format(java.util.Date())
             val time=java.text.SimpleDateFormat(pattern,java.util.Locale.ENGLISH).format(java.util.Date())
-            clock.text="$"+"date  •  $"+"time"
+            clock.text=date+"  •  "+time
         }
         render()
         val task=object:Runnable{
@@ -771,7 +771,7 @@ class MainActivity: Activity() {
                     2->{
                         val sizes=intArrayOf(12,14,16,18,20,24,28,32,36)
                         AlertDialog.Builder(this).setTitle("Clock text size")
-                            .setSingleChoiceItems(sizes.map{ "$"+"it sp" }.toTypedArray(),sizes.indexOf(prefs.getInt("clock_size",18)).coerceAtLeast(0)){dialog,i->
+                            .setSingleChoiceItems(sizes.map{ it.toString()+" sp" }.toTypedArray(),sizes.indexOf(prefs.getInt("clock_size",18)).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putInt("clock_size",sizes[i]).apply();dialog.dismiss();updateClock();clockSettings()
                             }.setNegativeButton("Cancel",null).show()
                     }
