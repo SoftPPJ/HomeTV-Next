@@ -192,7 +192,7 @@ class MainActivity: Activity() {
                 list.post{list.setSelection(position)}
             }
         }
-        root.addView(label("Select a channel · Long press for Favorite, Lock or Skip during channel surfing"))
+        root.addView(label("Long press: Favorite · Lock / Unlock · Hide / Unhide"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
@@ -227,7 +227,7 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Unhide" else "Hide","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)","Alternative stream / URL")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -670,7 +670,7 @@ class MainActivity: Activity() {
     }
     private fun manageLockedChannels(){
         requirePin{
-            val locked=channels.indices.filter{isLocked(channels[it])}
+            val locked=visibleIndices().filter{isLocked(channels[it])}
             if(locked.isEmpty()){
                 Toast.makeText(this,"No locked channels",Toast.LENGTH_SHORT).show()
             }else{
@@ -775,7 +775,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel",if(isSkipped(channel))"Unhide" else "Hide","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine","Alternative stream / URL")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel",if(isSkipped(channel))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -1651,7 +1651,7 @@ class MainActivity: Activity() {
         val index=channels.indexOfFirst{it.url==url}
         val available=visibleIndices()
         if(index>=0 && !isLocked(channels[index]))playIndex(index)
-        else if(available.isNotEmpty())playIndex(available.first())
+        else if(available.any{!isLocked(channels[it])})playIndex(available.first{!isLocked(channels[it])})
         else allChannels()
     }
     private fun liveSettings(){
