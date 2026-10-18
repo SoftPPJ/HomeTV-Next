@@ -1550,7 +1550,7 @@ class MainActivity: Activity() {
             val drawer=screen?.findViewWithTag<View>("channel_drawer")
                 ?:screen?.findViewWithTag<View>("settings_drawer")
                 ?:screen?.findViewWithTag<View>("left_navigation")
-            if(drawer!=null){
+            if(drawer!=null && screen!=null){
                 screen.removeView(drawer)
                 screen.requestFocus()
                 return
