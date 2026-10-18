@@ -63,16 +63,19 @@ class MainActivity: Activity() {
         prefs.edit().putStringSet("favorites",set).apply()
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
+    private fun isLocked(c:Channel)=lockIds.contains(id(c)) || lockGroups.contains(c.group)
+    private fun visibleIndices()=channels.indices.filter{!isLocked(channels[it])}
     private fun allChannels(){
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
-            if(playlists().any{it.enabled})refresh({channelCollection("All channels",channels.indices.toList())})
+            if(playlists().any{it.enabled})refresh({channelCollection("All channels",visibleIndices())})
             return
         }
-        channelCollection("All channels",channels.indices.toList())
+        channelCollection("All channels",visibleIndices())
     }
-    private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
+    private fun favorites(){channelCollection("Favorites",visibleIndices().filter{favoriteIds.contains(id(channels[it]))})}
     private fun channelCollection(title:String,indices:List<Int>){
+        val indices=indices.filter{it in channels.indices && !isLocked(channels[it])}
         reset(title+" ("+indices.size+")")
         val list=ListView(this).apply{
             dividerHeight=1
@@ -594,14 +597,16 @@ class MainActivity: Activity() {
             val set=(prefs.getStringSet(key,emptySet())?:emptySet()).toMutableSet()
             if(!set.add(value))set.remove(value)
             prefs.edit().putStringSet(key,set).apply()
-            if(group)showGroup(value) else showGroup(channels.firstOrNull{id(it)==value}?.group?:"Other")
+            if(active>=0 && channels.getOrNull(active)?.let{isLocked(it)}==true)allChannels()
+            else if(active>=0)showBanner("Channel lock updated")
+            else allChannels()
         }
     }
     private fun hash(pin:String)=MessageDigest.getInstance("SHA-256").digest(pin.toByteArray()).joinToString(""){"%02x".format(it)}
     private fun requirePin(action:()->Unit){
         val saved=prefs.getString("pin",null)
         if(saved==null){Toast.makeText(this,"Set a PIN in Settings first",Toast.LENGTH_LONG).show();return}
-        val field=EditText(this).apply{inputType=2;hint="PIN"}
+        val field=EditText(this).apply{inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;hint="Password"}
         AlertDialog.Builder(this).setTitle("Enter PIN").setView(field).setPositiveButton("Unlock"){_,_->
             if(hash(field.text.toString())==saved)action() else Toast.makeText(this,"Incorrect PIN",Toast.LENGTH_SHORT).show()
         }.setNegativeButton("Cancel",null).show()
@@ -791,7 +796,7 @@ class MainActivity: Activity() {
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
         val typed=channelDigits.toIntOrNull()
-        if(typed!=null && typed in 1..channels.size)showChannelInfo(typed-1)
+        if(typed!=null && typed in 1..channels.size && !isLocked(channels[typed-1]))showChannelInfo(typed-1)
         else showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
         channelDigitTask=task
@@ -809,9 +814,11 @@ class MainActivity: Activity() {
     private var previewIndex=-1
     private var previewTask:Runnable?=null
     private fun previewChannel(delta:Int){
-        if(channels.isEmpty())return
+        if(channels.isEmpty() || visibleIndices().isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
-        previewIndex=((if(previewIndex>=0)previewIndex else active)+delta+channels.size)%channels.size
+        val available=visibleIndices()
+        val from=available.indexOf(if(previewIndex>=0)previewIndex else active)
+        previewIndex=available[((if(from<0)0 else from)+delta+available.size)%available.size]
         showChannelInfo(previewIndex)
         val task=Runnable{previewIndex=-1}
         previewTask=task
@@ -930,19 +937,21 @@ class MainActivity: Activity() {
             setPadding(16,16,8,12)
         })
         val list=ListView(this)
+        val available=visibleIndices()
         list.adapter=object:android.widget.BaseAdapter(){
-            override fun getCount()=channels.size
-            override fun getItem(position:Int):Any=channels[position]
-            override fun getItemId(position:Int)=position.toLong()
+            override fun getCount()=available.size
+            override fun getItem(position:Int):Any=channels[available[position]]
+            override fun getItemId(position:Int)=available[position].toLong()
             override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View=
-                logoRow(channels[position],(position+1).toString()+". "+channels[position].name)
+                logoRow(channels[available[position]],(available[position]+1).toString()+". "+channels[available[position]].name)
         }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
 
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
-        list.setOnItemClickListener{_,_,position,_->close();playIndex(position)}
+        list.setOnItemClickListener{_,_,position,_->close();playIndex(available[position])}
+        list.setOnItemLongClickListener{_,_,position,_->close();channelOptions(available[position]);true}
         list.setOnKeyListener{_,code,event->
             if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){
                 close();showLeftNavigation();true
@@ -950,7 +959,7 @@ class MainActivity: Activity() {
                 close();true
             }else false
         }
-        list.setSelection(active.coerceAtLeast(0))
+        list.setSelection(available.indexOf(active).coerceAtLeast(0))
         list.requestFocus()
     }
     private fun showLeftNavigation(){
@@ -1212,7 +1221,7 @@ class MainActivity: Activity() {
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
-        if(unlockedChannel!=id(c) && (lockIds.contains(id(c)) || lockGroups.contains(c.group))){
+        if(unlockedChannel!=id(c) && isLocked(c)){
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
@@ -1505,12 +1514,20 @@ class MainActivity: Activity() {
             showBanner("LibVLC error: "+(e.message?:"unknown"),true)
         }
     }
-    private fun switchChannel(delta:Int){if(channels.isNotEmpty())playIndex((active+delta+channels.size)%channels.size)}
+    private fun switchChannel(delta:Int){
+        val available=visibleIndices()
+        if(available.isEmpty())return
+        val from=available.indexOf(active)
+        playIndex(available[((if(from<0)0 else from)+delta+available.size)%available.size])
+    }
     private fun resumeLast(){
         if(channels.isEmpty()){showHome();return}
         val url=prefs.getString("last_url",null)
         val index=channels.indexOfFirst{it.url==url}
-        playIndex(if(index>=0)index else 0)
+        val available=visibleIndices()
+        if(index>=0 && !isLocked(channels[index]))playIndex(index)
+        else if(available.isNotEmpty())playIndex(available.first())
+        else allChannels()
     }
     private fun liveSettings(){
         if(active<0){settings();return}
@@ -1574,17 +1591,21 @@ class MainActivity: Activity() {
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
-        root.addView(button("Set / change parental PIN"){
-            val field=EditText(this).apply{hint="New 4–6 digit PIN";inputType=2}
-            val save={
-                val value=field.text.toString()
-                if(value.matches(Regex("[0-9]{4,6}"))){
-                    prefs.edit().putString("pin",hash(value)).apply()
-                    Toast.makeText(this,"PIN saved",Toast.LENGTH_SHORT).show()
-                }else Toast.makeText(this,"Use 4–6 digits",Toast.LENGTH_LONG).show()
+        root.addView(button("Set / change lock password"){
+            val field=EditText(this).apply{
+                hint="Any letters or digits (no minimum length)"
+                inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
-            if(prefs.contains("pin"))requirePin{AlertDialog.Builder(this).setTitle("New PIN").setView(field).setPositiveButton("Save"){_,_->save()}.show()}
-            else AlertDialog.Builder(this).setTitle("Set PIN").setView(field).setPositiveButton("Save"){_,_->save()}.show()
+            val save:()->Unit={
+                val value=field.text.toString()
+                if(value.isNotEmpty()){
+                    prefs.edit().putString("pin",hash(value)).apply()
+                    Toast.makeText(this,"Lock password saved",Toast.LENGTH_SHORT).show()
+                }else Toast.makeText(this,"Password cannot be empty",Toast.LENGTH_SHORT).show()
+            }
+            val prompt={AlertDialog.Builder(this).setTitle("New lock password").setView(field)
+                .setPositiveButton("Save"){_,_->save()}.setNegativeButton("Cancel",null).show()}
+            if(prefs.contains("pin"))requirePin{prompt()} else prompt()
         })
         root.addView(button("Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF"){
             prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();settings()
