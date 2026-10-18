@@ -7,6 +7,9 @@ import android.view.*
 import android.widget.*
 import android.webkit.*
 import androidx.media3.common.MediaItem
+import androidx.media3.common.C
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
@@ -67,7 +70,7 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit","Audio tracks")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -77,6 +80,7 @@ class MainActivity: Activity() {
                 4->allChannels()
                 5->settings()
                 6->confirmExit()
+                7->audioTracks()
             }
         }.show()
     }
@@ -296,10 +300,36 @@ class MainActivity: Activity() {
             .setPositiveButton("Exit"){_,_->stopPlayback();finishAffinity()}
             .setNegativeButton("Cancel",null).show()
     }
+    private fun audioTracks(){
+        val exo=player
+        if(exo==null){Toast.makeText(this,"Audio track selection is available for IPTV streams",Toast.LENGTH_LONG).show();return}
+        val entries=mutableListOf<Pair<androidx.media3.common.TrackGroup,Int>>()
+        val names=mutableListOf<String>()
+        for(group in exo.currentTracks.groups){
+            if(group.type!=C.TRACK_TYPE_AUDIO)continue
+            for(i in 0 until group.length){
+                val fmt=group.getTrackFormat(i)
+                val language=fmt.language ?: "Unknown language"
+                val codec=fmt.sampleMimeType ?: "Unknown codec"
+                names.add(language+" · "+codec+(if(group.isTrackSelected(i))" ✓" else "")+(if(!group.isTrackSupported(i))" (unsupported)" else ""))
+                entries.add(Pair(group.mediaTrackGroup,i))
+            }
+        }
+        if(entries.isEmpty()){AlertDialog.Builder(this).setTitle("Audio tracks").setMessage("No audio track was detected for this channel. Try another stream URL.").setPositiveButton("OK",null).show();return}
+        AlertDialog.Builder(this).setTitle("Select audio track").setItems(names.toTypedArray()){_,position->
+            val (group,index)=entries[position]
+            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                .setOverrideForType(TrackSelectionOverride(group,listOf(index)))
+                .build()
+            showBanner("Audio track: "+names[position])
+        }.setNeutralButton("Automatic"){_,_->
+            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
+        }.setNegativeButton("Cancel",null).show()
+    }
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -312,6 +342,7 @@ class MainActivity: Activity() {
                     6->confirmExit()
                     7->favorite(channel)
                     8->allChannels()
+                    9->audioTracks()
                 }
             }.setNegativeButton("Close",null).show()
     }
