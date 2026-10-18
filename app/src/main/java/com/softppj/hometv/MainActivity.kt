@@ -213,7 +213,7 @@ class MainActivity: Activity() {
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
         setContentView(screen)
-        val videoId=Regex("(?:youtube\\\\.com/(?:live/|watch\\\\?v=|embed/)|youtu\\\\.be/)([A-Za-z0-9_-]{11})").find(c.url)?.groupValues?.get(1)
+        val videoId=Regex("""(?:youtube\.com/(?:live/|watch\?v=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})""").find(c.url)?.groupValues?.get(1)
         if(videoId!=null){
             web=WebView(this).apply {
                 setBackgroundColor(android.graphics.Color.BLACK)
