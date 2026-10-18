@@ -200,6 +200,77 @@ class MainActivity: Activity() {
                 showEpg()
             }.setNegativeButton("Cancel",null).create())
     }
+    private var epgTuneTask:Runnable?=null
+    private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme){
+        val now=System.currentTimeMillis()
+        if(programme.start<=now){
+            playIndex(preferredChannel(channels.indexOfFirst{sameChannel(it,channel)}))
+            return
+        }
+        val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
+        val key=channelKey(channel)+"|"+programme.start
+        if((0 until saved.length()).any{saved.optJSONObject(it)?.optString("key")==key}){
+            Toast.makeText(this,"Programme already scheduled",Toast.LENGTH_SHORT).show()
+            return
+        }
+        saved.put(JSONObject().put("key",key).put("url",channel.url)
+            .put("start",programme.start).put("title",programme.title))
+        prefs.edit().putString("epg_tune_schedules",saved.toString()).apply()
+        armEpgTune()
+        Toast.makeText(this,"Auto-switch scheduled for "+programmeTime(programme.start)+" • "+programme.title,Toast.LENGTH_LONG).show()
+    }
+    private fun armEpgTune(){
+        epgTuneTask?.let{handler.removeCallbacks(it)}
+        epgTuneTask=null
+        val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
+        val now=System.currentTimeMillis()
+        val upcoming=(0 until saved.length()).mapNotNull{saved.optJSONObject(it)}
+            .filter{it.optLong("start")>now-120000L}
+            .minByOrNull{it.optLong("start")} ?:return
+        val delay=(upcoming.optLong("start")-now).coerceAtLeast(0L).coerceAtMost(60000L)
+        val task=Runnable{checkEpgTune()}
+        epgTuneTask=task
+        handler.postDelayed(task,delay)
+    }
+    private fun checkEpgTune(){
+        val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
+        val now=System.currentTimeMillis()
+        val keep=JSONArray()
+        var target:String?=null
+        for(i in 0 until saved.length()){
+            val entry=saved.optJSONObject(i) ?:continue
+            val start=entry.optLong("start")
+            if(start<=now && start>=now-120000L)target=entry.optString("url")
+            else if(start>now)keep.put(entry)
+        }
+        prefs.edit().putString("epg_tune_schedules",keep.toString()).apply()
+        if(target!=null){
+            val index=channels.indexOfFirst{it.url==target}
+            if(index>=0)playIndex(preferredChannel(index))
+        }
+        armEpgTune()
+    }
+    private fun showEpgSchedules(){
+        val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
+        val items=(0 until saved.length()).mapNotNull{saved.optJSONObject(it)}
+            .filter{it.optLong("start")>System.currentTimeMillis()}
+        if(items.isEmpty()){
+            Toast.makeText(this,"No scheduled programmes",Toast.LENGTH_SHORT).show()
+            return
+        }
+        showSideDialog(AlertDialog.Builder(this).setTitle("Scheduled programmes • Select to cancel")
+            .setItems(items.map{programmeTime(it.optLong("start"))+"  "+it.optString("title")}.toTypedArray()){_,position->
+                val key=items[position].optString("key")
+                val remaining=JSONArray()
+                for(i in 0 until saved.length()){
+                    val item=saved.optJSONObject(i) ?:continue
+                    if(item.optString("key")!=key)remaining.put(item)
+                }
+                prefs.edit().putString("epg_tune_schedules",remaining.toString()).apply()
+                armEpgTune()
+                Toast.makeText(this,"Programme reminder cancelled",Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Close",null).create())
+    }
     private data class EpgProgramme(val start:Long,val end:Long,val title:String,val description:String)
     @Volatile private var epgGuide:Map<String,List<EpgProgramme>> = emptyMap()
     @Volatile private var epgLoadedAt=0L
@@ -316,10 +387,18 @@ class MainActivity: Activity() {
                                 if(p.description.isNotBlank())"\n"+p.description.take(140) else ""
                         }
                         showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • Programme schedule")
-                            .setItems(lines.toTypedArray()){_,_->}
+                            .setItems(lines.toTypedArray()){_,selected->
+                                val programme=entries[selected]
+                                showSideDialog(AlertDialog.Builder(this)
+                                    .setTitle(programme.title)
+                                    .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\\n"+programme.description)
+                                    .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch at start"){_,_->scheduleEpgTune(c,programme)}
+                                    .setNegativeButton("Cancel",null).create())
+                            }
                             .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(i))}
                             .setNegativeButton("Close",null).create())
                     }
+                    .setNeutralButton("Scheduled"){_,_->showEpgSchedules()}
                     .setPositiveButton("EPG source"){_,_->configureEpg()}
                     .setNegativeButton("Close",null).create())
             }
@@ -430,6 +509,7 @@ class MainActivity: Activity() {
         root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(root)
         channels=cachedChannels()
+        checkEpgTune()
         // Start directly in the last channel; do not briefly display Home first.
         if(channels.isNotEmpty()){
             resumeLast()
