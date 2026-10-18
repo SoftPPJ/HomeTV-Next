@@ -963,6 +963,79 @@ class MainActivity: Activity() {
     }
     private var previewIndex=-1
     private var previewTask:Runnable?=null
+    private var previewVideoTask:Runnable?=null
+    private var previewPlayer:ExoPlayer?=null
+    private var previewPanel:FrameLayout?=null
+    private var previewGeneration=0
+    private fun closeVideoPreview(){
+        previewGeneration++
+        previewVideoTask?.let{handler.removeCallbacks(it)}
+        previewVideoTask=null
+        previewPlayer?.release()
+        previewPlayer=null
+        previewPanel?.let{panel->(panel.parent as? android.view.ViewGroup)?.removeView(panel)}
+        previewPanel=null
+    }
+    private fun showVideoPreview(index:Int){
+        closeVideoPreview()
+        if(!prefs.getBoolean("live_channel_preview",false))return
+        val screen=videoScreen ?:return
+        if(index !in channels.indices)return
+        val c=channels[preferredChannel(index)]
+        if(c.url.contains("youtube.com") || c.url.contains("youtu.be"))return
+        val width=(resources.displayMetrics.widthPixels*0.28f).toInt().coerceAtLeast(220)
+        val height=(width*9/16).coerceAtLeast(120)
+        val panel=FrameLayout(this).apply{
+            setBackgroundColor(android.graphics.Color.BLACK)
+            elevation=12f
+        }
+        previewPanel=panel
+        val params=FrameLayout.LayoutParams(width,height,Gravity.TOP or Gravity.RIGHT).apply{
+            topMargin=(resources.displayMetrics.density*52).toInt()
+            rightMargin=(resources.displayMetrics.density*18).toInt()
+        }
+        screen.addView(panel,params)
+        panel.addView(TextView(this).apply{
+            text="PREVIEW  •  "+c.name
+            textSize=13f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(8,8,8,8)
+        },FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
+        val generation=previewGeneration
+        val task=Runnable{
+            if(generation!=previewGeneration || previewIndex!=index || videoScreen!==screen)return@Runnable
+            try{
+                val factory=DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(4500).setReadTimeoutMs(6000)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setDefaultRequestProperties(c.headers)
+                val exo=ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+                    .build()
+                previewPlayer=exo
+                exo.volume=0f
+                val view=PlayerView(this).apply{
+                    player=exo
+                    useController=false
+                    resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+                panel.addView(view,0,FrameLayout.LayoutParams(-1,-1))
+                exo.setMediaItem(MediaItem.fromUri(c.url))
+                exo.prepare()
+                exo.play()
+                exo.addListener(object:Player.Listener{
+                    override fun onPlayerError(error:PlaybackException){
+                        if(previewPlayer===exo)closeVideoPreview()
+                    }
+                })
+            }catch(e:Exception){
+                android.util.Log.w("HomeTV","Preview unavailable",e)
+                closeVideoPreview()
+            }
+        }
+        previewVideoTask=task
+        handler.postDelayed(task,650L)
+    }
     private fun previewChannel(delta:Int){
         if(channels.isEmpty() || surfingIndices().isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
@@ -972,7 +1045,8 @@ class MainActivity: Activity() {
         val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
         previewIndex=next
         showChannelInfo(previewIndex)
-        val task=Runnable{previewIndex=-1}
+        showVideoPreview(previewIndex)
+        val task=Runnable{previewIndex=-1;closeVideoPreview()}
         previewTask=task
         handler.postDelayed(task,8000)
     }
@@ -1006,6 +1080,7 @@ class MainActivity: Activity() {
     private fun confirmPreview(){
         val target=previewIndex
         previewIndex=-1
+        closeVideoPreview()
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
         if(target in channels.indices)playIndex(preferredChannel(target)) else showBanner("Use ▲ / ▼ to change channels")
@@ -1775,6 +1850,10 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
+        root.addView(button("Live video on Up / Down preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF"){
+            prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply()
+            settings()
+        })
         root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
@@ -1846,7 +1925,7 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
                     KeyEvent.KEYCODE_DPAD_RIGHT->{selectAlternative(active);return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
-                    KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
+                    KeyEvent.KEYCODE_BACK->{if(previewIndex>=0){previewIndex=-1;closeVideoPreview();return true};onBackPressed();return true}
                 }
             }
         }
@@ -1872,6 +1951,7 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        closeVideoPreview()
         playbackGeneration++
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
