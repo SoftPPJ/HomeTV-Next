@@ -862,7 +862,7 @@ class MainActivity: Activity() {
         clockTask=null
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("clock_overlay")?.let{screen.removeView(it)}
-        if(!prefs.getBoolean("clock_enabled",false))return
+        if(!prefs.getBoolean("clock_enabled",false) || (!prefs.getBoolean("clock_show_date",true) && !prefs.getBoolean("clock_show_time",true)))return
         val clock=TextView(this).apply{
             tag="clock_overlay"
             setTextColor(android.graphics.Color.WHITE)
@@ -891,7 +891,11 @@ class MainActivity: Activity() {
             val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
             val date=java.text.SimpleDateFormat("dd MMM yy",java.util.Locale.ENGLISH).format(java.util.Date())
             val time=java.text.SimpleDateFormat(pattern,java.util.Locale.ENGLISH).format(java.util.Date())
-            clock.text=date+"  •  "+time
+            clock.text=when{
+                prefs.getBoolean("clock_show_date",true) && prefs.getBoolean("clock_show_time",true)->date+"  •  "+time
+                prefs.getBoolean("clock_show_date",true)->date
+                else->time
+            }
         }
         render()
         val task=object:Runnable{
@@ -919,7 +923,9 @@ class MainActivity: Activity() {
     }
     private fun clockSettings(){
         val choices=arrayOf(
-            "Show date and time: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
+            "Date & time overlay: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
+            "Show date: "+if(prefs.getBoolean("clock_show_date",true))"ON" else "OFF",
+            "Show time: "+if(prefs.getBoolean("clock_show_time",true))"ON" else "OFF",
             "Time format: "+if(prefs.getBoolean("clock_24h",true))"24-hour" else "12-hour",
             "Text size: "+prefs.getInt("clock_size",18)+" sp",
             "Position: "+(prefs.getString("clock_position","Top right") ?: "Top right")
@@ -928,15 +934,17 @@ class MainActivity: Activity() {
             .setItems(choices){_,which->
                 when(which){
                     0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",false)).apply();updateClock();clockSettings()}
-                    1->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
-                    2->{
+                    1->{prefs.edit().putBoolean("clock_show_date",!prefs.getBoolean("clock_show_date",true)).apply();updateClock();clockSettings()}
+                    2->{prefs.edit().putBoolean("clock_show_time",!prefs.getBoolean("clock_show_time",true)).apply();updateClock();clockSettings()}
+                    3->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
+                    4->{
                         val sizes=intArrayOf(12,14,16,18,20,24,28,32,36)
                         AlertDialog.Builder(this).setTitle("Clock text size")
                             .setSingleChoiceItems(sizes.map{ it.toString()+" sp" }.toTypedArray(),sizes.indexOf(prefs.getInt("clock_size",18)).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putInt("clock_size",sizes[i]).apply();dialog.dismiss();updateClock();clockSettings()
                             }.setNegativeButton("Cancel",null).show()
                     }
-                    3->{
+                    5->{
                         val positions=arrayOf("Top left","Top center","Top right","Bottom left","Bottom center","Bottom right")
                         AlertDialog.Builder(this).setTitle("Clock position")
                             .setSingleChoiceItems(positions,positions.indexOf(prefs.getString("clock_position","Top right")).coerceAtLeast(0)){dialog,i->
@@ -1220,7 +1228,7 @@ class MainActivity: Activity() {
         })
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,
-            arrayOf("⚙  Universal playback settings","◷  Live preview ON / OFF","⌂  Home screen","☰  Channel list","▶  Return to TV"))
+            arrayOf("⚙  Universal playback settings","◷  Live channel preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF","◷  Date & time overlay","⌂  Home screen","☰  Channel list","▶  Return to TV"))
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
@@ -1230,8 +1238,9 @@ class MainActivity: Activity() {
             when(choice){
                 0->liveSettings()
                 1->{prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply();showBanner("Live preview "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF")}
-                2->showHome()
-                3->showOverlayList()
+                2->clockSettings()
+                3->showHome()
+                4->showOverlayList()
             }
         }
         list.setOnKeyListener{_,code,event->
