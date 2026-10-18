@@ -890,20 +890,45 @@ class MainActivity: Activity() {
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             vlc.vlcVout.setVideoView(surface)
             vlc.vlcVout.attachViews()
+            var started=false
+            var failed=false
+            val watchdog=Runnable{
+                if(!started && !failed && active==index && vlcPlayer===vlc){
+                    failed=true
+                    android.util.Log.w("HomeTV","LibVLC startup timeout for "+c.name)
+                    showBanner(c.name+" did not start. Trying another stream.",true)
+                    val alternative=channels.indexOfFirst{
+                        it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)
+                    }
+                    if(alternative>=0){
+                        fallbackAttempted.add(c.url)
+                        playIndex(alternative)
+                    }else showBanner(c.name+" could not load. Check the stream URL or try Media3.",true)
+                }
+            }
             vlc.setEventListener{event->
-                if(event.type==VlcPlayer.Event.EncounteredError && active==index && vlcPlayer===vlc){
-                    handler.post{
-                        if(active==index && vlcPlayer===vlc){
-                            showBanner("LibVLC could not play "+c.name+". Trying another source.",true)
-                            val alternative=channels.indexOfFirst{it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)}
+                when(event.type){
+                    VlcPlayer.Event.Playing->{
+                        started=true
+                        handler.removeCallbacks(watchdog)
+                    }
+                    VlcPlayer.Event.EncounteredError->handler.post{
+                        if(active==index && vlcPlayer===vlc && !failed){
+                            failed=true
+                            handler.removeCallbacks(watchdog)
+                            val alternative=channels.indexOfFirst{
+                                it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)
+                            }
                             if(alternative>=0){
                                 fallbackAttempted.add(c.url)
+                                showBanner("Trying another stream for "+c.name)
                                 playIndex(alternative)
-                            }
+                            }else showBanner("Cannot play "+c.name+" with LibVLC. Try Media3 or update the stream URL.",true)
                         }
                     }
                 }
             }
+            handler.postDelayed(watchdog,15000)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
