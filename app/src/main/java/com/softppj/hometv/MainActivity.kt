@@ -171,11 +171,13 @@ class MainActivity: Activity() {
         root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(root)
         channels=cachedChannels()
-        showHome()
-        when(prefs.getString("launch_screen","Last channel")){
-            "Last channel"->if(channels.isNotEmpty())resumeLast() else refresh{resumeLast()}
-            "Channels"->if(channels.isNotEmpty())allChannels() else refresh{allChannels()}
-            else->showHome()
+        // Start directly in the last channel; do not briefly display Home first.
+        if(channels.isNotEmpty()){
+            resumeLast()
+        }else{
+            refresh{
+                if(channels.isNotEmpty())resumeLast() else showHome()
+            }
         }
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
@@ -807,9 +809,10 @@ class MainActivity: Activity() {
     }
     private fun switchChannel(delta:Int){if(channels.isNotEmpty())playIndex((active+delta+channels.size)%channels.size)}
     private fun resumeLast(){
-        val url=prefs.getString("last_url",null)?:return
+        if(channels.isEmpty()){showHome();return}
+        val url=prefs.getString("last_url",null)
         val index=channels.indexOfFirst{it.url==url}
-        if(index>=0)playIndex(index)
+        playIndex(if(index>=0)index else 0)
     }
     private fun settings(){
         reset("HomeTV Settings")
