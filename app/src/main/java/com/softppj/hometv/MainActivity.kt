@@ -220,11 +220,68 @@ class MainActivity: Activity() {
         root.addView(button("⚙  Player & TV settings"){settings()})
         root.addView(button("⏻  Exit HomeTV"){confirmExit()})
     }
+    private val importPlaylistRequest=7291
+    private fun importLocalPlaylist(){
+        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply{
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type="*/*"
+        }
+        try{startActivityForResult(intent,importPlaylistRequest)}
+        catch(e:Exception){Toast.makeText(this,"No file picker available on this TV",Toast.LENGTH_LONG).show()}
+    }
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode!=importPlaylistRequest || resultCode!=RESULT_OK)return
+        val uri=data?.data ?:return
+        thread{
+            try{
+                val body=contentResolver.openInputStream(uri)?.bufferedReader()?.use{it.readText()}
+                    ?:throw IllegalArgumentException("Cannot read selected file")
+                if(parseM3u(body,"Imported playlist").isEmpty())throw IllegalArgumentException("No valid M3U channels found")
+                val file=java.io.File(filesDir,"import_"+System.currentTimeMillis()+".m3u")
+                file.writeText(body)
+                val displayName=uri.lastPathSegment?.substringAfterLast('/')?.take(40) ?: "Imported M3U"
+                val list=playlists()
+                list.add(Playlist(displayName,file.toURI().toString()))
+                savePlaylists(list)
+                runOnUiThread{refresh({managePlaylists()},true)}
+            }catch(e:Exception){
+                runOnUiThread{Toast.makeText(this,"Import failed: "+e.message,Toast.LENGTH_LONG).show()}
+            }
+        }
+    }
+    private fun addXtream(){
+        val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(18,12,18,8)}
+        val name=EditText(this).apply{hint="Playlist name";setSingleLine()}
+        val server=EditText(this).apply{hint="Server URL (https://host:port)";setSingleLine()}
+        val user=EditText(this).apply{hint="Username";setSingleLine()}
+        val password=EditText(this).apply{
+            hint="Password";setSingleLine()
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        listOf(name,server,user,password).forEach{layout.addView(it)}
+        AlertDialog.Builder(this).setTitle("Xtream Codes — Live TV").setView(layout)
+            .setPositiveButton("Add"){_,_->
+                val n=name.text.toString().trim()
+                val host=server.text.toString().trim().trimEnd('/')
+                val u=user.text.toString().trim()
+                val pass=password.text.toString()
+                if(n.isBlank() || !(host.startsWith("https://") || host.startsWith("http://")) || u.isBlank() || pass.isBlank()){
+                    Toast.makeText(this,"Enter server, username and password",Toast.LENGTH_LONG).show()
+                }else{
+                    val url=host+"/get.php?username="+Uri.encode(u)+"&password="+Uri.encode(pass)+"&type=m3u_plus&output=ts"
+                    val list=playlists()
+                    list.add(Playlist(n,url))
+                    savePlaylists(list)
+                    refresh({managePlaylists()},true)
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun managePlaylists(){
         reset("Playlists")
         val list=playlists()
         list.forEachIndexed { index,p ->
-            root.addView(button((if(p.enabled)"✓ " else "○ ")+p.name+" — "+p.url.take(40)){
+            root.addView(button((if(p.enabled)"✓ " else "○ ")+p.name+" — "+(if(p.url.contains("/get.php?"))"Xtream Codes" else if(p.url.startsWith("file:"))"Local M3U" else p.url.take(40))){
                 val opts=arrayOf("Enable / Disable","Edit","Delete")
                 AlertDialog.Builder(this).setTitle(p.name).setItems(opts){_,which->
                     when(which){
@@ -235,7 +292,9 @@ class MainActivity: Activity() {
                 }.show()
             })
         }
-        root.addView(button("Add M3U playlist"){editPlaylist(null)})
+        root.addView(button("Add M3U URL"){editPlaylist(null)})
+        root.addView(button("Import M3U file (TV / USB)"){importLocalPlaylist()})
+        root.addView(button("Add Xtream Codes"){addXtream()})
         root.addView(button("Back"){showHome()})
     }
     private fun editPlaylist(index:Int?){
