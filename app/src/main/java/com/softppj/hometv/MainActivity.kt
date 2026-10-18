@@ -64,6 +64,7 @@ class MainActivity: Activity() {
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Settings"){settings()})
         root.addView(button("Resume last channel"){resumeLast()})
+        root.addView(button("Exit HomeTV"){confirmExit()})
     }
     private fun managePlaylists(){
         reset("Playlists")
@@ -237,6 +238,47 @@ class MainActivity: Activity() {
             handler.postDelayed(task,2500)
         }
     }
+    private fun confirmExit(){
+        AlertDialog.Builder(this).setTitle("Exit HomeTV?")
+            .setMessage("Stop playback and close the app?")
+            .setPositiveButton("Exit"){_,_->stopPlayback();finishAffinity()}
+            .setNegativeButton("Cancel",null).show()
+    }
+    private fun showChannelOptions(){
+        if(active !in channels.indices)return
+        val channel=channels[active]
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV")
+        AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
+            .setItems(options){_,index->
+                when(index){
+                    0->showOverlayList()
+                    1->switchChannel(-1)
+                    2->switchChannel(1)
+                    3->toggleScreenMode()
+                    4->toggleLock(id(channel),false)
+                    5->settings()
+                    6->confirmExit()
+                }
+            }.setNegativeButton("Close",null).show()
+    }
+    private fun sideAction(side:String){
+        when(prefs.getString("side_"+side,if(side=="left")"Channel list" else "Channel settings")){
+            "Channel list"->showOverlayList()
+            "Channel settings"->showChannelOptions()
+            "Previous channel"->switchChannel(-1)
+            "Next channel"->switchChannel(1)
+            "Fit / Fill"->toggleScreenMode()
+        }
+    }
+    private fun chooseSideAction(side:String){
+        val actions=arrayOf("Channel list","Channel settings","Previous channel","Next channel","Fit / Fill","Do nothing")
+        val current=prefs.getString("side_"+side,if(side=="left")"Channel list" else "Channel settings")
+        AlertDialog.Builder(this).setTitle("Remote "+side+" button")
+            .setSingleChoiceItems(actions,actions.indexOf(current)){dialog,index->
+                prefs.edit().putString("side_"+side,actions[index]).apply()
+                dialog.dismiss();settings()
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun showOverlayList(){
         if(channels.isEmpty())return
         val labels=channels.mapIndexed{i,c->"${i+1}. ${c.name}  •  ${c.group}"}.toTypedArray()
@@ -345,8 +387,10 @@ class MainActivity: Activity() {
     override fun onKeyDown(keyCode:Int,event:KeyEvent?):Boolean{
         if(active>=0){
             when(keyCode){
-                KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,KeyEvent.KEYCODE_MEDIA_REWIND,KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
-                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
+                KeyEvent.KEYCODE_DPAD_LEFT->{sideAction("left");return true}
+                KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,KeyEvent.KEYCODE_MEDIA_REWIND,KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
+                KeyEvent.KEYCODE_DPAD_RIGHT->{sideAction("right");return true}
+                KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                 KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{showOverlayList();return true}
                 KeyEvent.KEYCODE_MENU->{toggleScreenMode();return true}
                 KeyEvent.KEYCODE_BACK->{showChannels();return true}
@@ -354,7 +398,7 @@ class MainActivity: Activity() {
         }
         return super.onKeyDown(keyCode,event)
     }
-    override fun onBackPressed(){unlockedChannel=null;showChannels()}
+    override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else confirmExit()}
     private fun stopPlayback(){
         bannerTask?.let{handler.removeCallbacks(it)}
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
