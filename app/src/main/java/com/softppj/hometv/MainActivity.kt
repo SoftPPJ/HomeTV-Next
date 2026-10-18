@@ -186,6 +186,78 @@ class MainActivity: Activity() {
         }
         channelCollection("All channels",visibleIndices())
     }
+    private fun configureEpg(){
+        val input=EditText(this).apply{
+            hint="XMLTV guide URL"
+            setSingleLine()
+            setText(prefs.getString("epg_xmltv_url",""))
+        }
+        showSideDialog(AlertDialog.Builder(this).setTitle("EPG source")
+            .setMessage("Enter an XMLTV guide URL (.xml or .xml.gz).")
+            .setView(input).setPositiveButton("Save"){_,_->
+                prefs.edit().putString("epg_xmltv_url",input.text.toString().trim()).apply()
+                showEpg()
+            }.setNegativeButton("Cancel",null).create())
+    }
+    private fun showEpg(){
+        val url=prefs.getString("epg_xmltv_url","")?.trim().orEmpty()
+        if(url.isEmpty()){configureEpg();return}
+        Toast.makeText(this,"Loading EPG…",Toast.LENGTH_SHORT).show()
+        thread{
+            try{
+                val connection=URL(url).openConnection().apply{
+                    connectTimeout=8000
+                    readTimeout=12000
+                }
+                val stream=connection.getInputStream()
+                val data=if(url.substringBefore("?").endsWith(".gz",true))
+                    java.util.zip.GZIPInputStream(stream) else stream
+                val guide=mutableMapOf<String,MutableList<String>>()
+                val parser=android.util.Xml.newPullParser()
+                parser.setInput(data,"UTF-8")
+                var channel="";var title=""
+                data.use{
+                    var event=parser.eventType
+                    while(event!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT){
+                        if(event==org.xmlpull.v1.XmlPullParser.START_TAG){
+                            when(parser.name){
+                                "programme"->{channel=parser.getAttributeValue(null,"channel")?.lowercase().orEmpty();title=""}
+                                "title"->if(channel.isNotEmpty())title=parser.nextText()
+                            }
+                        }else if(event==org.xmlpull.v1.XmlPullParser.END_TAG && parser.name=="programme"){
+                            if(channel.isNotEmpty() && title.isNotBlank()){
+                                val entries=guide.getOrPut(channel){mutableListOf()}
+                                if(entries.size<10)entries.add(title)
+                            }
+                            channel=""
+                        }
+                        event=parser.next()
+                    }
+                }
+                runOnUiThread{
+                    val c=channels.getOrNull(active)
+                    val entries=if(c!=null){
+                        val shows=guide[c.epgId.lowercase()] ?:guide[c.name.lowercase()]
+                        listOf(c.name)+(shows ?:listOf("No matching EPG programmes"))
+                    }else visibleIndices().mapNotNull{i->
+                        val ch=channels[i]
+                        (guide[ch.epgId.lowercase()] ?:guide[ch.name.lowercase()])?.firstOrNull()?.let{ch.name+" • "+it}
+                    }.take(100)
+                    showSideDialog(AlertDialog.Builder(this).setTitle("TV Guide (EPG)")
+                        .setItems(entries.toTypedArray()){_,_->}
+                        .setPositiveButton("EPG URL"){_,_->configureEpg()}
+                        .setNegativeButton("Close",null).create())
+                }
+            }catch(e:Exception){
+                runOnUiThread{
+                    showSideDialog(AlertDialog.Builder(this).setTitle("EPG unavailable")
+                        .setMessage(e.message ?: "Unable to load guide")
+                        .setPositiveButton("Change URL"){_,_->configureEpg()}
+                        .setNegativeButton("Close",null).create())
+                }
+            }
+        }
+    }
     private fun hiddenChannels(){channelCollection("Hidden channels",visibleIndices().filter{isSkipped(channels[it])})}
     private fun favorites(){channelCollection("Favorites",visibleIndices().filter{i->channels.any{sameChannel(it,channels[i]) && favoriteIds.contains(id(it))}})}
     private fun channelCollection(title:String,indices:List<Int>){
