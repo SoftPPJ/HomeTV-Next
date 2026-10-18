@@ -1135,24 +1135,41 @@ class MainActivity: Activity() {
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
         setContentView(screen)
-        val videoId=Regex("""(?:youtube\.com/(?:live/|watch\?v=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})""").find(c.url)?.groupValues?.get(1)
-        if(videoId!=null){
-            // YouTube error 152/153: WebView iframe playback may be refused.
-            // Use the official YouTube app instead of a synthetic embedded page.
-            val youtubeUri=Uri.parse("https://www.youtube.com/watch?v="+videoId)
-            val youtubeApp=Intent(Intent.ACTION_VIEW,youtubeUri).apply{
-                setPackage("com.google.android.youtube.tv")
+        val youtubeUri=try{
+            val uri=Uri.parse(c.url)
+            val host=uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.")
+            if(host=="youtube.com" || host=="youtube-nocookie.com" || host=="youtu.be"){
+                val path=uri.path ?: ""
+                val id=if(host=="youtu.be")path.trim('/').substringBefore('/')
+                    else when{
+                        path=="/watch"->uri.getQueryParameter("v")
+                        path.startsWith("/live/") || path.startsWith("/embed/") || path.startsWith("/shorts/")->path.trim('/').substringAfter('/').substringBefore('/')
+                        else->null
+                    }
+                if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))Uri.parse("https://www.youtube.com/watch?v="+id)
+                else if(path.startsWith("/channel/") || path.startsWith("/@") || path.startsWith("/playlist"))uri
+                else null
+            }else null
+        }catch(_:Exception){null}
+        if(youtubeUri!=null){
+            val packages=listOf("com.google.android.youtube.tv","com.google.android.youtube")
+            var opened=false
+            for(pkg in packages){
+                try{
+                    startActivity(Intent(Intent.ACTION_VIEW,youtubeUri).apply{setPackage(pkg)})
+                    opened=true
+                    break
+                }catch(_:android.content.ActivityNotFoundException){}
+                catch(_:SecurityException){}
             }
-            val opened=try{
-                startActivity(youtubeApp)
-                true
-            }catch(_:android.content.ActivityNotFoundException){
+            if(!opened){
                 try{
                     startActivity(Intent(Intent.ACTION_VIEW,youtubeUri))
-                    true
-                }catch(_:android.content.ActivityNotFoundException){false}
+                    opened=true
+                }catch(_:Exception){}
             }
-            if(!opened)Toast.makeText(this,"Install YouTube or a browser to play this channel",Toast.LENGTH_LONG).show()
+            if(!opened)Toast.makeText(this,"YouTube app or compatible browser required",Toast.LENGTH_LONG).show()
+            // Leave HomeTV in its normal channel browser when returning from YouTube.
             showHome()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
