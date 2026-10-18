@@ -226,8 +226,89 @@ class MainActivity: Activity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type="*/*"
         }
+        if(intent.resolveActivity(packageManager)==null){showImportFallback();return}
         try{startActivityForResult(intent,importPlaylistRequest)}
-        catch(e:Exception){Toast.makeText(this,"No file picker available on this TV",Toast.LENGTH_LONG).show()}
+        catch(e:Exception){showImportFallback()}
+    }
+    private fun showImportFallback(){
+        AlertDialog.Builder(this).setTitle("Import M3U playlist")
+            .setItems(arrayOf("Browse accessible storage","Paste M3U playlist text","Enter playlist URL")){_,choice->
+                when(choice){
+                    0->browsePlaylistFiles(null)
+                    1->pasteM3uPlaylist()
+                    2->editPlaylist(null)
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun pasteM3uPlaylist(){
+        val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(16,8,16,8)}
+        val name=EditText(this).apply{hint="Playlist name";setSingleLine()}
+        val content=EditText(this).apply{
+            hint="#EXTM3U followed by channel entries"
+            minLines=5
+            maxLines=10
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        layout.addView(name);layout.addView(content)
+        AlertDialog.Builder(this).setTitle("Paste M3U").setView(layout)
+            .setPositiveButton("Import"){_,_->
+                val body=content.text.toString()
+                val title=name.text.toString().trim().ifBlank{"Imported playlist"}
+                saveImportedM3u(body,title)
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun saveImportedM3u(body:String,title:String){
+        if(parseM3u(body,title).isEmpty()){
+            Toast.makeText(this,"No valid M3U channels found",Toast.LENGTH_LONG).show()
+            return
+        }
+        try{
+            val file=java.io.File(filesDir,"import_"+System.currentTimeMillis()+".m3u")
+            file.writeText(body)
+            val list=playlists()
+            list.add(Playlist(title,file.toURI().toString()))
+            savePlaylists(list)
+            refresh({managePlaylists()},true)
+        }catch(e:Exception){
+            Toast.makeText(this,"Import failed: "+e.message,Toast.LENGTH_LONG).show()
+        }
+    }
+    private fun browsePlaylistFiles(directory:java.io.File?){
+        val roots=if(directory==null){
+            val dirs=mutableListOf(java.io.File("/storage"),java.io.File("/sdcard"),java.io.File("/mnt/media_rw"))
+            getExternalFilesDirs(null).filterNotNull().forEach{dirs.add(it)}
+            dirs.distinctBy{it.absolutePath}.filter{it.exists() && it.isDirectory}
+        }else emptyList()
+        val children=if(directory!=null)directory.listFiles()?.filter{
+            it.isDirectory || (it.isFile && (it.name.endsWith(".m3u",true) || it.name.endsWith(".m3u8",true)))
+        }?.sortedWith(compareBy<java.io.File>{!it.isDirectory}.thenBy{it.name.lowercase()}) ?: emptyList()
+        else roots
+        val entries=mutableListOf<Pair<String,java.io.File?>>()
+        if(directory!=null)entries.add("← Back" to directory.parentFile?.takeIf{it.absolutePath!="/"})
+        children.forEach{entries.add((if(it.isDirectory)"📁 " else "▶ ")+it.name to it)}
+        if(entries.isEmpty()){
+            AlertDialog.Builder(this).setTitle("No accessible files")
+                .setMessage("Android TV may restrict USB and storage access. You can paste an M3U playlist or add its URL instead.")
+                .setPositiveButton("Paste M3U"){_,_->pasteM3uPlaylist()}
+                .setNeutralButton("Playlist URL"){_,_->editPlaylist(null)}
+                .setNegativeButton("Close",null).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle(directory?.absolutePath ?: "Browse storage")
+            .setItems(entries.map{it.first}.toTypedArray()){_,which->
+                val selected=entries[which].second
+                if(selected==null)browsePlaylistFiles(null)
+                else if(selected.isDirectory)browsePlaylistFiles(selected)
+                else thread{
+                    try{
+                        val body=selected.readText()
+                        runOnUiThread{saveImportedM3u(body,selected.name)}
+                    }catch(e:Exception){runOnUiThread{
+                        Toast.makeText(this,"Cannot read file: "+e.message,Toast.LENGTH_LONG).show()
+                    }}
+                }
+            }.setNeutralButton("Paste M3U"){_,_->pasteM3uPlaylist()}
+            .setNegativeButton("Close",null).show()
     }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
         super.onActivityResult(requestCode,resultCode,data)
@@ -293,7 +374,7 @@ class MainActivity: Activity() {
             })
         }
         root.addView(button("Add M3U URL"){editPlaylist(null)})
-        root.addView(button("Import M3U file (TV / USB)"){importLocalPlaylist()})
+        root.addView(button("Import M3U file (TV / USB)"){showImportFallback()})
         root.addView(button("Add Xtream Codes"){addXtream()})
         root.addView(button("Back"){showHome()})
     }
