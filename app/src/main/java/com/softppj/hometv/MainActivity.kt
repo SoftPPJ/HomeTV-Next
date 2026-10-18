@@ -27,7 +27,7 @@ class MainActivity: Activity() {
     private lateinit var root:LinearLayout
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
     private val lockGroups get() = prefs.getStringSet("locked_groups", emptySet()) ?: emptySet()
-    private var unlocked=false
+    private var unlockedChannel:String?=null
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -168,11 +168,12 @@ class MainActivity: Activity() {
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
-        if(!unlocked && (lockIds.contains(id(c)) || lockGroups.contains(c.group))){
-            requirePin {unlocked=true;playIndex(index)}
+        if(unlockedChannel!=id(c) && (lockIds.contains(id(c)) || lockGroups.contains(c.group))){
+            requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
         active=index
+        if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
         stopPlayback();root.removeAllViews()
         val videoId=Regex("(?:youtube\\.com/(?:live/|watch\\?v=|embed/)|youtu\\.be/)([A-Za-z0-9_-]{11})").find(c.url)?.groupValues?.get(1)
@@ -230,7 +231,7 @@ class MainActivity: Activity() {
         if(active>=0 && (keyCode==KeyEvent.KEYCODE_DPAD_RIGHT || keyCode==KeyEvent.KEYCODE_CHANNEL_UP)){switchChannel(1);return true}
         return super.onKeyDown(keyCode,event)
     }
-    override fun onBackPressed(){active=-1;unlocked=false;showChannels()}
+    override fun onBackPressed(){active=-1;unlockedChannel=null;showChannels()}
     private fun stopPlayback(){player?.release();player=null;web?.destroy();web=null;active=-1}
     override fun onDestroy(){stopPlayback();super.onDestroy()}
 }
