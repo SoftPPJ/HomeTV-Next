@@ -606,8 +606,8 @@ class MainActivity: Activity() {
         return prefs.getString("screen_mode","Fit") ?: "Fit"
     }
     private fun resizeMode():Int=when(screenMode()){
-        "Fit"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-        "Stretch","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+        "Fit","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        "Stretch"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
         "Original"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
         else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     }
@@ -615,9 +615,35 @@ class MainActivity: Activity() {
         val mode=screenMode()
         currentPlayerView?.let{view->
             view.resizeMode=resizeMode()
-            val zoom=when(mode){"Zoom 110%"->1.1f;"Zoom 125%"->1.25f;"Zoom 150%"->1.5f;else->1f}
-            view.scaleX=zoom
-            view.scaleY=zoom
+            // Zoom the video surface, not the entire player view and its controls.
+            val zoom=when(mode){
+                "Zoom 110%"->1.1f
+                "Zoom 125%"->1.25f
+                "Zoom 150%"->1.5f
+                else->1f
+            }
+            val surface=view.videoSurfaceView
+            if(surface!=null){
+                surface.scaleX=zoom
+                surface.scaleY=zoom
+            }
+            val ratio=when(mode){
+                "16:9"->16f/9f
+                "4:3"->4f/3f
+                else->0f
+            }
+            if(ratio>0f){
+                // Respect selected aspect ratio independently of stream metadata.
+                val frame=view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
+                frame?.setAspectRatio(ratio)
+            }else{
+                val frame=view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
+                if(frame!=null){
+                    val format=player?.videoFormat
+                    val videoRatio=if(format!=null && format.height>0)format.width.toFloat()*format.pixelWidthHeightRatio/format.height else 0f
+                    frame.setAspectRatio(videoRatio)
+                }
+            }
         }
         vlcPlayer?.let{vlc->
             try{
