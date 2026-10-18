@@ -65,7 +65,7 @@ class MainActivity: Activity() {
     private fun allChannels(){
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
-            if(playlists().any{it.enabled})refresh{channelCollection("All channels",channels.indices.toList())}
+            if(playlists().any{it.enabled})refresh({channelCollection("All channels",channels.indices.toList())})
             return
         }
         channelCollection("All channels",channels.indices.toList())
@@ -175,9 +175,9 @@ class MainActivity: Activity() {
         if(channels.isNotEmpty()){
             resumeLast()
         }else{
-            refresh{
+            refresh({
                 if(channels.isNotEmpty())resumeLast() else showHome()
-            }
+            })
         }
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
@@ -209,7 +209,7 @@ class MainActivity: Activity() {
     private fun showHome() {
         reset("HomeTV  •  LIVE")
         root.addView(label("YOUR TELEVISION  |  "+channels.size+" CHANNELS"))
-        root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh{resumeLast()}else resumeLast()})
+        root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()})
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
         root.addView(button("★  My favorites"){favorites()})
@@ -251,7 +251,7 @@ class MainActivity: Activity() {
                 if(index==null)list.add(p) else list[index]=p
                 savePlaylists(list)
                 Toast.makeText(this,"Downloading and saving playlist…",Toast.LENGTH_SHORT).show()
-                refresh{managePlaylists()}
+                refresh({managePlaylists()})
             } else Toast.makeText(this,"Enter name and HTTP(S) URL",Toast.LENGTH_LONG).show()
         }.setNegativeButton("Cancel",null).show()
     }
