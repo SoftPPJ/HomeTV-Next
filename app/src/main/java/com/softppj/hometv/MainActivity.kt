@@ -45,6 +45,35 @@ class MainActivity: Activity() {
     private var previousChannelUrl:String?=null
     private var alternativeAttempted=mutableSetOf<String>()
     private var alternativeSessionKey:String?=null
+    private var playbackGeneration=0
+    private var startupWatchdog:Runnable?=null
+    private var channelIndexOwner:MutableList<Channel>?=null
+    private var channelIndexSize=-1
+    private var channelRepresentatives=emptyList<Int>()
+    private var channelByKey=emptyMap<String,List<Int>>()
+    private var channelPosition=emptyMap<String,Int>()
+    private fun channelKey(c:Channel)=c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
+    private fun ensureChannelIndex(){
+        if(channelIndexOwner===channels && channelIndexSize==channels.size)return
+        val groups=linkedMapOf<String,MutableList<Int>>()
+        channels.forEachIndexed{i,c->groups.getOrPut(channelKey(c)){mutableListOf()}.add(i)}
+        channelByKey=groups
+        channelRepresentatives=groups.values.map{it.first()}
+        channelPosition=groups.keys.withIndex().associate{it.value to it.index+1}
+        channelIndexOwner=channels
+        channelIndexSize=channels.size
+    }
+    private fun preferredChannel(index:Int):Int{
+        val c=channels.getOrNull(index) ?:return index
+        ensureChannelIndex()
+        val group=channelByKey[channelKey(c)] ?:return index
+        val saved=prefs.getString("working_url_"+channelKey(c),null)
+        return group.firstOrNull{channels[it].url==saved} ?:group.first()
+    }
+    private fun rememberWorking(c:Channel){
+        if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
+            prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
+    }
     private var youtubeUnmuteTask:Runnable?=null
     private lateinit var root:LinearLayout
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
@@ -68,12 +97,15 @@ class MainActivity: Activity() {
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
-    private fun isSkipped(c:Channel)=channels.any{sameChannel(it,c) && skippedIds.contains(id(it))}
+    private fun isSkipped(c:Channel):Boolean{
+        ensureChannelIndex()
+        return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
+    }
     private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it])}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
-        channels.filter{sameChannel(it,c)}.forEach{if(skipped)values.add(id(it)) else values.remove(id(it))}
+        alternateIndices(channels.indexOf(c)).forEach{val entry=channels[it];if(skipped)values.add(id(entry)) else values.remove(id(entry))}
         prefs.edit().putStringSet("skip_channel_surfing",values).apply()
         Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
     }
@@ -90,10 +122,11 @@ class MainActivity: Activity() {
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
     }
-    private fun sameChannel(a:Channel,b:Channel)=a.name.trim().equals(b.name.trim(),true) && a.group.trim().equals(b.group.trim(),true)
+    private fun sameChannel(a:Channel,b:Channel)=channelKey(a)==channelKey(b)
     private fun alternateIndices(index:Int):List<Int>{
         val channel=channels.getOrNull(index) ?:return emptyList()
-        return channels.indices.filter{sameChannel(channels[it],channel)}.distinctBy{channels[it].url}
+        ensureChannelIndex()
+        return (channelByKey[channelKey(channel)] ?:emptyList()).distinctBy{channels[it].url}
     }
     private fun switchAlternative(){
         if(active !in channels.indices)return
@@ -132,9 +165,13 @@ class MainActivity: Activity() {
         handler.post{if(active==index)playIndex(next)}
         return true
     }
-    private fun isLocked(c:Channel)=lockGroups.contains(c.group) || channels.any{sameChannel(it,c) && lockIds.contains(id(it))}
-    private fun channelNumbers()=channels.indices.filter{i->channels.indices.none{j->j<i && sameChannel(channels[j],channels[i])}}
-    private fun numberFor(index:Int)=channelNumbers().indexOfFirst{sameChannel(channels[it],channels[index])}+1
+    private fun isLocked(c:Channel):Boolean{
+        if(lockGroups.contains(c.group))return true
+        ensureChannelIndex()
+        return (channelByKey[channelKey(c)] ?:emptyList()).any{lockIds.contains(id(channels[it]))}
+    }
+    private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
+    private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
     private fun visibleIndices()=channelNumbers()
     private fun channelLabel(index:Int):String{
         val c=channels[index]
@@ -180,7 +217,7 @@ class MainActivity: Activity() {
                 return view
             }
         }
-        list.setOnItemClickListener{_,_,position,_->playIndex(indices[position])}
+        list.setOnItemClickListener{_,_,position,_->playIndex(preferredChannel(indices[position]))}
         list.setOnItemLongClickListener{_,_,position,_->channelOptions(indices[position]);true}
         if(title=="All channels"){
             val last=prefs.getString("last_url",null)
@@ -230,7 +267,7 @@ class MainActivity: Activity() {
         val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)","Alternative stream / URL")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
-                0->playIndex(i)
+                0->playIndex(preferredChannel(i))
                 1->{favorite(c);if(active<0)allChannels()}
                 2->toggleLock(id(c),false)
                 3->{toggleChannelSkip(c);if(active<0)allChannels()}
@@ -661,7 +698,7 @@ class MainActivity: Activity() {
         root.addView(button("Lock group"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         visibleIndices().forEach { i->val c=channels[i];if(c.group==group){
-            list.addView(button(channelLabel(i)){playIndex(i)})
+            list.addView(button(channelLabel(i)){playIndex(preferredChannel(i))})
             list.addView(button("⋮ Options"){channelOptions(i)})
             list.addView(button("Lock channel"){toggleLock(id(c),false)})
         }}
@@ -921,7 +958,7 @@ class MainActivity: Activity() {
         val number=channelDigits.toIntOrNull()
         channelDigits=""
         if(number==null)return
-        if(number in 1..channelNumbers().size)playIndex(channelNumbers()[number-1])
+        if(number in 1..channelNumbers().size)playIndex(preferredChannel(channelNumbers()[number-1]))
         else showBanner("Channel "+number+" is not available",true)
     }
     private var previewIndex=-1
@@ -971,9 +1008,11 @@ class MainActivity: Activity() {
         previewIndex=-1
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
-        if(target in channels.indices)playIndex(target) else showBanner("Use ▲ / ▼ to preview channels")
+        if(target in channels.indices)playIndex(preferredChannel(target)) else showBanner("Use ▲ / ▼ to change channels")
     }
-    private val logoCache=android.util.LruCache<String,android.graphics.Bitmap>(80)
+    private val logoCache=object:android.util.LruCache<String,android.graphics.Bitmap>(6*1024*1024){
+        override fun sizeOf(key:String,value:android.graphics.Bitmap)=value.byteCount
+    }
     private val logoLoading=mutableSetOf<String>()
     private val logoWaiting=mutableMapOf<String,MutableList<ImageView>>()
     private fun logoView(channel:Channel,size:Int=52):ImageView{
@@ -1065,7 +1104,7 @@ class MainActivity: Activity() {
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
-        list.setOnItemClickListener{_,_,position,_->close();playIndex(available[position])}
+        list.setOnItemClickListener{_,_,position,_->close();playIndex(preferredChannel(available[position]))}
         list.setOnItemLongClickListener{_,_,position,_->close();channelOptions(available[position]);true}
         list.setOnKeyListener{_,code,event->
             if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){
@@ -1347,8 +1386,11 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        playbackGeneration++
+        startupWatchdog?.let{handler.removeCallbacks(it)}
+        startupWatchdog=null
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
-        val sessionKey=c.name.trim().lowercase()+"|"+c.group.trim().lowercase()
+        val sessionKey=channelKey(c)
         if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey}
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
@@ -1476,8 +1518,8 @@ class MainActivity: Activity() {
         }else{
             val factory=DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(20000)
+                .setConnectTimeoutMs(6500)
+                .setReadTimeoutMs(8500)
                 .setUserAgent(c.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
                 .setDefaultRequestProperties(c.headers.filterKeys{!it.equals("User-Agent",true)})
             val buffer=bufferValues()
@@ -1501,6 +1543,9 @@ class MainActivity: Activity() {
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_READY){
                         retryCount=0
+                        rememberWorking(c)
+                        startupWatchdog?.let{handler.removeCallbacks(it)}
+                        startupWatchdog=null
                         applyVideoSize()
                         scheduleQualityUpgrade()
                         retryTask?.let{handler.removeCallbacks(it)}
@@ -1510,6 +1555,7 @@ class MainActivity: Activity() {
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
+                    if(tryNextAlternative(index))return
                     if(engineFor(c)=="Auto" && !vlcAttempted){
                         vlcAttempted=true
                         handler.post{
@@ -1523,9 +1569,7 @@ class MainActivity: Activity() {
                         }
                         return
                     }
-                    if(tryNextAlternative(index)){
-                        // Move to the next URL for the same channel before retrying.
-                    }else if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
+                    if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
                         retryCount++
                         showBanner("Reconnecting "+c.name)
                         val task=Runnable{if(active==index)playIndex(index)}
@@ -1546,7 +1590,8 @@ class MainActivity: Activity() {
     }
     private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
         if(active!=index || videoScreen!==screen)return
-        if(prefs.getBoolean("auto_reconnect",true) && retryCount<3){
+        if(tryNextAlternative(index))return
+        if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
             retryCount++
             showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/3)")
             val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
@@ -1603,6 +1648,7 @@ class MainActivity: Activity() {
                 when(event.type){
                     VlcPlayer.Event.Playing->{
                         started=true
+                        rememberWorking(c)
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
                     }
@@ -1624,7 +1670,7 @@ class MainActivity: Activity() {
                     }
                 }
             }
-            handler.postDelayed(watchdog,15000)
+            handler.postDelayed(watchdog,9000)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
@@ -1643,15 +1689,15 @@ class MainActivity: Activity() {
         if(available.isEmpty())return
         val anchor=channels.getOrNull(active)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
         val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
-        playIndex(next)
+        playIndex(preferredChannel(next))
     }
     private fun resumeLast(){
         if(channels.isEmpty()){showHome();return}
         val url=prefs.getString("last_url",null)
         val index=channels.indexOfFirst{it.url==url}
-        val available=visibleIndices()
+        val available=surfingIndices()
         if(index>=0 && !isLocked(channels[index]))playIndex(index)
-        else if(available.any{!isLocked(channels[it])})playIndex(available.first{!isLocked(channels[it])})
+        else if(available.isNotEmpty())playIndex(preferredChannel(available.first()))
         else allChannels()
     }
     private fun liveSettings(){
@@ -1772,8 +1818,8 @@ class MainActivity: Activity() {
             if(!drawerOpen){
                 when(event.keyCode){
                     KeyEvent.KEYCODE_LAST_CHANNEL->{returnToPreviousChannel();return true}
-                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
-                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(-1);return true}
+                    KeyEvent.KEYCODE_DPAD_UP->{switchChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN->{switchChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
                     KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
@@ -1781,7 +1827,7 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
-                    KeyEvent.KEYCODE_DPAD_RIGHT->{switchAlternative();return true}
+                    KeyEvent.KEYCODE_DPAD_RIGHT->{selectAlternative(active);return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
                     KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
                 }
@@ -1809,6 +1855,9 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        playbackGeneration++
+        startupWatchdog?.let{handler.removeCallbacks(it)}
+        startupWatchdog=null
         previewIndex=-1
         youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
         youtubeUnmuteTask=null
