@@ -80,15 +80,37 @@ class MainActivity: Activity() {
     private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
     private fun channelCollection(title:String,indices:List<Int>){
         reset(title+" ("+indices.size+")")
-        val scroll=ScrollView(this)
-        val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        indices.forEach{i->
-            val c=channels[i]
-            list.addView(button((if(favoriteIds.contains(id(c)))"★ " else "☆ ")+c.name+" · "+c.group){playIndex(i)})
-            list.addView(button("⋮ Channel options"){channelOptions(i)})
+        val list=ListView(this).apply{
+            dividerHeight=1
+            isFocusable=true
+            isFocusableInTouchMode=true
+            setBackgroundColor(0xFF101E31.toInt())
         }
-        scroll.addView(list)
-        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        val names=indices.map{i->
+            val c=channels[i]
+            (if(favoriteIds.contains(id(c)))"★ " else "")+c.name+"  ·  "+c.group
+        }
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=names.size
+            override fun getItem(position:Int):Any=names[position]
+            override fun getItemId(position:Int)=indices[position].toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val view=(convertView as? TextView) ?: TextView(this@MainActivity).apply{
+                    textSize=18f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(22,17,18,17)
+                    minHeight=62
+                    isSingleLine=true
+                    ellipsize=android.text.TextUtils.TruncateAt.END
+                }
+                view.text=names[position]
+                return view
+            }
+        }
+        list.setOnItemClickListener{_,_,position,_->playIndex(indices[position])}
+        list.setOnItemLongClickListener{_,_,position,_->channelOptions(indices[position]);true}
+        root.addView(label("Select a channel · Long press for options"))
+        root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
     private val bufferProfiles=arrayOf("Ultra Fast","Fast","Balanced","Stable","Maximum Buffer")
