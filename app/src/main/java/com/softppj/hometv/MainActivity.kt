@@ -544,15 +544,20 @@ class MainActivity: Activity() {
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
-        val options=arrayOf("Aspect ratio / Screen size","Picture quality","Buffering","Audio tracks","Playback engine")
+        val options=arrayOf(
+            "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
+            "This channel aspect ratio: "+screenMode(),
+            "Picture quality","Buffering","Audio tracks","Playback engine"
+        )
         AlertDialog.Builder(this).setTitle("Playback settings")
             .setItems(options){_,choice->
                 when(choice){
-                    0->selectScreenMode(active.takeIf{it>=0})
-                    1->selectQuality(active.takeIf{it>=0})
-                    2->chooseBufferProfile()
-                    3->audioTracks()
-                    4->if(active>=0)chooseChannelEngine(active)
+                    0->selectScreenMode(null)
+                    1->selectScreenMode(active.takeIf{it>=0})
+                    2->selectQuality(active.takeIf{it>=0})
+                    3->chooseBufferProfile()
+                    4->audioTracks()
+                    5->if(active>=0)chooseChannelEngine(active)
                 }
             }.setNegativeButton("Close",null).show()
     }
