@@ -49,7 +49,7 @@ class MainActivity: Activity() {
     private var videoScreen:FrameLayout?=null
     private var currentPlayerView:PlayerView?=null
     private val handler=Handler(Looper.getMainLooper())
-    private var banner:TextView?=null
+    private var banner:View?=null
     private var bannerTask:Runnable?=null
     private var fallbackAttempted=mutableSetOf<String>()
     private val favoriteIds get()=prefs.getStringSet("favorites",emptySet()) ?: emptySet()
@@ -556,10 +556,38 @@ class MainActivity: Activity() {
         if(channels.isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
         previewIndex=((if(previewIndex>=0)previewIndex else active)+delta+channels.size)%channels.size
-        showBanner("▶ "+(previewIndex+1)+"  "+channels[previewIndex].name+"   •   OK to play")
+        showChannelInfo(previewIndex,"OK to play")
         val task=Runnable{previewIndex=-1}
         previewTask=task
         handler.postDelayed(task,8000)
+    }
+    private fun screenInfoOnStart(index:Int){
+        handler.postDelayed({if(active==index)showChannelInfo(index,"LIVE")},500)
+    }
+    private fun showChannelInfo(index:Int,extra:String=""){
+        val screen=videoScreen ?:return
+        val channel=channels.getOrNull(index) ?:return
+        bannerTask?.let{handler.removeCallbacks(it)}
+        banner?.let{screen.removeView(it)}
+        val panel=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(18,12,18,12)
+            setBackgroundColor(0xE515283C.toInt())
+        }
+        panel.addView(logoView(channel,64))
+        panel.addView(TextView(this).apply{
+            text=(index+1).toString()+"  "+channel.name+"\n"+channel.group+
+                (if(extra.isNotEmpty())"  •  "+extra else "")
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(18,4,8,4)
+        })
+        banner=panel
+        screen.addView(panel,FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
+        val task=Runnable{if(banner===panel){screen.removeView(panel);banner=null}}
+        bannerTask=task
+        handler.postDelayed(task,4000)
     }
     private fun confirmPreview(){
         val target=previewIndex
@@ -655,6 +683,8 @@ class MainActivity: Activity() {
                 logoRow(channels[position],(position+1).toString()+". "+channels[position].name)
         }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        drawer.addView(button("⚙  Playback settings"){screen.removeView(drawer);showPlaybackSettings()})
+        drawer.addView(button("⌂  Home screen"){showHome()})
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
@@ -674,7 +704,8 @@ class MainActivity: Activity() {
         val options=arrayOf(
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
-            "Picture quality","Buffering","Audio tracks","Playback engine"
+            "Picture quality","Buffering","Audio tracks","Playback engine",
+            "Home screen","Full settings"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -703,6 +734,8 @@ class MainActivity: Activity() {
                 3->chooseBufferProfile()
                 4->audioTracks()
                 5->if(active>=0)chooseChannelEngine(active)
+                6->showHome()
+                7->settings()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -894,6 +927,7 @@ class MainActivity: Activity() {
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
+        screenInfoOnStart(index)
         window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
@@ -1134,8 +1168,8 @@ class MainActivity: Activity() {
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null
             if(!drawerOpen){
                 when(event.keyCode){
-                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(-1);return true}
-                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
                     KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
