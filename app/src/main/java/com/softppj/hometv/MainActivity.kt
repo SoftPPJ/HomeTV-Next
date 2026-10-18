@@ -173,9 +173,9 @@ class MainActivity: Activity() {
         channels=cachedChannels()
         showHome()
         when(prefs.getString("launch_screen","Last channel")){
-            "Last channel"->refresh{resumeLast()}
-            "Channels"->refresh{allChannels()}
-            else->refresh{showHome()}
+            "Last channel"->if(channels.isNotEmpty())resumeLast() else refresh{resumeLast()}
+            "Channels"->if(channels.isNotEmpty())allChannels() else refresh{allChannels()}
+            else->showHome()
         }
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
@@ -867,12 +867,22 @@ class MainActivity: Activity() {
                 KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
                 KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS->{previewChannel(-1);return true}
                 KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT->{previewChannel(1);return true}
-                KeyEvent.KEYCODE_BACK->{showChannels();return true}
+                KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
             }
         }
         return super.onKeyDown(keyCode,event)
     }
-    override fun onBackPressed(){if(active>=0){unlockedChannel=null;showChannels()}else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()!="HomeTV")showHome() else confirmExit()}
+    override fun onBackPressed(){
+        // Back navigates one level; Back from Home exits the application.
+        if(active>=0){
+            unlockedChannel=null
+            allChannels()
+        }else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV")!=true){
+            showHome()
+        }else{
+            confirmExit()
+        }
+    }
     private fun stopPlayback(){
         previewIndex=-1
         previewTask?.let{handler.removeCallbacks(it)}
