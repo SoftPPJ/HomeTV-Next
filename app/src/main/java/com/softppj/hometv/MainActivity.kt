@@ -531,6 +531,25 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
     }
+    private var channelDigits=""
+    private var channelDigitTask:Runnable?=null
+    private fun enterChannelDigit(digit:Int){
+        channelDigitTask?.let{handler.removeCallbacks(it)}
+        channelDigits=(channelDigits+digit).takeLast(5)
+        showBanner("Channel "+channelDigits+"  •  OK to tune")
+        val task=Runnable{tuneTypedChannel()}
+        channelDigitTask=task
+        handler.postDelayed(task,1800)
+    }
+    private fun tuneTypedChannel(){
+        channelDigitTask?.let{handler.removeCallbacks(it)}
+        channelDigitTask=null
+        val number=channelDigits.toIntOrNull()
+        channelDigits=""
+        if(number==null)return
+        if(number in 1..channels.size)playIndex(number-1)
+        else showBanner("Channel "+number+" is not available",true)
+    }
     private var previewIndex=-1
     private var previewTask:Runnable?=null
     private fun previewChannel(delta:Int){
@@ -1070,6 +1089,15 @@ class MainActivity: Activity() {
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
         if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
+            val digit=when(event.keyCode){
+                in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9->event.keyCode-KeyEvent.KEYCODE_0
+                in KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_9->event.keyCode-KeyEvent.KEYCODE_NUMPAD_0
+                else->-1
+            }
+            if(digit>=0){enterChannelDigit(digit);return true}
+            if(channelDigits.isNotEmpty() && (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode==KeyEvent.KEYCODE_ENTER || event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER)){
+                tuneTypedChannel();return true
+            }
             // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
             // Let an open channel drawer handle its own list navigation.
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null
@@ -1104,6 +1132,9 @@ class MainActivity: Activity() {
     }
     private fun stopPlayback(){
         previewIndex=-1
+        channelDigitTask?.let{handler.removeCallbacks(it)}
+        channelDigitTask=null
+        channelDigits=""
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
         bannerTask?.let{handler.removeCallbacks(it)}
