@@ -51,6 +51,7 @@ class MainActivity: Activity() {
     private val handler=Handler(Looper.getMainLooper())
     private var banner:View?=null
     private var bannerTask:Runnable?=null
+    private var clockTask:Runnable?=null
     private var fallbackAttempted=mutableSetOf<String>()
     private val favoriteIds get()=prefs.getStringSet("favorites",emptySet()) ?: emptySet()
     private var retryCount=0
@@ -695,12 +696,103 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
     }
+    private fun updateClock(){
+        clockTask?.let{handler.removeCallbacks(it)}
+        clockTask=null
+        val screen=videoScreen ?:return
+        screen.findViewWithTag<View>("clock_overlay")?.let{screen.removeView(it)}
+        if(!prefs.getBoolean("clock_enabled",false))return
+        val clock=TextView(this).apply{
+            tag="clock_overlay"
+            setTextColor(android.graphics.Color.WHITE)
+            setShadowLayer(3f,1f,2f,android.graphics.Color.BLACK)
+            setBackgroundColor(0x77000000)
+            val size=prefs.getInt("clock_size",18).coerceIn(12,36)
+            textSize=size.toFloat()
+            setPadding(12,8,12,8)
+            isFocusable=false
+            isClickable=false
+        }
+        val position=prefs.getString("clock_position","Top right") ?: "Top right"
+        val gravity=when(position){
+            "Top left"->Gravity.TOP or Gravity.LEFT
+            "Bottom left"->Gravity.BOTTOM or Gravity.LEFT
+            "Bottom right"->Gravity.BOTTOM or Gravity.RIGHT
+            "Top center"->Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            "Bottom center"->Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            else->Gravity.TOP or Gravity.RIGHT
+        }
+        val params=FrameLayout.LayoutParams(-2,-2,gravity).apply{
+            setMargins(16,16,16,16)
+        }
+        screen.addView(clock,params)
+        fun render(){
+            val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
+            val date=java.text.SimpleDateFormat("dd MMM yy",java.util.Locale.ENGLISH).format(java.util.Date())
+            val time=java.text.SimpleDateFormat(pattern,java.util.Locale.ENGLISH).format(java.util.Date())
+            clock.text="$"+"date  •  $"+"time"
+        }
+        render()
+        val task=object:Runnable{
+            override fun run(){
+                if(videoScreen!==screen || clock.parent!==screen)return
+                render()
+                handler.postDelayed(this,15000L)
+            }
+        }
+        clockTask=task
+        handler.postDelayed(task,15000L)
+    }
+    private fun unmuteYoutube(viewer:WebView){
+        viewer.evaluateJavascript("""(function(){
+            var v=document.querySelector('video');
+            if(!v)return 'Video not ready';
+            v.muted=false;v.defaultMuted=false;v.volume=1;
+            var mute=document.querySelector('.ytp-mute-button');
+            if(mute && mute.getAttribute('data-title-no-tooltip')==='Unmute')mute.click();
+            if(v.paused)v.play().catch(function(){});
+            return v.muted?'YouTube requires manual unmute':'Sound requested';
+        })();"""){result->
+            if(result.contains("requires manual"))Toast.makeText(this@MainActivity,"Use YouTube mute button if sound stays off",Toast.LENGTH_SHORT).show()
+        }
+    }
+    private fun clockSettings(){
+        val choices=arrayOf(
+            "Show date and time: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
+            "Time format: "+if(prefs.getBoolean("clock_24h",true))"24-hour" else "12-hour",
+            "Text size: "+prefs.getInt("clock_size",18)+" sp",
+            "Position: "+(prefs.getString("clock_position","Top right") ?: "Top right")
+        )
+        AlertDialog.Builder(this).setTitle("Date & time overlay · dd MMM yy")
+            .setItems(choices){_,which->
+                when(which){
+                    0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",false)).apply();updateClock();clockSettings()}
+                    1->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
+                    2->{
+                        val sizes=intArrayOf(12,14,16,18,20,24,28,32,36)
+                        AlertDialog.Builder(this).setTitle("Clock text size")
+                            .setSingleChoiceItems(sizes.map{ "$"+"it sp" }.toTypedArray(),sizes.indexOf(prefs.getInt("clock_size",18)).coerceAtLeast(0)){dialog,i->
+                                prefs.edit().putInt("clock_size",sizes[i]).apply();dialog.dismiss();updateClock();clockSettings()
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                    3->{
+                        val positions=arrayOf("Top left","Top center","Top right","Bottom left","Bottom center","Bottom right")
+                        AlertDialog.Builder(this).setTitle("Clock position")
+                            .setSingleChoiceItems(positions,positions.indexOf(prefs.getString("clock_position","Top right")).coerceAtLeast(0)){dialog,i->
+                                prefs.edit().putString("clock_position",positions[i]).apply();dialog.dismiss();updateClock();clockSettings()
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                }
+            }.setNegativeButton("Close",null).show()
+    }
     private var channelDigits=""
     private var channelDigitTask:Runnable?=null
     private fun enterChannelDigit(digit:Int){
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
-        showBanner("Channel "+channelDigits+"  •  OK to tune")
+        val typed=channelDigits.toIntOrNull()
+        if(typed!=null && typed in 1..channels.size)showChannelInfo(typed-1)
+        else showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
         channelDigitTask=task
         handler.postDelayed(task,1800)
@@ -908,7 +1000,7 @@ class MainActivity: Activity() {
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine",
-            "Home screen","Full settings"
+            "Date & time overlay","Home screen","Full settings"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -937,8 +1029,9 @@ class MainActivity: Activity() {
                 3->chooseBufferProfile()
                 4->audioTracks()
                 5->if(active>=0)chooseChannelEngine(active)
-                6->showHome()
-                7->liveSettings()
+                6->clockSettings()
+                7->showHome()
+                8->liveSettings()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -1170,11 +1263,13 @@ class MainActivity: Activity() {
                     fullscreenView=view
                     screen.addView(view,FrameLayout.LayoutParams(-1,-1))
                     viewer.visibility=View.GONE
+                    screen.findViewWithTag<View>("clock_overlay")?.bringToFront()
                 }
                 override fun onHideCustomView(){
                     fullscreenView?.let{screen.removeView(it)}
                     fullscreenView=null
                     viewer.visibility=View.VISIBLE
+                    screen.findViewWithTag<View>("clock_overlay")?.bringToFront()
                 }
             }
             viewer.webViewClient=object:WebViewClient(){
@@ -1187,6 +1282,10 @@ class MainActivity: Activity() {
                       css.textContent='html,body{margin:0!important;background:#000!important;overflow:hidden!important} video{position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483000!important;background:#000!important}';
                       document.head.appendChild(css);
                     })();""",null)
+                    // YouTube may mute autoplay; request sound once the player is ready.
+                    view.postDelayed({
+                        if(web===view)unmuteYoutube(view)
+                    },1600L)
                 }
                 override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
                     val target=request.url
@@ -1215,15 +1314,7 @@ class MainActivity: Activity() {
                 setPadding(22,14,22,14)
                 isFocusable=true
                 setOnClickListener{
-                    viewer.evaluateJavascript("""(function(){
-                      var v=document.querySelector('video');
-                      if(!v)return 'Video not ready';
-                      v.muted=false;v.volume=1;
-                      if(v.paused)v.play().catch(function(){});
-                      return v.muted?'Muted by browser':'Sound enabled';
-                    })();"""){result->
-                        Toast.makeText(this@MainActivity,result.trim('"'),Toast.LENGTH_SHORT).show()
-                    }
+                    unmuteYoutube(viewer)
                 }
             }
             screen.addView(sound,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.RIGHT).apply{
@@ -1303,8 +1394,9 @@ class MainActivity: Activity() {
                 exo.play()
             }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true)}
         }
+        updateClock()
         screen.requestFocus()
-        showBanner("${index+1}  •  ${c.name}")
+        showChannelInfo(index)
     }
     private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
         if(active!=index || videoScreen!==screen)return
@@ -1429,6 +1521,7 @@ class MainActivity: Activity() {
             "Universal screen size: "+(prefs.getString("screen_mode","Fit")?:"Fit"),
             "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
             "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
+            "Date & time overlay",
             "Manage playlists (leave playback)",
             "Home screen (stop playback)",
             "Back to TV"
@@ -1456,11 +1549,12 @@ class MainActivity: Activity() {
                         prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply()
                         showBanner("Resume setting saved")
                     }
-                    6->AlertDialog.Builder(this).setTitle("Leave live TV?")
+                    6->clockSettings()
+                    7->AlertDialog.Builder(this).setTitle("Leave live TV?")
                         .setMessage("Managing playlists will stop the current channel.")
                         .setPositiveButton("Continue"){_,_->managePlaylists()}
                         .setNegativeButton("Stay on TV",null).show()
-                    7->showHome()
+                    8->showHome()
                 }
             }.setNegativeButton("Close",null).show()
     }
@@ -1508,6 +1602,7 @@ class MainActivity: Activity() {
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
         root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
+        root.addView(button("Date & time overlay"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
     }
@@ -1572,6 +1667,8 @@ class MainActivity: Activity() {
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
         bannerTask?.let{handler.removeCallbacks(it)}
+        clockTask?.let{handler.removeCallbacks(it)}
+        clockTask=null
         retryTask?.let{handler.removeCallbacks(it)}
         retryTask=null
         qualityUpgradeTask?.let{handler.removeCallbacks(it)}
