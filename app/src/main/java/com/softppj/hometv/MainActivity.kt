@@ -147,7 +147,7 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -159,6 +159,7 @@ class MainActivity: Activity() {
                 6->confirmExit()
                 7->audioTracks()
                 8->chooseChannelEngine(i)
+                9->selectQuality(i)
             }
         }.show()
     }
@@ -499,6 +500,46 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
             .setNegativeButton("Close",null).show()
     }
+    private val qualityModes=arrayOf("Auto","Data Saver (360p)","Standard (480p)","HD (720p)","Full HD (1080p)","Best Available")
+    private fun qualityMode(index:Int?=active.takeIf{it>=0}):String{
+        val url=index?.let{channels.getOrNull(it)?.url}
+        if(url!=null)prefs.getString("quality_channel_"+hash(url),null)?.let{return it}
+        return prefs.getString("quality_global","Auto") ?: "Auto"
+    }
+    private fun applyQuality(){
+        val exo=player ?:return
+        val mode=qualityMode()
+        val maxHeight=when(mode){
+            "Data Saver (360p)"->360
+            "Standard (480p)"->480
+            "HD (720p)"->720
+            "Full HD (1080p)"->1080
+            else->Int.MAX_VALUE
+        }
+        val builder=exo.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
+        if(mode=="Best Available")builder.setForceHighestSupportedBitrate(true)
+        else builder.setForceHighestSupportedBitrate(false)
+        exo.trackSelectionParameters=builder.build()
+    }
+    private fun selectQuality(index:Int?=null){
+        val url=index?.let{channels.getOrNull(it)?.url}
+        val key=url?.let{"quality_channel_"+hash(it)}
+        val options=if(key!=null)arrayOf("Use universal default")+qualityModes else qualityModes
+        val current=if(key!=null)prefs.getString(key,null) else prefs.getString("quality_global","Auto")
+        val selected=if(key!=null && current==null)0 else options.indexOf(current).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle(if(index!=null)"Picture quality · "+channels[index].name else "Universal picture quality")
+            .setSingleChoiceItems(options,selected){dialog,choice->
+                val editor=prefs.edit()
+                if(key!=null){
+                    if(choice==0)editor.remove(key) else editor.putString(key,options[choice])
+                }else editor.putString("quality_global",options[choice])
+                editor.apply()
+                applyQuality()
+                dialog.dismiss()
+                if(active>=0)showBanner("Quality: "+qualityMode()) else if(index==null)settings()
+            }.setNegativeButton("Cancel",null).show()
+    }
     private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original","Zoom 110%","Zoom 125%","Zoom 150%")
     private fun screenMode():String{
         val url=channels.getOrNull(active)?.url
@@ -615,6 +656,7 @@ class MainActivity: Activity() {
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
             exo.volume=1f
             player=exo
+            applyQuality()
             val view=PlayerView(this).apply{
                 player=exo
                 useController=false
@@ -756,6 +798,8 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
         })
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
+        root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
+        root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
         root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
         root.addView(label("Remote: Left/Right, CH+/-, Previous/Next, Rewind/Fast Forward = switch. OK = channel list; Back = groups; Menu = toggle Fit/Fill."))
         root.addView(button("Home"){showHome()})
