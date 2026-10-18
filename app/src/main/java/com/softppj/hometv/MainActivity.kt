@@ -29,7 +29,7 @@ import java.net.URL
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
-data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap())
+data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap(), val epgId:String="")
 data class Playlist(val name:String, val url:String, val enabled:Boolean=true)
 
 class MainActivity: Activity() {
@@ -186,6 +186,7 @@ class MainActivity: Activity() {
         }
         channelCollection("All channels",visibleIndices())
     }
+    private fun hiddenChannels(){channelCollection("Hidden channels",visibleIndices().filter{isSkipped(channels[it])})}
     private fun favorites(){channelCollection("Favorites",visibleIndices().filter{i->channels.any{sameChannel(it,channels[i]) && favoriteIds.contains(id(it))}})}
     private fun channelCollection(title:String,indices:List<Int>){
         val indices=indices.filter{it in channels.indices}.distinctBy{numberFor(it)}
@@ -332,6 +333,8 @@ class MainActivity: Activity() {
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
         root.addView(button("★  My favorites"){favorites()})
+        root.addView(button("🙈  Hidden channels"){hiddenChannels()})
+        root.addView(button("▤  TV programme guide (EPG)"){showEpg()})
         root.addView(button("☷  Browse by category"){showChannels()})
         root.addView(label("LIBRARY & CONTROLS"))
         root.addView(button("↻  Rebuild channel playlists"){refresh({showHome()},true)})
@@ -625,7 +628,7 @@ class MainActivity: Activity() {
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
         val out=mutableListOf<Channel>()
-        var name="";var group="Other";var logo=""
+        var name="";var group="Other";var logo="";var epgId=""
         var headers=mutableMapOf<String,String>()
         fun attr(line:String,key:String)=Regex(Regex.escape(key)+"""="([^"]*)" """.trim()).find(line)?.groupValues?.get(1)?:""
         fun applyHeader(key:String,value:String){
@@ -644,6 +647,7 @@ class MainActivity: Activity() {
                     name=line.substringAfterLast(",","").trim()
                     group=attr(line,"group-title").ifBlank{"Other"}
                     logo=attr(line,"tvg-logo")
+                    epgId=attr(line,"tvg-id")
                     headers=mutableMapOf()
                     applyHeader("user-agent",attr(line,"user-agent"))
                     applyHeader("referer",attr(line,"referrer"))
@@ -667,7 +671,7 @@ class MainActivity: Activity() {
                         val pair=kv.split("=",limit=2)
                         if(pair.size==2)applyHeaderTo(localHeaders,pair[0],pair[1])
                     }
-                    out.add(Channel(name,url,group,logo,source,localHeaders))
+                    out.add(Channel(name,url,group,logo,source,localHeaders,epgId))
                 }
             }
         }
@@ -1179,7 +1183,7 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="CHANNELS  •  LEFT for Settings / Home"
+            text="CHANNELS  •  LEFT for Groups / Home"
             textSize=19f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(16,16,8,12)
@@ -1221,14 +1225,16 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="HOMETV  •  UNIVERSAL SETTINGS"
+            text="HOMETV  •  CHANNEL GROUPS"
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(20,18,12,16)
         })
+        val groups=visibleIndices().map{channels[it].group}.distinct()
+        val options=listOf("⚙  Universal settings","⌂  Home","★  Favorites","🙈  Hidden channels","▤  EPG","↻  Refresh playlists","☰  All channels")+
+            groups.map{"▸  "+it}
         val list=ListView(this)
-        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,
-            arrayOf("⚙  Universal playback settings","◷  Live channel preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF","◷  Date & time overlay","⌂  Home screen","☰  Channel list","▶  Return to TV"))
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
@@ -1237,10 +1243,16 @@ class MainActivity: Activity() {
             close()
             when(choice){
                 0->liveSettings()
-                1->{prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply();showBanner("Live preview "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF")}
-                2->clockSettings()
-                3->showHome()
-                4->showOverlayList()
+                1->showHome()
+                2->favorites()
+                3->hiddenChannels()
+                4->showEpg()
+                5->refresh({showBanner("Playlist refresh completed")},true)
+                6->showOverlayList()
+                else->{
+                    val group=groups.getOrNull(choice-7)
+                    if(group!=null)showGroupDrawer(group)
+                }
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -1248,7 +1260,35 @@ class MainActivity: Activity() {
                 close();showOverlayList();true
             }else false
         }
-        list.setSelection(0)
+        list.requestFocus()
+    }
+    private fun showGroupDrawer(group:String){
+        val screen=videoScreen ?:return
+        screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
+        val indices=visibleIndices().filter{channels[it].group==group}
+        val drawer=LinearLayout(this).apply{
+            tag="channel_drawer"
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(0xF015283C.toInt())
+        }
+        drawer.addView(TextView(this).apply{
+            text=group+"  •  LEFT for groups"
+            textSize=19f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(16,16,8,12)
+        })
+        val list=ListView(this)
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,indices.map{channelLabel(it)})
+        drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        screen.addView(drawer,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
+        fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemClickListener{_,_,position,_->close();playIndex(preferredChannel(indices[position]))}
+        list.setOnItemLongClickListener{_,_,position,_->close();channelOptions(indices[position]);true}
+        list.setOnKeyListener{_,code,event->
+            if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){close();showLeftNavigation();true}
+            else if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){close();true}
+            else false
+        }
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
@@ -1864,6 +1904,8 @@ class MainActivity: Activity() {
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
+        root.addView(button("Hidden channels"){hiddenChannels()})
+        root.addView(button("EPG / XMLTV guide"){configureEpg()})
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
             val choices=arrayOf("Auto","Media3","LibVLC")
             AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3"))){dialog,i->
@@ -1942,8 +1984,8 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
                     KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
-                    KeyEvent.KEYCODE_DPAD_LEFT->{showLeftNavigation();return true}
+                    KeyEvent.KEYCODE_NUMPAD_ENTER->{if(previewIndex>=0)confirmPreview() else if(active in channels.indices)showChannelInfo(active);return true}
+                    KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
                     KeyEvent.KEYCODE_DPAD_RIGHT->{showChannelOptions();return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
                     KeyEvent.KEYCODE_BACK->{if(previewIndex>=0){previewIndex=-1;closeVideoPreview();return true};onBackPressed();return true}
