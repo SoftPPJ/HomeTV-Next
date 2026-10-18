@@ -1600,14 +1600,7 @@ class MainActivity: Activity() {
                         if(active==index && vlcPlayer===vlc && !failed){
                             failed=true
                             handler.removeCallbacks(watchdog)
-                            val alternative=channels.indexOfFirst{
-                                it.name.equals(c.name,true) && it.url!=c.url && !fallbackAttempted.contains(it.url)
-                            }
-                            if(alternative>=0){
-                                fallbackAttempted.add(c.url)
-                                showBanner("Trying another stream for "+c.name)
-                                playIndex(alternative)
-                            }else reconnectCurrentChannel(c,index,screen)
+                            if(!tryNextAlternative(index))reconnectCurrentChannel(c,index,screen)
                         }
                     }
                 }
