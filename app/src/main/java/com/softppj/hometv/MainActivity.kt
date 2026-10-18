@@ -10,6 +10,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -17,7 +19,7 @@ import java.net.URL
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
-data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="")
+data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap())
 data class Playlist(val name:String, val url:String, val enabled:Boolean=true)
 
 class MainActivity: Activity() {
@@ -34,6 +36,7 @@ class MainActivity: Activity() {
     private val handler=Handler(Looper.getMainLooper())
     private var banner:TextView?=null
     private var bannerTask:Runnable?=null
+    private var fallbackAttempted=mutableSetOf<String>()
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -115,20 +118,63 @@ class MainActivity: Activity() {
         }
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
-        val out=mutableListOf<Channel>();var name="";var group="Other";var logo=""
-        fun attr(line:String,key:String)=Regex(Regex.escape(key)+"=\"([^\"]*)\"").find(line)?.groupValues?.get(1)?:""
-        body.lineSequence().forEach { raw ->
+        val out=mutableListOf<Channel>()
+        var name="";var group="Other";var logo=""
+        var headers=mutableMapOf<String,String>()
+        fun attr(line:String,key:String)=Regex(Regex.escape(key)+"""="([^"]*)" """.trim()).find(line)?.groupValues?.get(1)?:""
+        fun applyHeader(key:String,value:String){
+            val normalized=when(key.lowercase()){
+                "http-user-agent","user-agent"->"User-Agent"
+                "http-referrer","http-referer","referer","referrer"->"Referer"
+                "http-origin","origin"->"Origin"
+                else->return
+            }
+            if(value.isNotBlank())headers[normalized]=value.trim()
+        }
+        body.lineSequence().forEach{raw->
             val line=raw.trim()
-            if(line.startsWith("#EXTINF",true)){
-                name=line.substringAfterLast(",","").trim()
-                group=attr(line,"group-title").ifBlank{"Other"}
-                logo=attr(line,"tvg-logo")
-            } else if(line.isNotEmpty() && !line.startsWith("#") && name.isNotEmpty()){
-                out.add(Channel(name,line,group,logo,source))
-                // Multiple stream URLs following one EXTINF become separate playable entries.
+            when{
+                line.startsWith("#EXTINF",true)->{
+                    name=line.substringAfterLast(",","").trim()
+                    group=attr(line,"group-title").ifBlank{"Other"}
+                    logo=attr(line,"tvg-logo")
+                    headers=mutableMapOf()
+                    applyHeader("user-agent",attr(line,"user-agent"))
+                    applyHeader("referer",attr(line,"referrer"))
+                }
+                line.startsWith("#EXTVLCOPT:",true)->{
+                    val pair=line.substringAfter(":").split("=",limit=2)
+                    if(pair.size==2)applyHeader(pair[0],pair[1])
+                }
+                line.startsWith("#EXTHTTP:",true)->{
+                    val rawHeaders=line.substringAfter(":").trim()
+                    try{
+                        val obj=JSONObject(rawHeaders)
+                        obj.keys().forEach{key->applyHeader(key,obj.optString(key))}
+                    }catch(_:Exception){}
+                }
+                line.isNotEmpty() && !line.startsWith("#") && name.isNotEmpty()->{
+                    val parts=line.split("|",limit=2)
+                    val url=parts[0].trim()
+                    val localHeaders=headers.toMutableMap()
+                    if(parts.size==2)parts[1].split("&").forEach{kv->
+                        val pair=kv.split("=",limit=2)
+                        if(pair.size==2)applyHeaderTo(localHeaders,pair[0],pair[1])
+                    }
+                    out.add(Channel(name,url,group,logo,source,localHeaders))
+                }
             }
         }
         return out
+    }
+    private fun applyHeaderTo(map:MutableMap<String,String>,key:String,value:String){
+        val name=when(key.lowercase()){
+            "user-agent","http-user-agent"->"User-Agent"
+            "referer","referrer","http-referrer"->"Referer"
+            "origin"->"Origin"
+            else->return
+        }
+        map[name]=java.net.URLDecoder.decode(value,"UTF-8")
     }
     private fun showChannels(){
         reset("Channels (${channels.size})")
@@ -224,7 +270,8 @@ class MainActivity: Activity() {
             }
             screen.addView(web,FrameLayout.LayoutParams(-1,-1))
         }else{
-            val exo=ExoPlayer.Builder(this).build()
+            val factory=DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(c.headers)
+            val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
             player=exo
             val view=PlayerView(this).apply{
                 player=exo
@@ -235,7 +282,12 @@ class MainActivity: Activity() {
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             exo.addListener(object:Player.Listener{
                 override fun onPlayerError(error:PlaybackException){
-                    showBanner("Cannot play ${c.name}: ${error.errorCodeName}. Press OK for channels.",true)
+                    val alternative=channels.indexOfFirst{other->other.name.equals(c.name,true) && other.url!=c.url && !fallbackAttempted.contains(other.url)}
+                    if(alternative>=0){
+                        fallbackAttempted.add(c.url)
+                        showBanner("Trying another stream for ${c.name}")
+                        handler.post{playIndex(alternative)}
+                    }else showBanner("Cannot play ${c.name}: ${error.errorCodeName}. Press OK for channels.",true)
                 }
             })
             try{
