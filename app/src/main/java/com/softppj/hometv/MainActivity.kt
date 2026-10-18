@@ -132,7 +132,7 @@ class MainActivity: Activity() {
                 dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","LibVLC") ?: "LibVLC")
+    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Media3") ?: "Media3")
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
@@ -1322,7 +1322,7 @@ class MainActivity: Activity() {
     private fun liveSettings(){
         if(active<0){settings();return}
         val items=arrayOf(
-            "Playback engine: "+(prefs.getString("engine","LibVLC")?:"LibVLC"),
+            "Playback engine: "+(prefs.getString("engine","Media3")?:"Media3"),
             "Buffering: "+bufferProfile(),
             "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
             "Universal screen size: "+(prefs.getString("screen_mode","Fit")?:"Fit"),
@@ -1338,7 +1338,7 @@ class MainActivity: Activity() {
                     0->{
                         val choices=arrayOf("Auto","Media3","LibVLC")
                         AlertDialog.Builder(this).setTitle("Default playback engine")
-                            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","LibVLC")).coerceAtLeast(0)){dialog,i->
+                            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3")).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putString("engine",choices[i]).apply()
                                 dialog.dismiss()
                                 showBanner("Playback engine saved for next channel")
@@ -1367,9 +1367,9 @@ class MainActivity: Activity() {
         reset("HomeTV Settings")
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
-        root.addView(button("Playback engine: "+(prefs.getString("engine","LibVLC")?:"LibVLC")){
+        root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
             val choices=arrayOf("Auto","Media3","LibVLC")
-            AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","LibVLC"))){dialog,i->
+            AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3"))){dialog,i->
                 prefs.edit().putString("engine",choices[i]).apply()
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
