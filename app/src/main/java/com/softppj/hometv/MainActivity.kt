@@ -62,7 +62,10 @@ class MainActivity: Activity() {
         prefs.edit().putStringSet("favorites",set).apply()
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
-    private fun allChannels(){channelCollection("All channels",channels.indices.toList())}
+    private fun allChannels(){
+        // Preserve the exact sequence from enabled playlists and their M3U entries.
+        channelCollection("All channels",channels.indices.toList())
+    }
     private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
     private fun channelCollection(title:String,indices:List<Int>){
         reset(title+" ("+indices.size+")")
@@ -214,6 +217,8 @@ class MainActivity: Activity() {
                 } catch(_:Exception){}
             }
             runOnUiThread {
+                // Kotlin distinctBy keeps the first occurrence and its original playlist position.
+                // Never alphabetically sort the merged channel list.
                 channels=found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
                 Toast.makeText(this,"${channels.size} channels loaded",Toast.LENGTH_SHORT).show()
                 done()
@@ -282,7 +287,7 @@ class MainActivity: Activity() {
     private fun showChannels(){
         reset("Channels (${channels.size})")
         root.addView(button("Refresh"){refresh{showChannels()}})
-        val groups=channels.map{it.group}.distinct().sorted()
+        val groups=channels.map{it.group}.distinct()
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
             list.addView(button("▸ $group"){showGroup(group)})
