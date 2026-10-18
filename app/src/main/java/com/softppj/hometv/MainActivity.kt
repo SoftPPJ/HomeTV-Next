@@ -879,14 +879,23 @@ class MainActivity: Activity() {
         setContentView(screen)
         val videoId=Regex("""(?:youtube\.com/(?:live/|watch\?v=|embed/)|youtu\.be/)([A-Za-z0-9_-]{11})""").find(c.url)?.groupValues?.get(1)
         if(videoId!=null){
-            web=WebView(this).apply {
-                setBackgroundColor(android.graphics.Color.BLACK)
-                settings.javaScriptEnabled=true
-                settings.domStorageEnabled=true
-                webChromeClient=WebChromeClient()
-                loadDataWithBaseURL("https://www.youtube.com", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='margin:0;background:black;overflow:hidden'><iframe style='position:absolute;top:0;left:0;width:100%;height:100%;border:0' src='https://www.youtube.com/embed/$videoId?autoplay=1' allow='autoplay; encrypted-media; fullscreen' allowfullscreen></iframe></body></html>","text/html","UTF-8",null)
+            // YouTube error 152/153: WebView iframe playback may be refused.
+            // Use the official YouTube app instead of a synthetic embedded page.
+            val youtubeUri=Uri.parse("https://www.youtube.com/watch?v="+videoId)
+            val youtubeApp=Intent(Intent.ACTION_VIEW,youtubeUri).apply{
+                setPackage("com.google.android.youtube.tv")
             }
-            screen.addView(web,FrameLayout.LayoutParams(-1,-1))
+            val opened=try{
+                startActivity(youtubeApp)
+                true
+            }catch(_:android.content.ActivityNotFoundException){
+                try{
+                    startActivity(Intent(Intent.ACTION_VIEW,youtubeUri))
+                    true
+                }catch(_:android.content.ActivityNotFoundException){false}
+            }
+            if(!opened)Toast.makeText(this,"Install YouTube or a browser to play this channel",Toast.LENGTH_LONG).show()
+            showHome()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
