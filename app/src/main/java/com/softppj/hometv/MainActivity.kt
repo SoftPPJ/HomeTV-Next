@@ -12,6 +12,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.ui.PlayerView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -375,7 +376,12 @@ class MainActivity: Activity() {
             }
             screen.addView(web,FrameLayout.LayoutParams(-1,-1))
         }else{
-            val factory=DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(c.headers)
+            val factory=DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(20000)
+                .setUserAgent(c.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
+                .setDefaultRequestProperties(c.headers.filterKeys{!it.equals("User-Agent",true)})
             val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
             player=exo
             val view=PlayerView(this).apply{
@@ -388,6 +394,8 @@ class MainActivity: Activity() {
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             exo.addListener(object:Player.Listener{
                 override fun onPlayerError(error:PlaybackException){
+                    val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+                    android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
                     val alternative=channels.indexOfFirst{other->other.name.equals(c.name,true) && other.url!=c.url && !fallbackAttempted.contains(other.url)}
                     if(alternative>=0){
                         fallbackAttempted.add(c.url)
@@ -399,7 +407,7 @@ class MainActivity: Activity() {
                         val task=Runnable{if(active==index)playIndex(index)}
                         retryTask=task
                         handler.postDelayed(task,2500L*retryCount)
-                    }else showBanner("Cannot play ${c.name}: ${error.errorCodeName}. Press OK for channels.",true)
+                    }else showBanner("Cannot play ${c.name}: ${error.errorCodeName}"+(if(httpStatus!=null)" (HTTP "+httpStatus+")" else "")+". Press OK for channels.",true)
                 }
             })
             try{
