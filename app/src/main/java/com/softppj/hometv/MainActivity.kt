@@ -965,6 +965,10 @@ class MainActivity: Activity() {
         try{
             val cache=bufferValues()[0].coerceAtLeast(300)
             val options=arrayListOf("--network-caching="+cache,"--live-caching="+cache,"--http-reconnect","--no-video-title-show")
+            // HDR10/HEVC streams can produce audio/video decoder black screens on older Android TVs.
+            // Allow LibVLC software decoding for these streams instead of relying on TV hardware.
+            val hdrStream=c.url.contains("HDR10",ignoreCase=true) || c.url.contains("HEVC",ignoreCase=true)
+            if(hdrStream)options.add("--avcodec-hw=none")
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
@@ -1024,6 +1028,7 @@ class MainActivity: Activity() {
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
             media.addOption(":network-caching="+cache)
+            if(hdrStream)media.addOption(":codec=avcodec")
             vlc.media=media
             media.release()
             vlc.play()
