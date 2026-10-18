@@ -42,6 +42,8 @@ class MainActivity: Activity() {
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
     private var active=-1
+    private var previousChannelUrl:String?=null
+    private var youtubeUnmuteTask:Runnable?=null
     private lateinit var root:LinearLayout
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
     private val lockGroups get() = prefs.getStringSet("locked_groups", emptySet()) ?: emptySet()
@@ -630,9 +632,9 @@ class MainActivity: Activity() {
         val saved=prefs.getString("pin",null)
         if(saved==null){Toast.makeText(this,"Set a PIN in Settings first",Toast.LENGTH_LONG).show();return}
         val field=EditText(this).apply{inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;hint="Password"}
-        AlertDialog.Builder(this).setTitle("Enter PIN").setView(field).setPositiveButton("Unlock"){_,_->
-            if(hash(field.text.toString())==saved)action() else Toast.makeText(this,"Incorrect PIN",Toast.LENGTH_SHORT).show()
-        }.setNegativeButton("Cancel",null).show()
+        showSideDialog(AlertDialog.Builder(this).setTitle("Enter password").setView(field).setPositiveButton("Unlock"){_,_->
+            if(hash(field.text.toString())==saved)action() else Toast.makeText(this,"Incorrect password",Toast.LENGTH_SHORT).show()
+        }.setNegativeButton("Cancel",null).create())
     }
     private fun showBanner(message:String, error:Boolean=false){
         val screen=videoScreen ?: return
@@ -646,18 +648,27 @@ class MainActivity: Activity() {
             setPadding(24,18,24,18)
         }
         banner=text
-        screen.addView(text,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
+        screen.addView(text,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.52f).toInt(),-2,Gravity.TOP or Gravity.RIGHT))
         if(!error){
             val task=Runnable{if(banner===text){screen.removeView(text);banner=null}}
             bannerTask=task
             handler.postDelayed(task,2500)
         }
     }
+    private fun showSideDialog(dialog:AlertDialog,side:Int=Gravity.RIGHT){
+        dialog.show()
+        dialog.window?.let{window->
+            window.setGravity(side or Gravity.CENTER_VERTICAL)
+            window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
+            window.setDimAmount(0.12f)
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        }
+    }
     private fun confirmExit(){
-        AlertDialog.Builder(this).setTitle("Exit HomeTV?")
+        showSideDialog(AlertDialog.Builder(this).setTitle("Exit HomeTV?")
             .setMessage("Stop playback and close the app?")
             .setPositiveButton("Exit"){_,_->stopPlayback();finishAffinity()}
-            .setNegativeButton("Cancel",null).show()
+            .setNegativeButton("Continue watching",null).create())
     }
     private fun audioTracks(){
         val exo=player
@@ -771,7 +782,7 @@ class MainActivity: Activity() {
         clockTask=task
         handler.postDelayed(task,15000L)
     }
-    private fun unmuteYoutube(viewer:WebView){
+    private fun unmuteYoutube(viewer:WebView,notify:Boolean=true){
         viewer.evaluateJavascript("""(function(){
             var v=document.querySelector('video');
             if(!v)return 'Video not ready';
@@ -781,7 +792,7 @@ class MainActivity: Activity() {
             if(v.paused)v.play().catch(function(){});
             return v.muted?'YouTube requires manual unmute':'Sound requested';
         })();"""){result->
-            if(result.contains("requires manual"))Toast.makeText(this@MainActivity,"Use YouTube mute button if sound stays off",Toast.LENGTH_SHORT).show()
+            if(notify && result.contains("requires manual"))Toast.makeText(this@MainActivity,"Use YouTube mute button if sound stays off",Toast.LENGTH_SHORT).show()
         }
     }
     private fun clockSettings(){
@@ -869,7 +880,7 @@ class MainActivity: Activity() {
             setPadding(18,4,8,4)
         })
         banner=panel
-        screen.addView(panel,FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
+        screen.addView(panel,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.62f).toInt(),-2,Gravity.BOTTOM or Gravity.LEFT))
         val task=Runnable{if(banner===panel){screen.removeView(panel);banner=null}}
         bannerTask=task
         handler.postDelayed(task,4000)
@@ -1241,6 +1252,12 @@ class MainActivity: Activity() {
         applyVideoSize()
         if(active>=0)showBanner("Screen: "+next)
     }
+    private fun returnToPreviousChannel(){
+        val url=previousChannelUrl ?:run{showBanner("No previous channel");return}
+        val index=channels.indexOfFirst{it.url==url}
+        if(index>=0 && index!=active)playIndex(index)
+        else showBanner("Previous channel is unavailable")
+    }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -1248,6 +1265,7 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        if(active in channels.indices && active!=index)previousChannelUrl=channels[active].url
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
@@ -1315,9 +1333,18 @@ class MainActivity: Activity() {
                       document.head.appendChild(css);
                     })();""",null)
                     // YouTube may mute autoplay; request sound once the player is ready.
-                    view.postDelayed({
-                        if(web===view)unmuteYoutube(view)
-                    },1600L)
+                    youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
+                    var tries=0
+                    val task=object:Runnable{
+                        override fun run(){
+                            if(web!==view || active<0)return
+                            unmuteYoutube(view,false)
+                            tries++
+                            if(tries<8)handler.postDelayed(this,1800L)
+                        }
+                    }
+                    youtubeUnmuteTask=task
+                    handler.postDelayed(task,1200L)
                 }
                 override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
                     val target=request.url
@@ -1566,7 +1593,7 @@ class MainActivity: Activity() {
             "Home screen (stop playback)",
             "Back to TV"
         )
-        AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
+        val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
                 when(choice){
                     0->{
@@ -1596,7 +1623,8 @@ class MainActivity: Activity() {
                         .setNegativeButton("Stay on TV",null).show()
                     8->showHome()
                 }
-            }.setNegativeButton("Close",null).show()
+            }.setNegativeButton("Close",null).create()
+        showSideDialog(liveDialog)
     }
     private fun settings(){
         reset("HomeTV Settings")
@@ -1667,6 +1695,7 @@ class MainActivity: Activity() {
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
             if(!drawerOpen){
                 when(event.keyCode){
+                    KeyEvent.KEYCODE_LAST_CHANNEL->{returnToPreviousChannel();return true}
                     KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
@@ -1695,9 +1724,7 @@ class MainActivity: Activity() {
                 screen.requestFocus()
                 return
             }
-            unlockedChannel=null
-            // Exiting playback returns directly to channels, never via Home or Settings.
-            allChannels()
+            confirmExit()
         }else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV")!=true){
             showHome()
         }else{
@@ -1706,6 +1733,8 @@ class MainActivity: Activity() {
     }
     private fun stopPlayback(){
         previewIndex=-1
+        youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
+        youtubeUnmuteTask=null
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigitTask=null
         channelDigits=""
