@@ -33,6 +33,7 @@ class MainActivity: Activity() {
     private val lockGroups get() = prefs.getStringSet("locked_groups", emptySet()) ?: emptySet()
     private var unlockedChannel:String?=null
     private var videoScreen:FrameLayout?=null
+    private var currentPlayerView:PlayerView?=null
     private val handler=Handler(Looper.getMainLooper())
     private var banner:TextView?=null
     private var bannerTask:Runnable?=null
@@ -244,6 +245,13 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
             .setNegativeButton("Close",null).show()
     }
+    private fun resizeMode():Int = if(prefs.getBoolean("fill_screen",true)) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+    private fun toggleScreenMode(){
+        val next=!prefs.getBoolean("fill_screen",true)
+        prefs.edit().putBoolean("fill_screen",next).apply()
+        currentPlayerView?.resizeMode=resizeMode()
+        showBanner(if(next)"Screen: Fill (edges may crop)" else "Screen: Fit (no cropping)")
+    }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -276,9 +284,10 @@ class MainActivity: Activity() {
             val view=PlayerView(this).apply{
                 player=exo
                 useController=false
-                resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode=resizeMode()
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
+            currentPlayerView=view
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             exo.addListener(object:Player.Listener{
                 override fun onPlayerError(error:PlaybackException){
@@ -327,15 +336,19 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
         })
         root.addView(label("Boot launching is device-dependent. The TV power key cannot be overridden by an ordinary app."))
-        root.addView(label("Remote: Left/Right or CH+/- = switch; OK = channel picker; Back = groups."))
+        root.addView(button("Video size: "+if(prefs.getBoolean("fill_screen",true))"Fill screen" else "Fit without cropping"){
+            prefs.edit().putBoolean("fill_screen",!prefs.getBoolean("fill_screen",true)).apply();settings()
+        })
+        root.addView(label("Remote: Left/Right, CH+/-, Previous/Next, Rewind/Fast Forward = switch. OK = channel list; Back = groups; Menu = toggle Fit/Fill."))
         root.addView(button("Home"){showHome()})
     }
     override fun onKeyDown(keyCode:Int,event:KeyEvent?):Boolean{
         if(active>=0){
             when(keyCode){
-                KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_CHANNEL_DOWN->{switchChannel(-1);return true}
-                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_CHANNEL_UP->{switchChannel(1);return true}
+                KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,KeyEvent.KEYCODE_MEDIA_REWIND,KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
+                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                 KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{showOverlayList();return true}
+                KeyEvent.KEYCODE_MENU->{toggleScreenMode();return true}
                 KeyEvent.KEYCODE_BACK->{showChannels();return true}
             }
         }
@@ -344,7 +357,7 @@ class MainActivity: Activity() {
     override fun onBackPressed(){unlockedChannel=null;showChannels()}
     private fun stopPlayback(){
         bannerTask?.let{handler.removeCallbacks(it)}
-        bannerTask=null;banner=null;videoScreen=null
+        bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         player?.release();player=null
         web?.onPause();web?.destroy();web=null
         active=-1
