@@ -696,13 +696,13 @@ class MainActivity: Activity() {
         if(channels.isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
         previewIndex=((if(previewIndex>=0)previewIndex else active)+delta+channels.size)%channels.size
-        showChannelInfo(previewIndex,"OK to play")
+        showChannelInfo(previewIndex)
         val task=Runnable{previewIndex=-1}
         previewTask=task
         handler.postDelayed(task,8000)
     }
     private fun screenInfoOnStart(index:Int){
-        handler.postDelayed({if(active==index)showChannelInfo(index,"LIVE")},500)
+        handler.postDelayed({if(active==index)showChannelInfo(index)},500)
     }
     private fun showChannelInfo(index:Int,extra:String=""){
         val screen=videoScreen ?:return
@@ -717,8 +717,7 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            text=(index+1).toString()+"  "+channel.name+"\n"+channel.group+
-                (if(extra.isNotEmpty())"  •  "+extra else "")
+            text=(index+1).toString()+"  "+channel.name
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -1166,6 +1165,16 @@ class MainActivity: Activity() {
         screen.requestFocus()
         showBanner("${index+1}  •  ${c.name}")
     }
+    private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
+        if(active!=index || videoScreen!==screen)return
+        if(prefs.getBoolean("auto_reconnect",true) && retryCount<3){
+            retryCount++
+            showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/3)")
+            val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
+            retryTask=task
+            handler.postDelayed(task,2000L*retryCount)
+        }else showBanner("Stream stopped. Try another source or channel.",true)
+    }
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
             val cache=bufferValues()[0].coerceAtLeast(300)
@@ -1188,6 +1197,21 @@ class MainActivity: Activity() {
             }
             var started=false
             var failed=false
+            var lastHealthy=android.os.SystemClock.elapsedRealtime()
+            val stallCheck=object:Runnable{
+                override fun run(){
+                    if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
+                    if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
+                        android.os.SystemClock.elapsedRealtime()-lastHealthy>18000L){
+                        failed=true
+                        android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
+                        reconnectCurrentChannel(c,index,screen)
+                        return
+                    }
+                    handler.postDelayed(this,5000)
+                }
+            }
+            handler.postDelayed(stallCheck,5000)
             val watchdog=Runnable{
                 if(!started && !failed && active==index && vlcPlayer===vlc){
                     failed=true
@@ -1206,7 +1230,17 @@ class MainActivity: Activity() {
                 when(event.type){
                     VlcPlayer.Event.Playing->{
                         started=true
+                        lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
+                    }
+                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged->{
+                        lastHealthy=android.os.SystemClock.elapsedRealtime()
+                    }
+                    VlcPlayer.Event.Stopped, VlcPlayer.Event.EndReached->handler.post{
+                        if(active==index && vlcPlayer===vlc && !failed){
+                            failed=true
+                            reconnectCurrentChannel(c,index,screen)
+                        }
                     }
                     VlcPlayer.Event.EncounteredError->handler.post{
                         if(active==index && vlcPlayer===vlc && !failed){
@@ -1219,7 +1253,7 @@ class MainActivity: Activity() {
                                 fallbackAttempted.add(c.url)
                                 showBanner("Trying another stream for "+c.name)
                                 playIndex(alternative)
-                            }else showBanner("Cannot play "+c.name+" with LibVLC. Try Media3 or update the stream URL.",true)
+                            }else reconnectCurrentChannel(c,index,screen)
                         }
                     }
                 }
