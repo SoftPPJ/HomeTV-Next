@@ -522,6 +522,41 @@ class MainActivity: Activity() {
         previewTask=null
         if(target in channels.indices)playIndex(target) else showBanner("Use ▲ / ▼ to preview channels")
     }
+    private fun logoView(channel:Channel,size:Int=52):ImageView{
+        val view=ImageView(this).apply{
+            layoutParams=LinearLayout.LayoutParams(size*resources.displayMetrics.density.toInt().coerceAtLeast(1),size*resources.displayMetrics.density.toInt().coerceAtLeast(1))
+            scaleType=ImageView.ScaleType.FIT_CENTER
+            setPadding(4,4,4,4)
+        }
+        if(channel.logo.isNotBlank()){
+            val url=channel.logo
+            thread{
+                val bmp=try{
+                    val connection=URL(url).openConnection().apply{connectTimeout=4000;readTimeout=4000}
+                    connection.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
+                }catch(_:Exception){null}
+                if(bmp!=null)runOnUiThread{if(view.tag==url)view.setImageBitmap(bmp)}
+            }
+            view.tag=url
+        }
+        return view
+    }
+    private fun logoRow(channel:Channel,title:String):LinearLayout{
+        return LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(8,5,8,5)
+            addView(logoView(channel))
+            addView(TextView(this@MainActivity).apply{
+                text=title
+                textSize=17f
+                setTextColor(android.graphics.Color.WHITE)
+                setPadding(12,8,8,8)
+                isSingleLine=true
+                ellipsize=android.text.TextUtils.TruncateAt.END
+            },LinearLayout.LayoutParams(0,-2,1f))
+        }
+    }
     private fun showOverlayList(){
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
@@ -540,8 +575,13 @@ class MainActivity: Activity() {
             setPadding(16,16,8,12)
         })
         val list=ListView(this)
-        val names=channels.mapIndexed{i,c->(i+1).toString()+". "+c.name}
-        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,names)
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=channels.size
+            override fun getItem(position:Int):Any=channels[position]
+            override fun getItemId(position:Int)=position.toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View=
+                logoRow(channels[position],(position+1).toString()+". "+channels[position].name)
+        }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
