@@ -32,5 +32,5 @@ jobs:
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HomeTV-debug
+          name: HomeTV-v0.2.0
           path: app/build/outputs/apk/debug/*.apk
