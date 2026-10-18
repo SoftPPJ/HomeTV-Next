@@ -63,19 +63,12 @@ class MainActivity: Activity() {
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private fun allChannels(){
-        val available=playlists().filter{it.enabled}
-        if(available.isEmpty()){
-            AlertDialog.Builder(this).setTitle("All channels").setMessage("Enable or add a playlist first.").setPositiveButton("Manage playlists"){_,_->managePlaylists()}.setNegativeButton("Cancel",null).show()
+        if(channels.isEmpty()){
+            channelCollection("All channels",emptyList())
+            if(playlists().any{it.enabled})refresh{channelCollection("All channels",channels.indices.toList())}
             return
         }
-        val choices=available.map{it.name}.toMutableList()
-        if(available.size>1)choices.add(0,"Combined playlists")
-        AlertDialog.Builder(this).setTitle("Select playlist")
-            .setItems(choices.toTypedArray()){_,choice->
-                val selected=if(available.size>1 && choice==0)null else available[if(available.size>1)choice-1 else choice]
-                val indices=channels.indices.filter{i->selected==null || channels[i].source==selected.name}
-                channelCollection(selected?.name ?: "All channels · Combined",indices)
-            }.setNegativeButton("Cancel",null).show()
+        channelCollection("All channels",channels.indices.toList())
     }
     private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
     private fun channelCollection(title:String,indices:List<Int>){
@@ -166,6 +159,7 @@ class MainActivity: Activity() {
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
         root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(root)
+        channels=cachedChannels()
         showHome()
         when(prefs.getString("launch_screen","Last channel")){
             "Last channel"->refresh{resumeLast()}
@@ -232,38 +226,66 @@ class MainActivity: Activity() {
             if(n.isNotEmpty() && (u.startsWith("https://") || u.startsWith("http://"))){
                 val list=playlists();val p=Playlist(n,u,old?.enabled?:true)
                 if(index==null)list.add(p) else list[index]=p
-                savePlaylists(list);managePlaylists()
+                savePlaylists(list)
+                Toast.makeText(this,"Downloading and saving playlist…",Toast.LENGTH_SHORT).show()
+                refresh{managePlaylists()}
             } else Toast.makeText(this,"Enter name and HTTP(S) URL",Toast.LENGTH_LONG).show()
         }.setNegativeButton("Cancel",null).show()
+    }
+    private fun cacheFile(p:Playlist):java.io.File{
+        val digest=MessageDigest.getInstance("SHA-256").digest(p.url.toByteArray())
+            .joinToString(""){"%02x".format(it)}
+        return java.io.File(filesDir,"playlist_"+digest+".m3u")
+    }
+    private fun cachedChannels():MutableList<Channel>{
+        val found=mutableListOf<Channel>()
+        playlists().filter{it.enabled}.forEach{p->
+            try{
+                val file=cacheFile(p)
+                if(file.exists())found.addAll(parseM3u(file.readText(),p.name))
+            }catch(e:Exception){android.util.Log.w("HomeTV","Playlist cache read failed",e)}
+        }
+        return found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
     }
     private fun refresh(done:()->Unit){
         val sources=playlists().filter{it.enabled}
         if(sources.isEmpty()){channels.clear();done();return}
-        Toast.makeText(this,"Loading playlists…",Toast.LENGTH_SHORT).show()
         thread {
-            // Fetch concurrently, but merge results in the configured playlist order.
             val results=Array(sources.size){emptyList<Channel>()}
-            val workers=sources.mapIndexed { index,p ->
+            val workers=sources.mapIndexed{index,p->
                 thread {
-                    try {
-                        val conn=URL(p.url).openConnection().apply {
+                    try{
+                        val conn=URL(p.url).openConnection().apply{
                             connectTimeout=5000
                             readTimeout=7000
                         }
                         val body=conn.getInputStream().bufferedReader().use{it.readText()}
-                        results[index]=parseM3u(body,p.name)
-                    } catch(e:Exception){
-                        android.util.Log.w("HomeTV","Could not load playlist "+p.name,e)
+                        val parsed=parseM3u(body,p.name)
+                        if(parsed.isNotEmpty()){
+                            results[index]=parsed
+                            val file=cacheFile(p)
+                            val temp=java.io.File(file.absolutePath+".tmp")
+                            temp.writeText(body)
+                            if(!temp.renameTo(file)){
+                                temp.copyTo(file,overwrite=true)
+                                temp.delete()
+                            }
+                        }
+                    }catch(e:Exception){
+                        android.util.Log.w("HomeTV","Playlist download failed: "+p.name,e)
+                    }
+                    if(results[index].isEmpty()){
+                        try{
+                            val file=cacheFile(p)
+                            if(file.exists())results[index]=parseM3u(file.readText(),p.name)
+                        }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
                     }
                 }
             }
             workers.forEach{it.join()}
-            val found=results.flatMap{it}
-            runOnUiThread {
-                // Kotlin distinctBy keeps the first occurrence and its original playlist position.
-                // Never alphabetically sort the merged channel list.
-                channels=found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
-                Toast.makeText(this,"${channels.size} channels loaded",Toast.LENGTH_SHORT).show()
+            val found=results.flatMap{it}.distinctBy{it.name.lowercase()+"|"+it.url}
+            runOnUiThread{
+                channels=found.toMutableList()
                 done()
             }
         }
