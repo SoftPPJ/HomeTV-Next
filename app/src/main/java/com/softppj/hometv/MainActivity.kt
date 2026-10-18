@@ -205,7 +205,7 @@ class MainActivity: Activity() {
     @Volatile private var epgLoadedAt=0L
     private fun epgTime(value:String?):Long{
         if(value.isNullOrBlank())return 0L
-        val m=Regex("""^(\\d{14})(?:\\s*([+-]\\d{4}))?""").find(value.trim()) ?:return 0L
+        val m=Regex("""^(\d{14})(?:\s*([+-]\d{4}))?""").find(value.trim()) ?:return 0L
         return try{
             val format=java.text.SimpleDateFormat("yyyyMMddHHmmss",java.util.Locale.US)
             format.isLenient=false
@@ -229,7 +229,7 @@ class MainActivity: Activity() {
             if(current!=null){
                 append("NOW  ").append(programmeTime(current.start)).append("–")
                     .append(programmeTime(current.end)).append("  ").append(current.title)
-                if(current.description.isNotBlank())append("\\n").append(current.description.take(130))
+                if(current.description.isNotBlank())append("\n").append(current.description.take(130))
             }else append("EPG: No current programme")
             if(next!=null)append("\\nNEXT  ").append(programmeTime(next.start)).append("  ").append(next.title)
         }
@@ -313,7 +313,7 @@ class MainActivity: Activity() {
                         val lines=entries.map{p->
                             val status=if(p.start<=now && p.end>now)"▶ NOW  " else ""
                             status+programmeTime(p.start)+"–"+programmeTime(p.end)+"  "+p.title+
-                                if(p.description.isNotBlank())"\\n"+p.description.take(140) else ""
+                                if(p.description.isNotBlank())"\n"+p.description.take(140) else ""
                         }
                         showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • Programme schedule")
                             .setItems(lines.toTypedArray()){_,_->}
