@@ -226,17 +226,21 @@ class MainActivity: Activity() {
             addCategory(Intent.CATEGORY_OPENABLE)
             type="*/*"
         }
-        if(intent.resolveActivity(packageManager)==null){showImportFallback();return}
+        if(intent.resolveActivity(packageManager)==null){
+            Toast.makeText(this,"Android file picker unavailable on this TV",Toast.LENGTH_LONG).show()
+            return
+        }
         try{startActivityForResult(intent,importPlaylistRequest)}
         catch(e:Exception){showImportFallback()}
     }
     private fun showImportFallback(){
         AlertDialog.Builder(this).setTitle("Import M3U playlist")
-            .setItems(arrayOf("Browse accessible storage","Paste M3U playlist text","Enter playlist URL")){_,choice->
+            .setItems(arrayOf("Browse TV / USB storage","Open Android file picker","Paste M3U playlist text","Enter playlist URL")){_,choice->
                 when(choice){
                     0->browsePlaylistFiles(null)
-                    1->pasteM3uPlaylist()
-                    2->editPlaylist(null)
+                    1->importLocalPlaylist()
+                    2->pasteM3uPlaylist()
+                    3->editPlaylist(null)
                 }
             }.setNegativeButton("Cancel",null).show()
     }
@@ -275,9 +279,29 @@ class MainActivity: Activity() {
     }
     private fun browsePlaylistFiles(directory:java.io.File?){
         val roots=if(directory==null){
-            val dirs=mutableListOf(java.io.File("/storage"),java.io.File("/sdcard"),java.io.File("/mnt/media_rw"))
-            getExternalFilesDirs(null).filterNotNull().forEach{dirs.add(it)}
-            dirs.distinctBy{it.absolutePath}.filter{it.exists() && it.isDirectory}
+            val dirs=mutableListOf<java.io.File>()
+            // Detect removable volumes reported by Android, rather than relying only on /storage.
+            val storage=getSystemService(android.content.Context.STORAGE_SERVICE) as android.os.storage.StorageManager
+            if(android.os.Build.VERSION.SDK_INT>=30){
+                storage.storageVolumes.filter{it.state==android.os.Environment.MEDIA_MOUNTED}.forEach{volume->
+                    volume.directory?.let{dirs.add(it)}
+                }
+            }
+            dirs.add(java.io.File("/storage"))
+            dirs.add(java.io.File("/sdcard"))
+            dirs.add(java.io.File("/mnt/media_rw"))
+            getExternalFilesDirs(null).filterNotNull().forEach{path->
+                // Android may expose USB only through the app-specific folder.
+                dirs.add(path)
+                var parent=path.parentFile
+                repeat(4){
+                    if(parent!=null){
+                        dirs.add(parent!!)
+                        parent=parent?.parentFile
+                    }
+                }
+            }
+            dirs.distinctBy{it.canonicalPath}.filter{it.exists() && it.isDirectory}
         }else emptyList()
         val children=if(directory!=null)directory.listFiles()?.filter{
             it.isDirectory || (it.isFile && (it.name.endsWith(".m3u",true) || it.name.endsWith(".m3u8",true)))
@@ -287,14 +311,14 @@ class MainActivity: Activity() {
         if(directory!=null)entries.add("← Back" to directory.parentFile?.takeIf{it.absolutePath!="/"})
         children.forEach{entries.add((if(it.isDirectory)"📁 " else "▶ ")+it.name to it)}
         if(entries.isEmpty()){
-            AlertDialog.Builder(this).setTitle("No accessible files")
-                .setMessage("Android TV may restrict USB and storage access. You can paste an M3U playlist or add its URL instead.")
-                .setPositiveButton("Paste M3U"){_,_->pasteM3uPlaylist()}
+            AlertDialog.Builder(this).setTitle("No accessible USB files")
+                .setMessage("The USB drive may be mounted but Android 14 is blocking direct folder access. Try the Android file picker, if installed, or import using an M3U URL.")
+                .setPositiveButton("System file picker"){_,_->importLocalPlaylist()}
                 .setNeutralButton("Playlist URL"){_,_->editPlaylist(null)}
                 .setNegativeButton("Close",null).show()
             return
         }
-        AlertDialog.Builder(this).setTitle(directory?.absolutePath ?: "Browse storage")
+        AlertDialog.Builder(this).setTitle(directory?.absolutePath ?: "TV / USB storage")
             .setItems(entries.map{it.first}.toTypedArray()){_,which->
                 val selected=entries[which].second
                 if(selected==null)browsePlaylistFiles(null)
@@ -307,7 +331,7 @@ class MainActivity: Activity() {
                         Toast.makeText(this,"Cannot read file: "+e.message,Toast.LENGTH_LONG).show()
                     }}
                 }
-            }.setNeutralButton("Paste M3U"){_,_->pasteM3uPlaylist()}
+            }.setNeutralButton("System file picker"){_,_->importLocalPlaylist()}
             .setNegativeButton("Close",null).show()
     }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
