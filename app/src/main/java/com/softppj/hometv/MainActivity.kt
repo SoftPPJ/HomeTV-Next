@@ -514,6 +514,7 @@ class MainActivity: Activity() {
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
         val drawer=LinearLayout(this).apply{
+            tag="channel_drawer"
             orientation=LinearLayout.VERTICAL
             setBackgroundColor(0xF015283C.toInt())
             isFocusableInTouchMode=true
@@ -854,23 +855,29 @@ class MainActivity: Activity() {
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
         root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
-        root.addView(label("Remote: Left/Right, CH+/-, Previous/Next, Rewind/Fast Forward = switch. OK = channel list; Back = groups; Menu = toggle Fit/Fill."))
+        root.addView(label("Remote: Up/Down preview channel; OK plays highlighted channel; Left opens channel list; Right/Menu opens playback settings; Back returns."))
         root.addView(button("Home"){showHome()})
     }
-    override fun onKeyDown(keyCode:Int,event:KeyEvent?):Boolean{
-        if(active>=0){
-            when(keyCode){
-                KeyEvent.KEYCODE_DPAD_UP->{previewChannel(-1);return true}
-                KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(1);return true}
-                KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
-                KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
-                KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
-                KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS->{previewChannel(-1);return true}
-                KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT->{previewChannel(1);return true}
-                KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
+    override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
+            // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
+            // Let an open channel drawer handle its own list navigation.
+            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null
+            if(!drawerOpen){
+                when(event.keyCode){
+                    KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_CHANNEL_DOWN,
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS->{previewChannel(-1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN,KeyEvent.KEYCODE_CHANNEL_UP,
+                    KeyEvent.KEYCODE_MEDIA_NEXT->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER->{confirmPreview();return true}
+                    KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
+                    KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
+                    KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
+                }
             }
         }
-        return super.onKeyDown(keyCode,event)
+        return super.dispatchKeyEvent(event)
     }
     override fun onBackPressed(){
         // Back navigates one level; Back from Home exits the application.
