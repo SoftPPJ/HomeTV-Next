@@ -138,15 +138,18 @@ class MainActivity: Activity() {
         prefs.edit().putString("playlists",arr.toString()).apply()
     }
     private fun showHome() {
-        reset("HomeTV")
-        root.addView(button("All channels"){allChannels()})
-        root.addView(button("Channel groups"){showChannels()})
-        root.addView(button("★ Favorites"){favorites()})
-        root.addView(button("Refresh playlists"){refresh{showChannels()}})
-        root.addView(button("Manage playlists"){managePlaylists()})
-        root.addView(button("Settings"){settings()})
-        root.addView(button("Resume last channel"){if(channels.isEmpty())refresh{resumeLast()}else resumeLast()})
-        root.addView(button("Exit HomeTV"){confirmExit()})
+        reset("HomeTV  •  LIVE")
+        root.addView(label("YOUR TELEVISION  |  "+channels.size+" CHANNELS"))
+        root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh{resumeLast()}else resumeLast()})
+        root.addView(label("DISCOVER"))
+        root.addView(button("▦  All live channels"){allChannels()})
+        root.addView(button("★  My favorites"){favorites()})
+        root.addView(button("☷  Browse by category"){showChannels()})
+        root.addView(label("LIBRARY & CONTROLS"))
+        root.addView(button("↻  Refresh channel lists"){refresh{showHome()}})
+        root.addView(button("＋  Manage playlists"){managePlaylists()})
+        root.addView(button("⚙  Player & TV settings"){settings()})
+        root.addView(button("⏻  Exit HomeTV"){confirmExit()})
     }
     private fun managePlaylists(){
         reset("Playlists")
