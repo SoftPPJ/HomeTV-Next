@@ -196,65 +196,132 @@ class MainActivity: Activity() {
             .setMessage("Enter an XMLTV guide URL (.xml or .xml.gz).")
             .setView(input).setPositiveButton("Save"){_,_->
                 prefs.edit().putString("epg_xmltv_url",input.text.toString().trim()).apply()
+                epgGuide=emptyMap();epgLoadedAt=0L
                 showEpg()
             }.setNegativeButton("Cancel",null).create())
     }
-    private fun showEpg(){
+    private data class EpgProgramme(val start:Long,val end:Long,val title:String,val description:String)
+    @Volatile private var epgGuide:Map<String,List<EpgProgramme>> = emptyMap()
+    @Volatile private var epgLoadedAt=0L
+    private fun epgTime(value:String?):Long{
+        if(value.isNullOrBlank())return 0L
+        val m=Regex("""^(\\d{14})(?:\\s*([+-]\\d{4}))?""").find(value.trim()) ?:return 0L
+        return try{
+            val format=java.text.SimpleDateFormat("yyyyMMddHHmmss",java.util.Locale.US)
+            format.isLenient=false
+            format.timeZone=if(m.groupValues[2].isNotEmpty())
+                java.util.TimeZone.getTimeZone("GMT"+m.groupValues[2].substring(0,3)+":"+m.groupValues[2].substring(3))
+                else java.util.TimeZone.getDefault()
+            format.parse(m.groupValues[1])?.time ?:0L
+        }catch(_:Exception){0L}
+    }
+    private fun programmeList(c:Channel):List<EpgProgramme> =
+        epgGuide[c.epgId.trim().lowercase(java.util.Locale.ROOT)]
+            ?:epgGuide[c.name.trim().lowercase(java.util.Locale.ROOT)] ?:emptyList()
+    private fun programmeTime(t:Long):String =
+        java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(t))
+    private fun programmeSummary(c:Channel):String{
+        val now=System.currentTimeMillis()
+        val entries=programmeList(c)
+        val current=entries.firstOrNull{it.start<=now && it.end>now}
+        val next=entries.firstOrNull{it.start>now}
+        return buildString{
+            if(current!=null){
+                append("NOW  ").append(programmeTime(current.start)).append("–")
+                    .append(programmeTime(current.end)).append("  ").append(current.title)
+                if(current.description.isNotBlank())append("\\n").append(current.description.take(130))
+            }else append("EPG: No current programme")
+            if(next!=null)append("\\nNEXT  ").append(programmeTime(next.start)).append("  ").append(next.title)
+        }
+    }
+    private fun loadEpg(done:(Boolean)->Unit){
         val url=prefs.getString("epg_xmltv_url","")?.trim().orEmpty()
-        if(url.isEmpty()){configureEpg();return}
-        Toast.makeText(this,"Loading EPG…",Toast.LENGTH_SHORT).show()
+        if(url.isEmpty()){done(false);return}
+        if(epgGuide.isNotEmpty() && System.currentTimeMillis()-epgLoadedAt<60*60*1000L){
+            done(true);return
+        }
         thread{
             try{
                 val connection=URL(url).openConnection().apply{
-                    connectTimeout=8000
-                    readTimeout=12000
+                    connectTimeout=8000;readTimeout=15000
+                    useCaches=false
                 }
-                val stream=connection.getInputStream()
-                val data=if(url.substringBefore("?").endsWith(".gz",true))
-                    java.util.zip.GZIPInputStream(stream) else stream
-                val guide=mutableMapOf<String,MutableList<String>>()
-                val parser=android.util.Xml.newPullParser()
-                parser.setInput(data,"UTF-8")
-                var channel="";var title=""
-                data.use{
+                val input=connection.getInputStream()
+                val stream=if(url.substringBefore("?").endsWith(".gz",true))
+                    java.util.zip.GZIPInputStream(input) else input
+                val guide=mutableMapOf<String,MutableList<EpgProgramme>>()
+                stream.use{data->
+                    val parser=android.util.Xml.newPullParser()
+                    parser.setInput(data,"UTF-8")
+                    var channel="";var start=0L;var end=0L;var title="";var description=""
                     var event=parser.eventType
                     while(event!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT){
                         if(event==org.xmlpull.v1.XmlPullParser.START_TAG){
                             when(parser.name){
-                                "programme"->{channel=parser.getAttributeValue(null,"channel")?.lowercase().orEmpty();title=""}
+                                "programme"->{
+                                    channel=parser.getAttributeValue(null,"channel")?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+                                    start=epgTime(parser.getAttributeValue(null,"start"))
+                                    end=epgTime(parser.getAttributeValue(null,"stop"))
+                                    title="";description=""
+                                }
                                 "title"->if(channel.isNotEmpty())title=parser.nextText()
+                                "desc"->if(channel.isNotEmpty())description=parser.nextText()
                             }
                         }else if(event==org.xmlpull.v1.XmlPullParser.END_TAG && parser.name=="programme"){
-                            if(channel.isNotEmpty() && title.isNotBlank()){
-                                val entries=guide.getOrPut(channel){mutableListOf()}
-                                if(entries.size<10)entries.add(title)
+                            if(channel.isNotEmpty() && start>0 && end>start && title.isNotBlank()){
+                                guide.getOrPut(channel){mutableListOf()}.add(EpgProgramme(start,end,title,description))
                             }
                             channel=""
                         }
                         event=parser.next()
                     }
                 }
-                runOnUiThread{
-                    val c=channels.getOrNull(active)
-                    val entries=if(c!=null){
-                        val shows=guide[c.epgId.lowercase()] ?:guide[c.name.lowercase()]
-                        listOf(c.name+"  •  "+c.group)+(shows ?:listOf("No matching EPG programmes"))
-                    }else visibleIndices().mapNotNull{i->
-                        val ch=channels[i]
-                        (guide[ch.epgId.lowercase()] ?:guide[ch.name.lowercase()])?.firstOrNull()?.let{ch.name+" • "+it}
-                    }.take(100)
-                    showSideDialog(AlertDialog.Builder(this).setTitle("TV Guide (EPG)")
-                        .setItems(entries.toTypedArray()){_,_->}
-                        .setPositiveButton("EPG URL"){_,_->configureEpg()}
-                        .setNegativeButton("Close",null).create())
-                }
+                val sorted=guide.mapValues{(_,v)->v.sortedBy{it.start}}
+                epgGuide=sorted
+                epgLoadedAt=System.currentTimeMillis()
+                runOnUiThread{done(true)}
             }catch(e:Exception){
-                runOnUiThread{
-                    showSideDialog(AlertDialog.Builder(this).setTitle("EPG unavailable")
-                        .setMessage(e.message ?: "Unable to load guide")
-                        .setPositiveButton("Change URL"){_,_->configureEpg()}
-                        .setNegativeButton("Close",null).create())
+                android.util.Log.w("HomeTV","EPG download failed",e)
+                runOnUiThread{done(epgGuide.isNotEmpty())}
+            }
+        }
+    }
+    private fun showEpg(){
+        if(prefs.getString("epg_xmltv_url","").isNullOrBlank()){configureEpg();return}
+        Toast.makeText(this,"Loading TV guide…",Toast.LENGTH_SHORT).show()
+        loadEpg{success->
+            if(!success){
+                showSideDialog(AlertDialog.Builder(this).setTitle("EPG unavailable")
+                    .setMessage("Unable to load XMLTV guide.")
+                    .setPositiveButton("Change EPG URL"){_,_->configureEpg()}
+                    .setNegativeButton("Close",null).create())
+            }else{
+                val now=System.currentTimeMillis()
+                val items=visibleIndices().mapNotNull{i->
+                    val c=channels[i]
+                    val entries=programmeList(c)
+                    if(entries.isEmpty())null else{
+                        val current=entries.firstOrNull{it.start<=now && it.end>now}
+                        i to (c.name+"  •  "+(current?.let{programmeTime(it.start)+" "+it.title} ?: "Schedule"))
+                    }
                 }
+                showSideDialog(AlertDialog.Builder(this).setTitle("TV Guide • Channels")
+                    .setItems(items.map{it.second}.toTypedArray()){_,position->
+                        val i=items[position].first
+                        val c=channels[i]
+                        val entries=programmeList(c).filter{it.end>now-3600000L}.take(80)
+                        val lines=entries.map{p->
+                            val status=if(p.start<=now && p.end>now)"▶ NOW  " else ""
+                            status+programmeTime(p.start)+"–"+programmeTime(p.end)+"  "+p.title+
+                                if(p.description.isNotBlank())"\\n"+p.description.take(140) else ""
+                        }
+                        showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • Programme schedule")
+                            .setItems(lines.toTypedArray()){_,_->}
+                            .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(i))}
+                            .setNegativeButton("Close",null).create())
+                    }
+                    .setPositiveButton("EPG source"){_,_->configureEpg()}
+                    .setNegativeButton("Close",null).create())
             }
         }
     }
@@ -1148,6 +1215,7 @@ class MainActivity: Activity() {
     }
     private fun screenInfoOnStart(index:Int){
         handler.postDelayed({if(active==index)showChannelInfo(index)},500)
+        if(epgGuide.isEmpty())loadEpg{if(active==index)showChannelInfo(index)}
     }
     private fun showChannelInfo(index:Int,extra:String=""){
         val screen=videoScreen ?:return
@@ -1162,7 +1230,7 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            text=numberFor(index).toString()+"  "+channel.name+"\n"+channel.group+"  •  "+channel.source+(if(channel.epgId.isNotBlank())"  •  EPG: "+channel.epgId else "")+(if(extra.isNotBlank())"\n"+extra else "")
+            text=numberFor(index).toString()+"  "+channel.name+"\n"+channel.group+"  •  "+channel.source+(if(channel.epgId.isNotBlank())"  •  EPG: "+channel.epgId else "")+"\n"+(if(epgGuide.isNotEmpty())programmeSummary(channel) else "EPG: Loading or unavailable")+(if(extra.isNotBlank())"\n"+extra else "")
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
