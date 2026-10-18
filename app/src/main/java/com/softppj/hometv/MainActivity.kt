@@ -77,6 +77,22 @@ class MainActivity: Activity() {
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
+    private val bufferProfiles=arrayOf("Ultra Fast","Fast","Balanced","Stable","Maximum Buffer")
+    private fun bufferProfile()=prefs.getString("buffer_profile","Balanced") ?: "Balanced"
+    private fun bufferValues():IntArray=when(bufferProfile()){
+        "Ultra Fast"->intArrayOf(500,3500,250,500)
+        "Fast"->intArrayOf(1000,7000,500,1000)
+        "Stable"->intArrayOf(4000,25000,1500,3500)
+        "Maximum Buffer"->intArrayOf(8000,45000,3000,6500)
+        else->intArrayOf(2000,15000,1000,2000)
+    }
+    private fun chooseBufferProfile(){
+        AlertDialog.Builder(this).setTitle("Playback buffer")
+            .setSingleChoiceItems(bufferProfiles,bufferProfiles.indexOf(bufferProfile()).coerceAtLeast(0)){dialog,i->
+                prefs.edit().putString("buffer_profile",bufferProfiles[i]).apply()
+                dialog.dismiss();settings()
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Auto") ?: "Auto")
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
@@ -479,7 +495,9 @@ class MainActivity: Activity() {
                 .setReadTimeoutMs(20000)
                 .setUserAgent(c.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
                 .setDefaultRequestProperties(c.headers.filterKeys{!it.equals("User-Agent",true)})
-            val loadControl=DefaultLoadControl.Builder().setBufferDurationsMs(1500,12000,750,1500).build()
+            val buffer=bufferValues()
+            val loadControl=DefaultLoadControl.Builder()
+                .setBufferDurationsMs(buffer[0],buffer[1],buffer[2],buffer[3]).build()
             val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
             exo.volume=1f
@@ -541,7 +559,8 @@ class MainActivity: Activity() {
     }
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
-            val options=arrayListOf("--network-caching=1200","--live-caching=1200","--http-reconnect","--no-video-title-show")
+            val cache=bufferValues()[0].coerceAtLeast(300)
+            val options=arrayListOf("--network-caching="+cache,"--live-caching="+cache,"--http-reconnect","--no-video-title-show")
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
@@ -567,7 +586,7 @@ class MainActivity: Activity() {
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
-            media.addOption(":network-caching=1200")
+            media.addOption(":network-caching="+cache)
             vlc.media=media
             media.release()
             vlc.play()
@@ -594,6 +613,8 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
+        root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
+        root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
