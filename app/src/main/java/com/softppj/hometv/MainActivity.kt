@@ -13,6 +13,8 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.common.AudioAttributes
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -413,7 +415,10 @@ class MainActivity: Activity() {
                 .setReadTimeoutMs(20000)
                 .setUserAgent(c.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
                 .setDefaultRequestProperties(c.headers.filterKeys{!it.equals("User-Agent",true)})
-            val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+            val loadControl=DefaultLoadControl.Builder().setBufferDurationsMs(1500,12000,750,1500).build()
+            val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
+            exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
+            exo.volume=1f
             player=exo
             val view=PlayerView(this).apply{
                 player=exo
@@ -424,6 +429,13 @@ class MainActivity: Activity() {
             currentPlayerView=view
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             exo.addListener(object:Player.Listener{
+                override fun onPlaybackStateChanged(state:Int){
+                    if(state==Player.STATE_READY){
+                        retryCount=0
+                        retryTask?.let{handler.removeCallbacks(it)}
+                        retryTask=null
+                    }
+                }
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
