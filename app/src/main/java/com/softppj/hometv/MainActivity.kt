@@ -1222,7 +1222,7 @@ class MainActivity: Activity() {
                       if(v.paused)v.play().catch(function(){});
                       return v.muted?'Muted by browser':'Sound enabled';
                     })();"""){result->
-                        Toast.makeText(this,result.trim('"'),Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity,result.trim('"'),Toast.LENGTH_SHORT).show()
                     }
                 }
             }
