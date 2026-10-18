@@ -77,10 +77,22 @@ class MainActivity: Activity() {
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
+    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Auto") ?: "Auto")
+    private fun chooseChannelEngine(i:Int){
+        if(i !in channels.indices)return
+        val c=channels[i]
+        val choices=arrayOf("Auto","Media3","LibVLC")
+        AlertDialog.Builder(this).setTitle(c.name+" — Player")
+            .setSingleChoiceItems(choices,choices.indexOf(engineFor(c)).coerceAtLeast(0)){dialog,which->
+                prefs.edit().putString("engine_"+id(c),choices[which]).apply()
+                dialog.dismiss()
+                if(active==i)playIndex(i)
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit","Audio tracks")
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock","Fit / Fill screen","All channels","Settings","Exit","Audio tracks","Playback engine")
         AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(i)
@@ -91,6 +103,7 @@ class MainActivity: Activity() {
                 5->settings()
                 6->confirmExit()
                 7->audioTracks()
+                8->chooseChannelEngine(i)
             }
         }.show()
     }
@@ -343,7 +356,7 @@ class MainActivity: Activity() {
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val channel=channels[active]
-        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks")
+        val options=arrayOf("Channel list","Previous channel","Next channel","Fit / Fill screen","Lock / unlock channel","Settings","Exit HomeTV","Favorite / Unfavorite","All channels","Audio tracks","Playback engine")
         AlertDialog.Builder(this).setTitle(channel.name+" — Channel settings")
             .setItems(options){_,index->
                 when(index){
@@ -357,6 +370,7 @@ class MainActivity: Activity() {
                     7->favorite(channel)
                     8->allChannels()
                     9->audioTracks()
+                    10->chooseChannelEngine(active)
                 }
             }.setNegativeButton("Close",null).show()
     }
@@ -453,7 +467,7 @@ class MainActivity: Activity() {
                 loadDataWithBaseURL("https://www.youtube.com", "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='margin:0;background:black;overflow:hidden'><iframe style='position:absolute;top:0;left:0;width:100%;height:100%;border:0' src='https://www.youtube.com/embed/$videoId?autoplay=1' allow='autoplay; encrypted-media; fullscreen' allowfullscreen></iframe></body></html>","text/html","UTF-8",null)
             }
             screen.addView(web,FrameLayout.LayoutParams(-1,-1))
-        }else if(prefs.getString("engine","Auto")=="LibVLC"){
+        }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
             val factory=DefaultHttpDataSource.Factory()
@@ -486,7 +500,7 @@ class MainActivity: Activity() {
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
-                    if(prefs.getString("engine","Auto")=="Auto" && !vlcAttempted){
+                    if(engineFor(c)=="Auto" && !vlcAttempted){
                         vlcAttempted=true
                         handler.post{
                             if(active==index && videoScreen===screen){
