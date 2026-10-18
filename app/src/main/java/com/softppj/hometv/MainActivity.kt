@@ -102,7 +102,11 @@ class MainActivity: Activity() {
         root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(root)
         showHome()
-        if(prefs.getBoolean("resume",true)) refresh { resumeLast() }
+        when(prefs.getString("launch_screen","Last channel")){
+            "Last channel"->refresh{resumeLast()}
+            "Channels"->refresh{allChannels()}
+            else->refresh{showHome()}
+        }
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
     private fun button(s:String, action:()->Unit)=Button(this).apply {
@@ -382,12 +386,44 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(labels,selected){dialog,index->dialog.dismiss();playIndex(index)}
             .setNegativeButton("Close",null).show()
     }
-    private fun resizeMode():Int = if(prefs.getBoolean("fill_screen",true)) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-    private fun toggleScreenMode(){
-        val next=!prefs.getBoolean("fill_screen",true)
-        prefs.edit().putBoolean("fill_screen",next).apply()
+    private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original")
+    private fun screenMode()=prefs.getString("screen_mode","Fill / Crop") ?: "Fill / Crop"
+    private fun resizeMode():Int=when(screenMode()){
+        "Fit"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        "Stretch","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+        "Original"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+        else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+    }
+    private fun applyVideoSize(){
         currentPlayerView?.resizeMode=resizeMode()
-        showBanner(if(next)"Screen: Fill (edges may crop)" else "Screen: Fit (no cropping)")
+        vlcPlayer?.let{vlc->
+            try{
+                vlc.setScale(0f)
+                vlc.setAspectRatio(when(screenMode()){
+                    "16:9"->"16:9"
+                    "4:3"->"4:3"
+                    "Stretch"->"16:9"
+                    else->null
+                })
+                if(screenMode()=="Fill / Crop")vlc.setScale(1.35f)
+                if(screenMode()=="Original")vlc.setScale(1f)
+            }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
+        }
+    }
+    private fun selectScreenMode(){
+        AlertDialog.Builder(this).setTitle("Screen size and aspect ratio")
+            .setSingleChoiceItems(screenModes,screenModes.indexOf(screenMode()).coerceAtLeast(0)){dialog,i->
+                prefs.edit().putString("screen_mode",screenModes[i]).apply()
+                dialog.dismiss()
+                applyVideoSize()
+                if(active>=0)showBanner("Screen: "+screenModes[i]) else settings()
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun toggleScreenMode(){
+        val next=if(screenMode()=="Fill / Crop")"Fit" else "Fill / Crop"
+        prefs.edit().putString("screen_mode",next).apply()
+        applyVideoSize()
+        showBanner("Screen: "+next)
     }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
@@ -518,6 +554,7 @@ class MainActivity: Activity() {
             vlc.media=media
             media.release()
             vlc.play()
+            handler.postDelayed({if(vlcPlayer===vlc)applyVideoSize()},1000)
         }catch(e:Exception){
             android.util.Log.e("HomeTV","LibVLC startup failed",e)
             showBanner("LibVLC error: "+(e.message?:"unknown"),true)
@@ -558,13 +595,17 @@ class MainActivity: Activity() {
         root.addView(button("Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF"){
             prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();settings()
         })
+        root.addView(button("Open on launch: "+(prefs.getString("launch_screen","Last channel")?:"Last channel")){
+            val choices=arrayOf("Home","Last channel","Channels")
+            AlertDialog.Builder(this).setTitle("When HomeTV opens").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel"))){dialog,i->
+                prefs.edit().putString("launch_screen",choices[i]).apply();dialog.dismiss();settings()
+            }.setNegativeButton("Cancel",null).show()
+        })
         root.addView(button("Try launch at device boot: "+if(prefs.getBoolean("boot",false))"ON" else "OFF"){
             prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
         })
-        root.addView(label("Boot launching is device-dependent. The TV power key cannot be overridden by an ordinary app."))
-        root.addView(button("Video size: "+if(prefs.getBoolean("fill_screen",true))"Fill screen" else "Fit without cropping"){
-            prefs.edit().putBoolean("fill_screen",!prefs.getBoolean("fill_screen",true)).apply();settings()
-        })
+        root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
+        root.addView(button("Screen size: "+screenMode()){selectScreenMode()})
         root.addView(label("Remote: Left/Right, CH+/-, Previous/Next, Rewind/Fast Forward = switch. OK = channel list; Back = groups; Menu = toggle Fit/Fill."))
         root.addView(button("Home"){showHome()})
     }
