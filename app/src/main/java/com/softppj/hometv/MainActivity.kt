@@ -591,6 +591,7 @@ class MainActivity: Activity() {
                 }.show()
             })
         }
+        root.addView(button("↻ Refresh from original source URLs"){refresh({managePlaylists()},true)})
         root.addView(button("Add M3U URL"){editPlaylist(null)})
         root.addView(button("Import M3U file (TV / USB)"){showImportFallback()})
         root.addView(button("Add Xtream Codes"){addXtream()})
