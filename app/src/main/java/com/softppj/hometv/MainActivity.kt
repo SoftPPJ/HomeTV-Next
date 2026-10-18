@@ -1546,7 +1546,17 @@ class MainActivity: Activity() {
     override fun onBackPressed(){
         // Back navigates one level; Back from Home exits the application.
         if(active>=0){
+            val screen=videoScreen
+            val drawer=screen?.findViewWithTag<View>("channel_drawer")
+                ?:screen?.findViewWithTag<View>("settings_drawer")
+                ?:screen?.findViewWithTag<View>("left_navigation")
+            if(drawer!=null){
+                screen.removeView(drawer)
+                screen.requestFocus()
+                return
+            }
             unlockedChannel=null
+            // Exiting playback returns directly to channels, never via Home or Settings.
             allChannels()
         }else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV")!=true){
             showHome()
