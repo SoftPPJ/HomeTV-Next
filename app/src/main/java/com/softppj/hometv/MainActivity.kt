@@ -238,7 +238,7 @@ class MainActivity: Activity() {
                     val c=channels.getOrNull(active)
                     val entries=if(c!=null){
                         val shows=guide[c.epgId.lowercase()] ?:guide[c.name.lowercase()]
-                        listOf(c.name)+(shows ?:listOf("No matching EPG programmes"))
+                        listOf(c.name+"  •  "+c.group)+(shows ?:listOf("No matching EPG programmes"))
                     }else visibleIndices().mapNotNull{i->
                         val ch=channels[i]
                         (guide[ch.epgId.lowercase()] ?:guide[ch.name.lowercase()])?.firstOrNull()?.let{ch.name+" • "+it}
@@ -762,7 +762,7 @@ class MainActivity: Activity() {
     private fun showChannels(){
         reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
-        val groups=visibleIndices().map{channels[it].group}.distinct()
+        val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
             list.addView(button("▸ $group"){showGroup(group)})
@@ -1162,8 +1162,8 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            text=numberFor(index).toString()+"  "+channel.name
-            textSize=20f
+            text=numberFor(index).toString()+"  "+channel.name+"\n"+channel.group+"  •  "+channel.source+(if(channel.epgId.isNotBlank())"  •  EPG: "+channel.epgId else "")+(if(extra.isNotBlank())"\n"+extra else "")
+            textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
         })
@@ -1249,6 +1249,7 @@ class MainActivity: Activity() {
         if(channels.isEmpty())return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it);return}
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it)}
+        screen.findViewWithTag<View>("left_navigation")?.let{screen.removeView(it)}
         val drawer=LinearLayout(this).apply{
             tag="channel_drawer"
             orientation=LinearLayout.VERTICAL
@@ -1304,7 +1305,7 @@ class MainActivity: Activity() {
             setPadding(20,18,12,16)
         })
         val groups=visibleIndices().map{channels[it].group}.distinct()
-        val options=listOf("⚙  Universal settings","⌂  Home","★  Favorites","🙈  Hidden channels","▤  EPG","↻  Refresh playlists","☰  All channels")+
+        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels")+
             groups.map{"▸  "+it}
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
@@ -1320,7 +1321,7 @@ class MainActivity: Activity() {
                 2->favorites()
                 3->hiddenChannels()
                 4->showEpg()
-                5->refresh({showBanner("Playlist refresh completed")},true)
+                5->refresh({if(active>=0)showChannelInfo(active,"Playlist refresh finished") else showHome()},true)
                 6->showOverlayList()
                 else->{
                     val group=groups.getOrNull(choice-7)
