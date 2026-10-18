@@ -808,7 +808,7 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="CHANNELS  •  OK to play"
+            text="CHANNELS  •  LEFT for Settings / Home"
             textSize=19f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(16,16,8,12)
@@ -822,18 +822,58 @@ class MainActivity: Activity() {
                 logoRow(channels[position],(position+1).toString()+". "+channels[position].name)
         }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
-        drawer.addView(button("⚙  Playback settings"){screen.removeView(drawer);showPlaybackSettings()})
-        drawer.addView(button("⌂  Home screen"){showHome()})
+
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,position,_->close();playIndex(position)}
         list.setOnKeyListener{_,code,event->
-            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
+            if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){
+                close();showLeftNavigation();true
+            }else if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
                 close();true
             }else false
         }
         list.setSelection(active.coerceAtLeast(0))
+        list.requestFocus()
+    }
+    private fun showLeftNavigation(){
+        val screen=videoScreen ?:return
+        screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
+        screen.findViewWithTag<View>("left_navigation")?.let{screen.removeView(it);return}
+        val drawer=LinearLayout(this).apply{
+            tag="left_navigation"
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(0xF015283C.toInt())
+            isFocusableInTouchMode=true
+        }
+        drawer.addView(TextView(this).apply{
+            text="HOMETV  •  SETTINGS & HOME"
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(20,18,12,16)
+        })
+        val list=ListView(this)
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,
+            arrayOf("⚙  Settings (keep watching)","⌂  Home screen","←  Back to channels","▶  Return to TV"))
+        drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
+        screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
+        fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemClickListener{_,_,choice,_->
+            close()
+            when(choice){
+                0->liveSettings()
+                1->showHome()
+                2->showOverlayList()
+            }
+        }
+        list.setOnKeyListener{_,code,event->
+            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_DPAD_RIGHT || code==KeyEvent.KEYCODE_BACK)){
+                close();showOverlayList();true
+            }else false
+        }
+        list.setSelection(0)
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
@@ -1383,7 +1423,7 @@ class MainActivity: Activity() {
             }
             // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
             // Let an open channel drawer handle its own list navigation.
-            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null
+            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
             if(!drawerOpen){
                 when(event.keyCode){
                     KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
