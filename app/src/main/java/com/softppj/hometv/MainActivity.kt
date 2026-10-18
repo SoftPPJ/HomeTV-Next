@@ -1512,14 +1512,6 @@ class MainActivity: Activity() {
         root.addView(button("Home"){showHome()})
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
-        if(active>=0 && web!=null && event.action==KeyEvent.ACTION_DOWN){
-            if(event.keyCode==KeyEvent.KEYCODE_BACK || event.keyCode==KeyEvent.KEYCODE_ESCAPE){allChannels();return true}
-            if(event.keyCode==KeyEvent.KEYCODE_MENU){
-                videoScreen?.findViewById<View>(android.R.id.content)?.requestFocus()
-                return true
-            }
-            return super.dispatchKeyEvent(event)
-        }
         if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
             val digit=when(event.keyCode){
                 in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9->event.keyCode-KeyEvent.KEYCODE_0
