@@ -1641,7 +1641,7 @@ class MainActivity: Activity() {
             viewer.settings.useWideViewPort=true
             viewer.settings.loadWithOverviewMode=true
             viewer.settings.setSupportZoom(false)
-            viewer.settings.userAgentString=viewer.settings.userAgentString.replace("Mobile","").replace(" wv","")
+            // Keep the system WebView user agent unchanged; spoofing a desktop browser can cause YouTube verification challenges.
             viewer.webChromeClient=object:WebChromeClient(){
                 private var fullscreenView:View?=null
                 override fun onShowCustomView(view:View,callback:CustomViewCallback){
@@ -1660,26 +1660,9 @@ class MainActivity: Activity() {
             viewer.webViewClient=object:WebViewClient(){
                 override fun onPageFinished(view:WebView,url:String){
                     super.onPageFinished(view,url)
-                    view.evaluateJavascript("""(function(){
-                      if(document.getElementById('hometv-video-style'))return;
-                      var css=document.createElement('style');
-                      css.id='hometv-video-style';
-                      css.textContent='html,body{margin:0!important;background:#000!important;overflow:hidden!important} video{position:fixed!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;object-fit:contain!important;z-index:2147483000!important;background:#000!important}';
-                      document.head.appendChild(css);
-                    })();""",null)
-                    // YouTube may mute autoplay; request sound once the player is ready.
-                    youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
-                    var tries=0
-                    val task=object:Runnable{
-                        override fun run(){
-                            if(web!==view || active<0)return
-                            unmuteYoutube(view,false)
-                            tries++
-                            if(tries<8)handler.postDelayed(this,1800L)
-                        }
-                    }
-                    youtubeUnmuteTask=task
-                    handler.postDelayed(task,1200L)
+                    // Do not override YouTube video elements or repeatedly force unmute.
+                    // Leave the native player controls available for a real remote interaction.
+
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
                     if(request.isForMainFrame && web===view){
