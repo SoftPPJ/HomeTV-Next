@@ -39,6 +39,9 @@ class MainActivity: Activity() {
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
+    private val engineAttempts=mutableMapOf<String,MutableSet<String>>()
+    private val unavailableChannels=mutableSetOf<String>()
+    private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
     private var active=-1
@@ -71,6 +74,10 @@ class MainActivity: Activity() {
         return group.firstOrNull{channels[it].url==saved} ?:group.first()
     }
     private fun rememberWorking(c:Channel){
+        unavailableChannels.remove(channelKey(c))
+        val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
+        if(engine=="LibVLC" || engine=="Media3")prefs.edit().putString("engine_"+channelKey(c),engine).apply()
+        engineAttempts.remove(c.url)
         if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
     }
@@ -101,7 +108,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it])}
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
@@ -163,6 +170,31 @@ class MainActivity: Activity() {
             ?:return false
         showBanner("Trying alternative source for "+channels[index].name)
         handler.post{if(active==index)playIndex(next)}
+        return true
+    }
+    private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
+        if(index !in channels.indices || active!=index || videoScreen!==screen)return true
+        val c=channels[index]
+        val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
+        tried.add(current)
+        val other=if(current=="Media3")"LibVLC" else "Media3"
+        if(!tried.contains(other)){
+            fallbackEngineOverride=other
+            showBanner("Trying "+other+" for "+c.name)
+            handler.post{if(active==index && videoScreen===screen)playIndex(index)}
+            return true
+        }
+        if(tryNextAlternative(index)){
+            fallbackEngineOverride=null
+            return true
+        }
+        unavailableChannels.add(channelKey(c))
+        engineAttempts.clear()
+        fallbackEngineOverride=null
+        showBanner(c.name+" unavailable on both engines • Skipping",true)
+        val next=surfingIndices().firstOrNull{!sameChannel(channels[it],c)}
+        if(next!=null)handler.postDelayed({if(active==index)playIndex(preferredChannel(next))},1200L)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
@@ -469,14 +501,15 @@ class MainActivity: Activity() {
                 dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private fun engineFor(c:Channel):String=prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Media3") ?: "Media3")
+    private fun engineFor(c:Channel):String=fallbackEngineOverride ?: prefs.getString("engine_"+channelKey(c),null) ?: prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Media3") ?: "Media3")
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
         val choices=arrayOf("Auto","Media3","LibVLC")
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
             .setSingleChoiceItems(choices,choices.indexOf(engineFor(c)).coerceAtLeast(0)){dialog,which->
-                prefs.edit().putString("engine_"+id(c),choices[which]).apply()
+                prefs.edit().putString("engine_"+channelKey(c),choices[which]).apply()
+                engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
                 dialog.dismiss()
                 if(active==i)playIndex(i)
             }.setNegativeButton("Cancel",null).show()
@@ -1751,7 +1784,7 @@ class MainActivity: Activity() {
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
         val sessionKey=channelKey(c)
         if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey}
-        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
+        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;fallbackEngineOverride=null}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
@@ -1885,15 +1918,7 @@ class MainActivity: Activity() {
                 if(active==index && videoScreen===screen && player===exo &&
                     exo.playbackState!=Player.STATE_READY){
                     android.util.Log.w("HomeTV","Stream startup timeout: "+c.name)
-                    if(!tryNextAlternative(index)){
-                        if(engineFor(c)=="Auto" && !vlcAttempted){
-                            vlcAttempted=true
-                            player?.release();player=null
-                            currentPlayerView?.let{screen.removeView(it)}
-                            currentPlayerView=null
-                            startVlc(c,index,screen)
-                        }else showBanner("Stream is not responding. Choose another source.",true)
-                    }
+                    handleEngineFailure(index,screen)
                 }
             }
             startupWatchdog=startupTimeout
@@ -1914,27 +1939,7 @@ class MainActivity: Activity() {
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
-                    if(tryNextAlternative(index))return
-                    if(engineFor(c)=="Auto" && !vlcAttempted){
-                        vlcAttempted=true
-                        handler.post{
-                            if(active==index && videoScreen===screen){
-                                player?.release();player=null
-                                currentPlayerView?.let{screen.removeView(it)}
-                                currentPlayerView=null
-                                showBanner("Trying LibVLC for "+c.name)
-                                startVlc(c,index,screen)
-                            }
-                        }
-                        return
-                    }
-                    if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
-                        retryCount++
-                        showBanner("Reconnecting "+c.name)
-                        val task=Runnable{if(active==index)playIndex(index)}
-                        retryTask=task
-                        handler.postDelayed(task,2500L*retryCount)
-                    }else showBanner("Cannot play ${c.name}: ${error.errorCodeName}"+(if(httpStatus!=null)" (HTTP "+httpStatus+")" else "")+". Press OK for channels.",true)
+                    handleEngineFailure(index,screen)
                 }
             })
             try{
@@ -2000,7 +2005,7 @@ class MainActivity: Activity() {
                     failed=true
                     android.util.Log.w("HomeTV","LibVLC startup timeout for "+c.name)
                     showBanner(c.name+" did not start. Trying another stream.",true)
-                    if(!tryNextAlternative(index))showBanner(c.name+" could not load. Check the stream URL or try Media3.",true)
+                    handleEngineFailure(index,screen)
                 }
             }
             vlc.setEventListener{event->
@@ -2024,7 +2029,7 @@ class MainActivity: Activity() {
                         if(active==index && vlcPlayer===vlc && !failed){
                             failed=true
                             handler.removeCallbacks(watchdog)
-                            if(!tryNextAlternative(index))reconnectCurrentChannel(c,index,screen)
+                            handleEngineFailure(index,screen)
                         }
                     }
                 }
@@ -2041,6 +2046,7 @@ class MainActivity: Activity() {
         }catch(e:Exception){
             android.util.Log.e("HomeTV","LibVLC startup failed",e)
             showBanner("LibVLC error: "+(e.message?:"unknown"),true)
+            handleEngineFailure(index,screen)
         }
     }
     private fun switchChannel(delta:Int){
