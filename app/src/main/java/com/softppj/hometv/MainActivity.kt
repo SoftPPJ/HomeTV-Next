@@ -198,6 +198,8 @@ class MainActivity: Activity() {
     private val engineAttempts=mutableMapOf<String,MutableSet<String>>()
     private val recoveryAttempts=mutableMapOf<String,Int>()
     private val unavailableChannels=mutableSetOf<String>()
+    private val playedThisSession=mutableSetOf<String>()
+    private val failedUrlsThisSession=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
@@ -234,6 +236,8 @@ class MainActivity: Activity() {
             ?:group.first()
     }
     private fun rememberWorking(c:Channel){
+        playedThisSession.add(channelKey(c))
+        failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
         val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
         if(engine=="Media3")probeReachable[c.url]=true
@@ -362,10 +366,20 @@ class MainActivity: Activity() {
             fallbackEngineOverride=null
             return true
         }
-        // A transient playback stall is not proof that a channel is offline.
+        // Only hide channels that have NEVER played in this app session and
+        // whose every URL has exhausted both playback engines.
+        failedUrlsThisSession.add(c.url)
+        val key=channelKey(c)
+        val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
+        if(key !in playedThisSession && allUrls.isNotEmpty() &&
+            allUrls.all{it in failedUrlsThisSession}){
+            unavailableChannels.add(key)
+            showBanner(c.name+" could not start • Hidden until app restart",true)
+        }
         engineAttempts.clear()
         fallbackEngineOverride=null
-        showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
+        if(key !in unavailableChannels)
+            showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
@@ -1107,9 +1121,8 @@ class MainActivity: Activity() {
         probePlayers.clear()
         probeInFlight=0
         probeQueue.clear()
-        // Restore channels that were automatically marked unavailable in earlier sessions.
-        unavailableChannels.clear()
-        val snapshot=channels.toList().distinctBy{it.url}
+        // Keep failed-start channels hidden until the app session ends.
+        val snapshot=channels.toList().distinctBy{it.url}.filter{it.url!=channels.getOrNull(active)?.url}
         val prioritized=snapshot.sortedWith(compareBy<Channel>{
             when {
                 probeReachable[it.url]==false -> 0
@@ -1150,7 +1163,7 @@ class MainActivity: Activity() {
                 if(working!=null){
                     probeReachable[channel.url]=working
                     // Background probing must never declare a channel offline.
-                    if(working)unavailableChannels.remove(channelKey(channel))
+                    // Do not unhide a failed-start channel until the next login.
                 }
                 // Defer next probe to avoid recursive work on the UI event stack.
                 handler.post{launchNextProbe(generation)}
