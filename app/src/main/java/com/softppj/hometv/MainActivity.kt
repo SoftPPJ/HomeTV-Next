@@ -196,6 +196,7 @@ class MainActivity: Activity() {
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
     private val engineAttempts=mutableMapOf<String,MutableSet<String>>()
+    private val recoveryAttempts=mutableMapOf<String,Int>()
     private val unavailableChannels=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
@@ -336,6 +337,18 @@ class MainActivity: Activity() {
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        // Retry the current engine before switching after an intermittent black screen.
+        val attempts=recoveryAttempts[c.url] ?: 0
+        if(prefs.getBoolean("auto_reconnect",true) && attempts<2){
+            recoveryAttempts[c.url]=attempts+1
+            autoBufferStalled()
+            fallbackEngineOverride=current
+            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/2)")
+            val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
+            retryTask=task
+            handler.postDelayed(task,1500L*(attempts+1))
+            return true
+        }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
         val other=if(current=="Media3")"LibVLC" else "Media3"
@@ -352,14 +365,7 @@ class MainActivity: Activity() {
         // A transient playback stall is not proof that a channel is offline.
         engineAttempts.clear()
         fallbackEngineOverride=null
-        showBanner(c.name+" temporarily unavailable • Trying next channel",true)
-        val available=surfingIndices()
-        val currentPosition=numberFor(index)
-        val next=if(surfingDirection>=0)
-            available.firstOrNull{numberFor(it)>currentPosition} ?:available.firstOrNull{numberFor(it)<currentPosition}
-        else
-            available.lastOrNull{numberFor(it)<currentPosition} ?:available.lastOrNull{numberFor(it)>currentPosition}
-        if(next!=null)handler.postDelayed({if(active==index)playIndex(preferredChannel(next))},1200L)
+        showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
@@ -2275,6 +2281,10 @@ class MainActivity: Activity() {
                     if(state==Player.STATE_READY){
                         autoBufferHealthy()
                         retryCount=0
+                        handler.postDelayed({
+                            if(player===exo && active==index && exo.playbackState==Player.STATE_READY)
+                                recoveryAttempts.remove(c.url)
+                        },60000L)
                         rememberWorking(c)
                         startupWatchdog?.let{handler.removeCallbacks(it)}
                         startupWatchdog=null
@@ -2361,6 +2371,11 @@ class MainActivity: Activity() {
                 when(event.type){
                     VlcPlayer.Event.Playing->{
                         started=true
+                        handler.postDelayed({
+                            if(vlcPlayer===vlc && active==index && !failed &&
+                                android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
+                                recoveryAttempts.remove(c.url)
+                        },60000L)
                         rememberWorking(c)
                         autoBufferHealthy()
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
