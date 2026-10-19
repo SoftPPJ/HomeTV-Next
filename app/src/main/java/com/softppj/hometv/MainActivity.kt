@@ -235,7 +235,8 @@ class MainActivity: Activity() {
     private fun rememberWorking(c:Channel){
         unavailableChannels.remove(channelKey(c))
         val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
-        if(engine=="LibVLC" || engine=="Media3")prefs.edit().putString("engine_"+channelKey(c),engine).apply()
+        if(engine=="Media3")probeReachable[c.url]=true
+        // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
         if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
@@ -701,14 +702,24 @@ class MainActivity: Activity() {
                 dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private fun engineFor(c:Channel):String=fallbackEngineOverride ?: prefs.getString("engine_"+channelKey(c),null) ?: prefs.getString("engine_"+id(c),null) ?: (prefs.getString("engine","Media3") ?: "Media3")
+    private fun engineFor(c:Channel):String{
+        fallbackEngineOverride?.let{return it}
+        val manual=prefs.getString("manual_engine_"+channelKey(c),null)
+        if(manual=="Media3" || manual=="LibVLC")return manual
+        // A previous automatic LibVLC fallback must not block later Media3 verification.
+        if(probeReachable[c.url]==true)return "Media3"
+        return "LibVLC"
+    }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
         val choices=arrayOf("Auto","Media3","LibVLC")
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
             .setSingleChoiceItems(choices,choices.indexOf(engineFor(c)).coerceAtLeast(0)){dialog,which->
-                prefs.edit().putString("engine_"+channelKey(c),choices[which]).apply()
+                prefs.edit().apply{
+                    if(choices[which]=="Auto")remove("manual_engine_"+channelKey(c))
+                    else putString("manual_engine_"+channelKey(c),choices[which])
+                }.apply()
                 engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
                 dialog.dismiss()
                 if(active==i)playIndex(i)
@@ -1090,6 +1101,8 @@ class MainActivity: Activity() {
         probePlayers.clear()
         probeInFlight=0
         probeQueue.clear()
+        // Restore channels that were automatically marked unavailable in earlier sessions.
+        unavailableChannels.clear()
         val snapshot=channels.toList().distinctBy{it.url}
         val prioritized=snapshot.sortedWith(compareBy<Channel>{
             when {
