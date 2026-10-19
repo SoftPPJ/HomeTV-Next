@@ -1899,25 +1899,55 @@ class MainActivity: Activity() {
         }
     }
     private fun selectScreenMode(channelIndex:Int?=null){
-        val current=if(channelIndex!=null){
-            prefs.getString("screen_channel_"+hash(channels[channelIndex].url),null)
-                ?:prefs.getString("screen_mode","16:9") ?: "Fit"
-        }else prefs.getString("screen_mode","16:9") ?: "Fit"
+        val key=if(channelIndex!=null)"screen_channel_"+hash(channels[channelIndex].url) else "screen_mode"
+        val original=prefs.getString(key,null)
+        val universal=prefs.getString("screen_mode","16:9") ?: "16:9"
         val labels=if(channelIndex!=null)arrayOf("Use universal default")+screenModes else screenModes
-        val selected=if(channelIndex!=null && !prefs.contains("screen_channel_"+hash(channels[channelIndex].url)))0
-            else labels.indexOf(current).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(if(channelIndex!=null)"Screen size · "+channels[channelIndex].name else "Universal screen size")
-            .setSingleChoiceItems(labels,selected){dialog,i->
+        val current=original ?: universal
+        val selected=if(channelIndex!=null && original==null)0 else labels.indexOf(current).coerceAtLeast(0)
+        var confirmed=false
+        fun preview(position:Int){
+            val value=if(channelIndex!=null && position==0)universal else labels[position]
+            val edit=prefs.edit()
+            if(channelIndex!=null && position==0)edit.remove(key) else edit.putString(key,value)
+            edit.apply()
+            applyVideoSize()
+        }
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(if(channelIndex!=null)"Screen size · "+channels[channelIndex].name else "Universal screen size")
+            .setSingleChoiceItems(labels,selected){_,position->preview(position)}
+            .setPositiveButton("OK"){_,_->confirmed=true}
+            .setNegativeButton("Cancel",null)
+            .create()
+        dialog.setOnDismissListener{
+            if(!confirmed){
                 val edit=prefs.edit()
-                if(channelIndex!=null){
-                    val key="screen_channel_"+hash(channels[channelIndex].url)
-                    if(i==0)edit.remove(key) else edit.putString(key,labels[i])
-                }else edit.putString("screen_mode",labels[i])
+                if(original==null)edit.remove(key) else edit.putString(key,original)
                 edit.apply()
-                dialog.dismiss()
                 applyVideoSize()
-                if(active>=0)showBanner("Screen: "+screenMode()) else if(channelIndex==null)settings()
-            }.setNegativeButton("Cancel",null).show()
+            }else if(active>=0)showBanner("Screen: "+screenMode())
+        }
+        dialog.setOnShowListener{
+            val list=dialog.listView
+            list?.setOnKeyListener{_,keyCode,event->
+                if(event.action==android.view.KeyEvent.ACTION_DOWN &&
+                    (keyCode==android.view.KeyEvent.KEYCODE_DPAD_UP || keyCode==android.view.KeyEvent.KEYCODE_DPAD_DOWN)){
+                    val currentPosition=list.checkedItemPosition.takeIf{it>=0} ?: selected
+                    val next=(currentPosition+if(keyCode==android.view.KeyEvent.KEYCODE_DPAD_DOWN)1 else -1).coerceIn(0,labels.lastIndex)
+                    list.setItemChecked(next,true)
+                    list.setSelection(next)
+                    preview(next)
+                    true
+                }else if(event.action==android.view.KeyEvent.ACTION_DOWN &&
+                    (keyCode==android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode==android.view.KeyEvent.KEYCODE_ENTER)){
+                    confirmed=true
+                    dialog.dismiss()
+                    true
+                }else false
+            }
+            list?.requestFocus()
+        }
+        showSideDialog(dialog)
     }
     private fun toggleScreenMode(){
         val next=if(screenMode()=="Fill / Crop")"Fit" else "Fill / Crop"
