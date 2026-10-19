@@ -1038,54 +1038,91 @@ class MainActivity: Activity() {
             }
         }
     }
-    // Lightweight network availability checks. They do not claim decoder compatibility.
+    // Bounded background stream checks: two independent Media3 players, never the on-screen player.
     @Volatile private var backgroundProbeGeneration=0
     private val probeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
-    private val probePool=java.util.concurrent.Executors.newFixedThreadPool(2)
     private var periodicProbeTask:Runnable?=null
+    private var probeQueue=java.util.ArrayDeque<Channel>()
+    private val probePlayers=mutableSetOf<ExoPlayer>()
+    private var probeInFlight=0
     private fun startBackgroundChannelChecks(){
         if(!licenseReady)return
-        val generation=++backgroundProbeGeneration
+        backgroundProbeGeneration++
+        val generation=backgroundProbeGeneration
         periodicProbeTask?.let{handler.removeCallbacks(it)}
+        probePlayers.toList().forEach{it.release()}
+        probePlayers.clear()
+        probeInFlight=0
+        probeQueue.clear()
         val snapshot=channels.toList().distinctBy{it.url}
-        val ordering=snapshot.sortedBy{ c ->
-            val selected=channels.getOrNull(active)
-            if(selected!=null && channelKey(c)==channelKey(selected))0 else if(probeReachable[c.url]==false)1 else 2
+        val prioritized=snapshot.sortedWith(compareBy<Channel>{
+            when {
+                probeReachable[it.url]==false -> 0
+                channels.getOrNull(active)?.let{current->channelKey(current)==channelKey(it)}==true -> 1
+                else -> 2
+            }
+        })
+        prioritized.forEach{probeQueue.addLast(it)}
+        launchNextProbe(generation)
+    }
+    private fun launchNextProbe(generation:Int){
+        if(generation!=backgroundProbeGeneration || !licenseReady)return
+        while(probeInFlight<2 && probeQueue.isNotEmpty()){
+            val channel=probeQueue.removeFirst()
+            val uri=channel.url.lowercase(java.util.Locale.ROOT)
+            // YouTube pages and non-HTTP protocols cannot be validated by Media3 here.
+            if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
+                "youtube.com" in uri || "youtu.be" in uri)continue
+            probeInFlight++
+            val probe=try{ExoPlayer.Builder(this).build()}catch(e:Exception){
+                probeInFlight--;continue
+            }
+            probePlayers.add(probe)
+            var completed=false
+            var watchdog:Runnable?=null
+            fun finish(working:Boolean?){
+                if(completed)return
+                completed=true
+                watchdog?.let{handler.removeCallbacks(it)}
+                probePlayers.remove(probe)
+                probe.release()
+                probeInFlight--
+                if(generation!=backgroundProbeGeneration)return
+                if(working!=null){
+                    probeReachable[channel.url]=working
+                    // Only skip a channel when every known alternative is confirmed failed.
+                    val group=channels.filter{channelKey(it)==channelKey(channel)}
+                    val key=channelKey(channel)
+                    if(group.isNotEmpty() && group.all{probeReachable[it.url]==false})
+                        unavailableChannels.add(key)
+                    else if(group.any{probeReachable[it.url]==true})
+                        unavailableChannels.remove(key)
+                }
+                launchNextProbe(generation)
+            }
+            probe.addListener(object:Player.Listener{
+                override fun onPlaybackStateChanged(state:Int){
+                    if(state==Player.STATE_READY)finish(true)
+                    else if(state==Player.STATE_ENDED)finish(false)
+                }
+                override fun onPlayerError(error:PlaybackException){finish(false)}
+            })
+            watchdog=Runnable{finish(null)} // Timeout is inconclusive, not a failed stream.
+            handler.postDelayed(watchdog!!,10000L)
+            try{
+                val http=DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(5000).setReadTimeoutMs(5000)
+                    .setUserAgent(channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                val headers=channel.headers.filterKeys{!it.equals("User-Agent",true)}
+                http.setDefaultRequestProperties(headers)
+                probe.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(MediaItem.fromUri(channel.url)))
+                probe.prepare()
+                probe.playWhenReady=true
+            }catch(_:Exception){finish(false)}
         }
-        // Single coordinator schedules at most two active HTTP connections.
-        thread(name="HomeTV-probe-coordinator"){
-            val tasks=ordering.map { c ->
-                probePool.submit {
-                    if(generation!=backgroundProbeGeneration || !licenseReady)return@submit
-                    val u=c.url.lowercase(java.util.Locale.ROOT)
-                    if(!u.startsWith("http://") && !u.startsWith("https://"))return@submit
-                    if("youtube.com" in u || "youtu.be" in u)return@submit
-                    try{
-                        val conn=URL(c.url).openConnection() as java.net.HttpURLConnection
-                        try{
-                            conn.requestMethod="GET"
-                            conn.connectTimeout=2500;conn.readTimeout=2500
-                            conn.setRequestProperty("Range","bytes=0-1023")
-                            conn.setRequestProperty("User-Agent",c.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                            c.headers.forEach{(k,v)->if(!k.equals("User-Agent",true))conn.setRequestProperty(k,v)}
-                            when(conn.responseCode){
-                                in 200..299 -> {conn.inputStream.use{it.read(ByteArray(512))};probeReachable[c.url]=true}
-                                404,410 -> probeReachable[c.url]=false
-                            }
-                        }finally{conn.disconnect()}
-                    }catch(_:Exception){ /* Inconclusive: keep channel selectable. */ }
-                }
-            }
-            tasks.forEach{try{it.get()}catch(_:Exception){}}
-            if(generation==backgroundProbeGeneration && licenseReady){
-                runOnUiThread {
-                    if(generation==backgroundProbeGeneration && !isFinishing && !isDestroyed){
-                        val task=Runnable{startBackgroundChannelChecks()}
-                        periodicProbeTask=task
-                        handler.postDelayed(task,15*60*1000L)
-                    }
-                }
-            }
+        if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
+            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+            handler.postDelayed(periodicProbeTask!!,15*60*1000L)
         }
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
@@ -2568,5 +2605,5 @@ class MainActivity: Activity() {
         web?.onPause();web?.destroy();web=null
         active=-1
     }
-    override fun onDestroy(){backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePool.shutdownNow();stopPlayback();super.onDestroy()}
+    override fun onDestroy(){backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
 }
