@@ -4,14 +4,14 @@ Worker: https://hometv-license.prasanthpjoy.workers.dev/
 
 Deploy `cloudflare/hometv-license.js` in the Cloudflare Workers editor (replace the default starter code).
 
-Create a **separate private** GitHub repository for licensing and the protected default playlist. Set Worker secrets:
+Create a **separate private** GitHub repository for licensing and license records. The protected default playlist is fetched server-side from the PLAYLIST_URL secret. Set Worker secrets:
 - `GITHUB_TOKEN`: fine-grained token with **Contents: Read and write** for that private repository only.
 - `ADMIN_TOKEN`: long random administrator token; never embed in APK.
+- `PLAYLIST_URL`: the full existing HomeTV upstream M3U URL, including its query token. Set as a **secret**, not a plain variable. Do not commit it to GitHub.
 
 Set Worker variables:
 - `GITHUB_REPO`: `owner/private-license-repo`
 - `LICENSE_PATH`: `licenses.json`
-- `PLAYLIST_PATH`: `playlist.m3u`
 
 Create `licenses.json` in the private repository as a JSON array, e.g.
 ```json
