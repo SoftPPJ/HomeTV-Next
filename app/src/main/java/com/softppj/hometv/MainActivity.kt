@@ -227,7 +227,10 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
-        return group.firstOrNull{channels[it].url==saved} ?:group.first()
+        return group.firstOrNull{channels[it].url==saved && probeReachable[channels[it].url]!=false}
+            ?:group.firstOrNull{probeReachable[channels[it].url]==true}
+            ?:group.firstOrNull{probeReachable[channels[it].url]!=false}
+            ?:group.first()
     }
     private fun rememberWorking(c:Channel){
         unavailableChannels.remove(channelKey(c))
