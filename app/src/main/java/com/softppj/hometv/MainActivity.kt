@@ -153,15 +153,17 @@ class MainActivity: Activity() {
             reset("HomeTV • Activating license")
             thread{
                 var token:String?=null
+                var activationResult:JSONObject?=null
                 val error=try{
                     val result=licenseRequest("/activate",JSONObject().put("device",installationId()).put("password",value))
+                    activationResult=result
                     token=result.getString("token");null
                 }catch(e:Exception){e.message?:"Activation failed"}
                 runOnUiThread{
                     if(isFinishing||isDestroyed)return@runOnUiThread
                     if(token!=null){
                         prefs.edit().putString("license_token",token).apply()
-                        saveLicenseExpiry(result)
+                        activationResult?.let{saveLicenseExpiry(it)}
                         licenseReady=true;startLicensedApp()
                     }else showLicenseScreen(error)
                 }
@@ -2338,7 +2340,57 @@ class MainActivity: Activity() {
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
     }
+    private var volumeOverlay:View?=null
+    private var volumeOverlayTask:Runnable?=null
+    private fun showHomeTvVolume(){
+        val screen=videoScreen ?:return
+        val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val max=audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val current=audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        volumeOverlayTask?.let{handler.removeCallbacks(it)}
+        volumeOverlay?.let{(it.parent as? android.view.ViewGroup)?.removeView(it)}
+        val density=resources.displayMetrics.density
+        val height=(220*density).toInt()
+        val width=(12*density).toInt()
+        val filled=(height*current/max).coerceIn(0,height)
+        val panel=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            gravity=Gravity.CENTER
+            setPadding((15*density).toInt(),(16*density).toInt(),(15*density).toInt(),(16*density).toInt())
+            setBackgroundColor(0xE515283C.toInt())
+            isClickable=false
+        }
+        panel.addView(TextView(this).apply{
+            text="VOL"
+            textSize=12f
+            gravity=Gravity.CENTER
+            setTextColor(0xFFFFB900.toInt())
+        })
+        val track=FrameLayout(this).apply{setBackgroundColor(0xFF344B63.toInt())}
+        val fill=View(this).apply{setBackgroundColor(0xFFFFB900.toInt())}
+        track.addView(fill,FrameLayout.LayoutParams(width,filled,Gravity.BOTTOM))
+        panel.addView(track,LinearLayout.LayoutParams(width,height).apply{topMargin=(10*density).toInt();bottomMargin=(10*density).toInt()})
+        panel.addView(TextView(this).apply{
+            text="${current*100/max}%"
+            textSize=14f
+            gravity=Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+        })
+        screen.addView(panel,FrameLayout.LayoutParams(-2,-2,Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply{rightMargin=(20*density).toInt()})
+        volumeOverlay=panel
+        val task=Runnable{if(volumeOverlay===panel){(panel.parent as? android.view.ViewGroup)?.removeView(panel);volumeOverlay=null}}
+        volumeOverlayTask=task
+        handler.postDelayed(task,2500L)
+    }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        if(event.action==KeyEvent.ACTION_DOWN && active>=0 &&
+            (event.keyCode==KeyEvent.KEYCODE_VOLUME_UP || event.keyCode==KeyEvent.KEYCODE_VOLUME_DOWN)){
+            val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+            val direction=if(event.keyCode==KeyEvent.KEYCODE_VOLUME_UP)android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER
+            audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,direction,0)
+            showHomeTvVolume()
+            return true
+        }
         if(active>=0 && event.action==KeyEvent.ACTION_DOWN){
             val digit=when(event.keyCode){
                 in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9->event.keyCode-KeyEvent.KEYCODE_0
