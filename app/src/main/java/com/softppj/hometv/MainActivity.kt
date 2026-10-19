@@ -662,7 +662,7 @@ class MainActivity: Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
         root.setBackgroundColor(0xFF101E31.toInt())
-        setContentView(android.widget.ScrollView(this).apply{fillViewport=true;addView(root)})
+        setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root)})
         beginLicensedSession()
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
@@ -682,7 +682,7 @@ class MainActivity: Activity() {
         }
         setOnClickListener{action()}
     }
-    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{fillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
+    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
         return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
