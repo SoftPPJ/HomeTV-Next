@@ -40,6 +40,9 @@ class MainActivity: Activity() {
     private val licensedPlaylist="hometv://licensed-playlist"
     private var licenseReady=false
     private var licenseChecking=false
+    private fun saveLicenseExpiry(response:JSONObject){
+        response.optString("expiry","").takeIf{it.isNotBlank()}?.let{prefs.edit().putString("license_expiry",it).apply()}
+    }
     private var surfingDirection=1
     private fun installationId():String {
         val old=prefs.getString("license_device",null)
@@ -110,14 +113,14 @@ class MainActivity: Activity() {
         val token=prefs.getString("license_token",null)
         if(token.isNullOrBlank()){licenseChecking=false;showLicenseScreen();return}
         thread{
-            val error=try{licenseRequest("/validate",licensePayload());null}catch(e:Exception){e.message?:"License validation failed"}
+            val error=try{saveLicenseExpiry(licenseRequest("/validate",licensePayload()));null}catch(e:Exception){e.message?:"License validation failed"}
             runOnUiThread{
                 licenseChecking=false
                 if(isFinishing||isDestroyed)return@runOnUiThread
                 if(error==null){licenseReady=true;startLicensedApp()}
                 else{
                     if(error.contains("expired",true)||error.contains("revoked",true)||error.contains("not active",true)||error.contains("Invalid token",true))
-                        prefs.edit().remove("license_token").apply()
+                        prefs.edit().remove("license_token").remove("license_expiry").apply()
                     showLicenseScreen(error)
                 }
             }
@@ -158,6 +161,7 @@ class MainActivity: Activity() {
                     if(isFinishing||isDestroyed)return@runOnUiThread
                     if(token!=null){
                         prefs.edit().putString("license_token",token).apply()
+                        saveLicenseExpiry(result)
                         licenseReady=true;startLicensedApp()
                     }else showLicenseScreen(error)
                 }
@@ -175,7 +179,7 @@ class MainActivity: Activity() {
                     val error=try{licenseRequest("/surrender",licensePayload());null}catch(e:Exception){e.message?:"Unable to release license"}
                     runOnUiThread{
                         if(error==null){
-                            prefs.edit().remove("license_token").apply()
+                            prefs.edit().remove("license_token").remove("license_expiry").apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
                             showLicenseScreen("Could not surrender: "+error)
@@ -1494,7 +1498,13 @@ class MainActivity: Activity() {
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
             val epg=if(prefs.getBoolean("show_channel_epg",true) && epgGuide.isNotEmpty() && programmeList(channel).isNotEmpty())programmeSummary(channel) else ""
-            text=numberFor(index).toString()+"  "+channel.name+(if(epg.isNotBlank())"\n"+epg else "")
+            val expiry=prefs.getString("license_expiry","").orEmpty()
+            val licenseLine=when(expiry){
+                ""->""
+                "unlimited"->"License: Unlimited"
+                else->"License expires: "+expiry
+            }
+            text=numberFor(index).toString()+"  "+channel.name+(if(licenseLine.isNotBlank())"\n"+licenseLine else "")+(if(epg.isNotBlank())"\n"+epg else "")
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -1702,7 +1712,7 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val options=arrayOf(
-            "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
+            "Universal aspect ratio: "+(prefs.getString("screen_mode","16:9") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine",
             "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
@@ -1811,7 +1821,7 @@ class MainActivity: Activity() {
             val saved=prefs.getString("screen_channel_"+hash(url),null)
             if(saved!=null)return saved
         }
-        return prefs.getString("screen_mode","Fit") ?: "Fit"
+        return prefs.getString("screen_mode","16:9") ?: "16:9"
     }
     private fun resizeMode():Int=when(screenMode()){
         "Fit","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -1889,8 +1899,8 @@ class MainActivity: Activity() {
     private fun selectScreenMode(channelIndex:Int?=null){
         val current=if(channelIndex!=null){
             prefs.getString("screen_channel_"+hash(channels[channelIndex].url),null)
-                ?:prefs.getString("screen_mode","Fit") ?: "Fit"
-        }else prefs.getString("screen_mode","Fit") ?: "Fit"
+                ?:prefs.getString("screen_mode","16:9") ?: "Fit"
+        }else prefs.getString("screen_mode","16:9") ?: "Fit"
         val labels=if(channelIndex!=null)arrayOf("Use universal default")+screenModes else screenModes
         val selected=if(channelIndex!=null && !prefs.contains("screen_channel_"+hash(channels[channelIndex].url)))0
             else labels.indexOf(current).coerceAtLeast(0)
@@ -2222,7 +2232,7 @@ class MainActivity: Activity() {
             "Playback engine: "+(prefs.getString("engine","Media3")?:"Media3"),
             "Buffering: "+bufferProfile(),
             "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
-            "Universal screen size: "+(prefs.getString("screen_mode","Fit")?:"Fit"),
+            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"Fit"),
             "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
             "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
             "Date & time overlay",
@@ -2323,7 +2333,7 @@ class MainActivity: Activity() {
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
-        root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","Fit") ?: "Fit")){selectScreenMode()})
+        root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
         root.addView(button("Date & time overlay"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
