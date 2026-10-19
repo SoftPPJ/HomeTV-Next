@@ -130,7 +130,7 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         channels=cachedChannels()
         checkEpgTune()
-        if(channels.isNotEmpty())resumeLast()
+        if(channels.isNotEmpty()){startBackgroundChannelChecks();resumeLast()}
         else refresh({if(channels.isNotEmpty())resumeLast() else showHome()})
     }
     private fun showLicenseScreen(error:String?=null){
@@ -1038,37 +1038,53 @@ class MainActivity: Activity() {
             }
         }
     }
-    // Probe URLs sequentially without starting a second video decoder.
-    // A failed probe is inconclusive and never hides a channel.
+    // Lightweight network availability checks. They do not claim decoder compatibility.
     @Volatile private var backgroundProbeGeneration=0
     private val probeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
+    private val probePool=java.util.concurrent.Executors.newFixedThreadPool(2)
+    private var periodicProbeTask:Runnable?=null
     private fun startBackgroundChannelChecks(){
         if(!licenseReady)return
         val generation=++backgroundProbeGeneration
+        periodicProbeTask?.let{handler.removeCallbacks(it)}
         val snapshot=channels.toList().distinctBy{it.url}
-        thread(name="HomeTV-stream-probe"){
-            for(c in snapshot){
-                if(generation!=backgroundProbeGeneration || !licenseReady)break
-                val u=c.url.lowercase()
-                if(!u.startsWith("http://") && !u.startsWith("https://"))continue
-                if("youtube.com" in u || "youtu.be" in u)continue
-                try{
-                    val conn=URL(c.url).openConnection() as java.net.HttpURLConnection
+        val ordering=snapshot.sortedBy{ c ->
+            val selected=channels.getOrNull(active)
+            if(selected!=null && channelKey(c)==channelKey(selected))0 else if(probeReachable[c.url]==false)1 else 2
+        }
+        // Single coordinator schedules at most two active HTTP connections.
+        thread(name="HomeTV-probe-coordinator"){
+            val tasks=ordering.map { c ->
+                probePool.submit {
+                    if(generation!=backgroundProbeGeneration || !licenseReady)return@submit
+                    val u=c.url.lowercase(java.util.Locale.ROOT)
+                    if(!u.startsWith("http://") && !u.startsWith("https://"))return@submit
+                    if("youtube.com" in u || "youtu.be" in u)return@submit
                     try{
-                        conn.requestMethod="GET"
-                        conn.connectTimeout=2500
-                        conn.readTimeout=2500
-                        conn.setRequestProperty("Range","bytes=0-1023")
-                        conn.setRequestProperty("User-Agent",c.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                        c.headers.forEach{(k,v)->if(!k.equals("User-Agent",true))conn.setRequestProperty(k,v)}
-                        val status=conn.responseCode
-                        if(status in 200..299 || status==206){
-                            conn.inputStream.use{stream->stream.read(ByteArray(512))}
-                            probeReachable[c.url]=true
-                        }else if(status==404 || status==410)probeReachable[c.url]=false
-                    }finally{conn.disconnect()}
-                }catch(_:Exception){ /* inconclusive */ }
-                try{Thread.sleep(250)}catch(_:InterruptedException){break}
+                        val conn=URL(c.url).openConnection() as java.net.HttpURLConnection
+                        try{
+                            conn.requestMethod="GET"
+                            conn.connectTimeout=2500;conn.readTimeout=2500
+                            conn.setRequestProperty("Range","bytes=0-1023")
+                            conn.setRequestProperty("User-Agent",c.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                            c.headers.forEach{(k,v)->if(!k.equals("User-Agent",true))conn.setRequestProperty(k,v)}
+                            when(conn.responseCode){
+                                in 200..299 -> {conn.inputStream.use{it.read(ByteArray(512))};probeReachable[c.url]=true}
+                                404,410 -> probeReachable[c.url]=false
+                            }
+                        }finally{conn.disconnect()}
+                    }catch(_:Exception){ /* Inconclusive: keep channel selectable. */ }
+                }
+            }
+            tasks.forEach{try{it.get()}catch(_:Exception){}}
+            if(generation==backgroundProbeGeneration && licenseReady){
+                runOnUiThread {
+                    if(generation==backgroundProbeGeneration && !isFinishing && !isDestroyed){
+                        val task=Runnable{startBackgroundChannelChecks()}
+                        periodicProbeTask=task
+                        handler.postDelayed(task,15*60*1000L)
+                    }
+                }
             }
         }
     }
@@ -1937,51 +1953,51 @@ class MainActivity: Activity() {
         }
     }
     private fun selectScreenMode(channelIndex:Int?=null){
-        val key=if(channelIndex!=null)"screen_channel_"+hash(channels[channelIndex].url) else "screen_mode"
+        val target=channelIndex?.takeIf{it in channels.indices}
+        val key=if(target!=null)"screen_channel_"+hash(channels[target].url) else "screen_mode"
         val original=prefs.getString(key,null)
         val universal=prefs.getString("screen_mode","16:9") ?: "16:9"
-        val labels=if(channelIndex!=null)arrayOf("Use universal default")+screenModes else screenModes
-        val current=original ?: universal
-        val selected=if(channelIndex!=null && original==null)0 else labels.indexOf(current).coerceAtLeast(0)
+        val labels=if(target!=null)arrayOf("Use universal default")+screenModes else screenModes
+        val selected=if(target!=null && original==null)0 else labels.indexOf(original ?: universal).coerceAtLeast(0)
         var confirmed=false
+        var pending=selected
         fun preview(position:Int){
-            val value=if(channelIndex!=null && position==0)universal else labels[position]
-            val edit=prefs.edit()
-            if(channelIndex!=null && position==0)edit.remove(key) else edit.putString(key,value)
-            edit.apply()
+            pending=position
+            val editor=prefs.edit()
+            if(target!=null && position==0)editor.remove(key) else editor.putString(key,labels[position])
+            editor.apply()
             applyVideoSize()
         }
         val dialog=AlertDialog.Builder(this)
-            .setTitle(if(channelIndex!=null)"Screen size · "+channels[channelIndex].name else "Universal screen size")
+            .setTitle(if(target!=null)"Screen size · "+channels[target].name else "Universal screen size")
             .setSingleChoiceItems(labels,selected){_,position->preview(position)}
             .setPositiveButton("OK"){_,_->confirmed=true}
-            .setNegativeButton("Cancel",null)
-            .create()
+            .setNegativeButton("Cancel",null).create()
         dialog.setOnDismissListener{
             if(!confirmed){
-                val edit=prefs.edit()
-                if(original==null)edit.remove(key) else edit.putString(key,original)
-                edit.apply()
-                applyVideoSize()
+                val editor=prefs.edit()
+                if(original==null)editor.remove(key) else editor.putString(key,original)
+                editor.apply();applyVideoSize()
             }else if(active>=0)showBanner("Screen: "+screenMode())
         }
         dialog.setOnShowListener{
             val list=dialog.listView
-            list?.setOnKeyListener{_,keyCode,event->
-                if(event.action==android.view.KeyEvent.ACTION_DOWN &&
-                    (keyCode==android.view.KeyEvent.KEYCODE_DPAD_UP || keyCode==android.view.KeyEvent.KEYCODE_DPAD_DOWN)){
-                    val currentPosition=list.checkedItemPosition.takeIf{it>=0} ?: selected
-                    val next=(currentPosition+if(keyCode==android.view.KeyEvent.KEYCODE_DPAD_DOWN)1 else -1).coerceIn(0,labels.lastIndex)
-                    list.setItemChecked(next,true)
-                    list.setSelection(next)
-                    preview(next)
-                    true
-                }else if(event.action==android.view.KeyEvent.ACTION_DOWN &&
-                    (keyCode==android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode==android.view.KeyEvent.KEYCODE_ENTER)){
-                    confirmed=true
-                    dialog.dismiss()
-                    true
-                }else false
+            list?.setItemChecked(selected,true)
+            list?.setSelection(selected)
+            list?.setOnKeyListener{_,code,event->
+                if(event.action!=KeyEvent.ACTION_DOWN)false
+                else when(code){
+                    KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN->{
+                        val next=(pending+if(code==KeyEvent.KEYCODE_DPAD_DOWN)1 else -1).coerceIn(0,labels.lastIndex)
+                        list.setItemChecked(next,true);list.setSelection(next);preview(next);true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->{
+                        // Remote OK confirms the highlighted value.
+                        confirmed=true;dialog.dismiss();true
+                    }
+                    KeyEvent.KEYCODE_BACK->{dialog.dismiss();true}
+                    else->false
+                }
             }
             list?.requestFocus()
         }
@@ -2542,5 +2558,5 @@ class MainActivity: Activity() {
         web?.onPause();web?.destroy();web=null
         active=-1
     }
-    override fun onDestroy(){stopPlayback();super.onDestroy()}
+    override fun onDestroy(){backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePool.shutdownNow();stopPlayback();super.onDestroy()}
 }
