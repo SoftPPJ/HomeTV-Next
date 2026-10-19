@@ -93,7 +93,7 @@ async function serve(req,env){
   const active=sessions(row);
   if(!active[device]&&deviceLimit(row)!=="unlimited"&&Object.keys(active).length>=deviceLimit(row))return json({error:"Device limit reached. Surrender a device or request admin release."},409);
   const token=crypto.randomUUID()+"-"+crypto.randomUUID();
-  active[device]=await hash(token);row.sessions=active;const active=sessions(row);delete active[device];row.sessions=active;row.device=null;row.tokenHash=null;
+  active[device]=await hash(token);row.sessions=active;row.device=null;row.tokenHash=null;
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
   return json({ok:true,token,expiry:row.expiry});
  }
