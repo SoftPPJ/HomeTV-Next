@@ -649,9 +649,45 @@ class MainActivity: Activity() {
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
-    private val bufferProfiles=arrayOf("Ultra Fast","Fast","Balanced","Stable","Maximum Buffer")
-    private fun bufferProfile()=prefs.getString("buffer_profile","Balanced") ?: "Balanced"
+    private val bufferProfiles=arrayOf("Auto","Ultra Fast","Fast","Balanced","Stable","Maximum Buffer")
+    private val autoBufferLevels=intArrayOf(0,1,2,3)
+    private var autoBufferLevel=0
+    private var autoBufferLastChange=0L
+    private var autoBufferStableSince=0L
+    private var autoBufferRecoveryCount=0
+    private fun autoBufferEnabled()=bufferProfile()=="Auto"
+    private fun bufferLevelValues(level:Int):IntArray=when(level.coerceIn(0,3)){
+        0->intArrayOf(2000,15000,1000,2000)
+        1->intArrayOf(4000,25000,1500,3500)
+        2->intArrayOf(6000,35000,2500,5000)
+        else->intArrayOf(8000,45000,3000,6500)
+    }
+    private fun autoBufferStalled(){
+        if(!autoBufferEnabled())return
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(now-autoBufferLastChange<12000L)return
+        autoBufferRecoveryCount++
+        if(autoBufferRecoveryCount>=2 && autoBufferLevel<3){
+            autoBufferLevel++
+            autoBufferLastChange=now
+            autoBufferRecoveryCount=0
+            android.util.Log.i("HomeTV","Adaptive buffer increased to level "+autoBufferLevel)
+        }
+    }
+    private fun autoBufferHealthy(){
+        if(!autoBufferEnabled())return
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(autoBufferStableSince==0L)autoBufferStableSince=now
+        if(now-autoBufferStableSince>15*60*1000L && autoBufferLevel>0){
+            autoBufferLevel--
+            autoBufferLastChange=now
+            autoBufferStableSince=now
+        }
+        autoBufferRecoveryCount=0
+    }
+    private fun bufferProfile()=prefs.getString("buffer_profile","Auto") ?: "Auto"
     private fun bufferValues():IntArray=when(bufferProfile()){
+        "Auto"->bufferLevelValues(autoBufferLevel)
         "Ultra Fast"->intArrayOf(500,3500,250,500)
         "Fast"->intArrayOf(1000,7000,500,1000)
         "Stable"->intArrayOf(4000,25000,1500,3500)
@@ -2072,6 +2108,7 @@ class MainActivity: Activity() {
             return
         }
         playbackGeneration++
+        autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
@@ -2218,7 +2255,12 @@ class MainActivity: Activity() {
             handler.postDelayed(startupTimeout,10000L)
             exo.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
+                    if(state==Player.STATE_BUFFERING){
+                        autoBufferStableSince=0L
+                        autoBufferStalled()
+                    }
                     if(state==Player.STATE_READY){
+                        autoBufferHealthy()
                         retryCount=0
                         rememberWorking(c)
                         startupWatchdog?.let{handler.removeCallbacks(it)}
@@ -2285,6 +2327,7 @@ class MainActivity: Activity() {
                     if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
                         android.os.SystemClock.elapsedRealtime()-lastHealthy>18000L){
                         failed=true
+                        autoBufferStalled()
                         android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
                         handleEngineFailure(index,screen)
                         return
@@ -2306,6 +2349,7 @@ class MainActivity: Activity() {
                     VlcPlayer.Event.Playing->{
                         started=true
                         rememberWorking(c)
+                        autoBufferHealthy()
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
                     }
