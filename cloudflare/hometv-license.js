@@ -36,6 +36,18 @@ async function serve(req,env){
  if(path==="/health")return json({ok:true});
  if(req.method!=="POST")return json({error:"Use POST"},405);
  let body;try{body=await req.json()}catch{return json({error:"Invalid JSON"},400)}
+ if(path==="/admin/create"){
+  if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
+  const expiry=String(body.expiry||"unlimited");
+  if(expiry!=="unlimited" && (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)||!Number.isFinite(Date.parse(expiry+"T23:59:59Z"))))return json({error:"Invalid expiry"},400);
+  const {records,sha}=await readLicenses(env);
+  const bytes=crypto.getRandomValues(new Uint8Array(24));
+  const password=Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
+  const passwordHash=await hash(password);
+  records.push({passwordHash,expiry,device:null,tokenHash:null});
+  await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
+  return json({ok:true,password,expiry});
+ }
  if(path==="/admin/release"){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
   const {records,sha}=await readLicenses(env);
