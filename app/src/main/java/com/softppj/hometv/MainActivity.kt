@@ -40,6 +40,7 @@ class MainActivity: Activity() {
     private val licensedPlaylist="hometv://licensed-playlist"
     private var licenseReady=false
     private var licenseChecking=false
+    private var surfingDirection=1
     private fun installationId():String {
         val old=prefs.getString("license_device",null)
         if(old!=null)return old
@@ -74,10 +75,38 @@ class MainActivity: Activity() {
             return data
         }finally{conn.disconnect()}
     }
+    private fun showLicenseCheckingScreen(){
+        val screen=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            gravity=Gravity.CENTER
+            setPadding(32,32,32,32)
+            setBackgroundColor(0xFF101E31.toInt())
+        }
+        screen.addView(ImageView(this).apply{
+            setImageResource(R.drawable.hometv_icon)
+            scaleType=ImageView.ScaleType.FIT_CENTER
+        },LinearLayout.LayoutParams((160*resources.displayMetrics.density).toInt(),(160*resources.displayMetrics.density).toInt()))
+        screen.addView(TextView(this).apply{
+            text="HomeTV"
+            textSize=32f
+            gravity=Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(0,20,0,12)
+        })
+        screen.addView(ProgressBar(this))
+        screen.addView(TextView(this).apply{
+            text="Checking license…"
+            textSize=17f
+            gravity=Gravity.CENTER
+            setTextColor(0xFFB6C9DD.toInt())
+            setPadding(0,20,0,0)
+        })
+        setContentView(screen)
+    }
     private fun beginLicensedSession(){
         if(licenseChecking)return
         licenseReady=false;licenseChecking=true
-        reset("HomeTV • Checking license")
+        showLicenseCheckingScreen()
         val token=prefs.getString("license_token",null)
         if(token.isNullOrBlank()){licenseChecking=false;showLicenseScreen();return}
         thread{
@@ -316,8 +345,10 @@ class MainActivity: Activity() {
         showBanner(c.name+" unavailable on both engines • Skipping",true)
         val available=surfingIndices()
         val currentPosition=numberFor(index)
-        val next=available.firstOrNull{numberFor(it)>currentPosition}
-            ?:available.firstOrNull{numberFor(it)<currentPosition}
+        val next=if(surfingDirection>=0)
+            available.firstOrNull{numberFor(it)>currentPosition} ?:available.firstOrNull{numberFor(it)<currentPosition}
+        else
+            available.lastOrNull{numberFor(it)<currentPosition} ?:available.lastOrNull{numberFor(it)>currentPosition}
         if(next!=null)handler.postDelayed({if(active==index)playIndex(preferredChannel(next))},1200L)
         return true
     }
@@ -1431,6 +1462,7 @@ class MainActivity: Activity() {
         handler.postDelayed(task,900L)
     }
     private fun previewChannel(delta:Int){
+        surfingDirection=if(delta>=0)1 else -1
         if(channels.isEmpty() || surfingIndices().isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
         val available=surfingIndices()
@@ -2168,6 +2200,7 @@ class MainActivity: Activity() {
         }
     }
     private fun switchChannel(delta:Int){
+        surfingDirection=if(delta>=0)1 else -1
         val available=surfingIndices()
         if(available.isEmpty())return
         val anchor=channels.getOrNull(active)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
