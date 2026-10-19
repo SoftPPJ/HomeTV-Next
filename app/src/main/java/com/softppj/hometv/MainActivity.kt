@@ -1030,7 +1030,42 @@ class MainActivity: Activity() {
                     }else channels=found.toMutableList()
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
                 }
+                startBackgroundChannelChecks()
                 done()
+            }
+        }
+    }
+    // Probe URLs sequentially without starting a second video decoder.
+    // A failed probe is inconclusive and never hides a channel.
+    @Volatile private var backgroundProbeGeneration=0
+    private val probeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
+    private fun startBackgroundChannelChecks(){
+        if(!licenseReady)return
+        val generation=++backgroundProbeGeneration
+        val snapshot=channels.toList().distinctBy{it.url}
+        thread(name="HomeTV-stream-probe"){
+            for(c in snapshot){
+                if(generation!=backgroundProbeGeneration || !licenseReady)break
+                val u=c.url.lowercase()
+                if(!u.startsWith("http://") && !u.startsWith("https://"))continue
+                if("youtube.com" in u || "youtu.be" in u)continue
+                try{
+                    val conn=URL(c.url).openConnection() as java.net.HttpURLConnection
+                    try{
+                        conn.requestMethod="GET"
+                        conn.connectTimeout=2500
+                        conn.readTimeout=2500
+                        conn.setRequestProperty("Range","bytes=0-1023")
+                        conn.setRequestProperty("User-Agent",c.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                        c.headers.forEach{(k,v)->if(!k.equals("User-Agent",true))conn.setRequestProperty(k,v)}
+                        val status=conn.responseCode
+                        if(status in 200..299 || status==206){
+                            conn.inputStream.use{stream->stream.read(ByteArray(512))}
+                            probeReachable[c.url]=true
+                        }else if(status==404 || status==410)probeReachable[c.url]=false
+                    }finally{conn.disconnect()}
+                }catch(_:Exception){ /* inconclusive */ }
+                try{Thread.sleep(250)}catch(_:InterruptedException){break}
             }
         }
     }
