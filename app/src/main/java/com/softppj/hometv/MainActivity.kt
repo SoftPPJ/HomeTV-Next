@@ -35,6 +35,127 @@ data class Playlist(val name:String, val url:String, val enabled:Boolean=true)
 class MainActivity: Activity() {
     private val prefs by lazy { getSharedPreferences("hometv", MODE_PRIVATE) }
     private var channels = mutableListOf<Channel>()
+    // Licensing is verified online before any cached or remote playlist is opened.
+    private val licenseApi="https://hometv-license.prasanthpjoy.workers.dev"
+    private val licensedPlaylist="hometv://licensed-playlist"
+    private var licenseReady=false
+    private var licenseChecking=false
+    private fun installationId():String {
+        val old=prefs.getString("license_device",null)
+        if(old!=null)return old
+        val id=java.util.UUID.randomUUID().toString()
+        prefs.edit().putString("license_device",id).commit()
+        return id
+    }
+    private fun licenseRequest(endpoint:String,payload:JSONObject):JSONObject {
+        val conn=(URL(licenseApi+endpoint).openConnection() as java.net.HttpURLConnection)
+        try {
+            conn.requestMethod="POST";conn.doOutput=true;conn.connectTimeout=12000;conn.readTimeout=15000
+            conn.setRequestProperty("Content-Type","application/json")
+            conn.outputStream.use{it.write(payload.toString().toByteArray(Charsets.UTF_8))}
+            val status=conn.responseCode
+            val body=(if(status in 200..299)conn.inputStream else conn.errorStream)?.bufferedReader()?.use{it.readText()} ?: ""
+            val result=try{JSONObject(body)}catch(_:Exception){JSONObject()}
+            if(status !in 200..299)throw IllegalStateException(result.optString("error","License server error: "+status))
+            return result
+        }finally{conn.disconnect()}
+    }
+    private fun licensePayload():JSONObject=JSONObject().put("device",installationId()).put("token",prefs.getString("license_token",""))
+    private fun licensedM3u():String {
+        val conn=(URL(licenseApi+"/playlist").openConnection() as java.net.HttpURLConnection)
+        try {
+            conn.requestMethod="POST";conn.doOutput=true;conn.connectTimeout=12000;conn.readTimeout=20000
+            conn.setRequestProperty("Content-Type","application/json")
+            conn.outputStream.use{it.write(licensePayload().toString().toByteArray(Charsets.UTF_8))}
+            val status=conn.responseCode
+            val data=(if(status in 200..299)conn.inputStream else conn.errorStream)?.bufferedReader()?.use{it.readText()} ?: ""
+            if(status !in 200..299)throw IllegalStateException(try{JSONObject(data).optString("error","License validation failed")}catch(_:Exception){"License validation failed"})
+            if(!data.trimStart().startsWith("#EXTM3U"))throw IllegalStateException("Invalid licensed playlist")
+            return data
+        }finally{conn.disconnect()}
+    }
+    private fun beginLicensedSession(){
+        if(licenseChecking)return
+        licenseReady=false;licenseChecking=true
+        reset("HomeTV • Checking license")
+        val token=prefs.getString("license_token",null)
+        if(token.isNullOrBlank()){licenseChecking=false;showLicenseScreen();return}
+        thread{
+            val error=try{licenseRequest("/validate",licensePayload());null}catch(e:Exception){e.message?:"License validation failed"}
+            runOnUiThread{
+                licenseChecking=false
+                if(isFinishing||isDestroyed)return@runOnUiThread
+                if(error==null){licenseReady=true;startLicensedApp()}
+                else{
+                    if(error.contains("expired",true)||error.contains("revoked",true)||error.contains("not active",true)||error.contains("Invalid token",true))
+                        prefs.edit().remove("license_token").apply()
+                    showLicenseScreen(error)
+                }
+            }
+        }
+    }
+    private fun startLicensedApp(){
+        if(!licenseReady)return
+        channels=cachedChannels()
+        checkEpgTune()
+        if(channels.isNotEmpty())resumeLast()
+        else refresh({if(channels.isNotEmpty())resumeLast() else showHome()})
+    }
+    private fun showLicenseScreen(error:String?=null){
+        licenseReady=false
+        reset("HomeTV • License activation")
+        root.addView(label("Enter your HomeTV License Key"))
+        if(!error.isNullOrBlank())root.addView(label(error))
+        val key=EditText(this).apply{
+            hint="HTV-XXXXX-XXXXX-XXXXX-XXXXX"
+            isSingleLine=true
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            setTextColor(android.graphics.Color.WHITE);setHintTextColor(0xFFB0BEC5.toInt())
+            setPadding(16,20,16,20)
+        }
+        root.addView(key)
+        val activate=button("Activate HomeTV"){
+            val value=key.text.toString().trim().uppercase(java.util.Locale.ROOT)
+            if(value.isBlank()){key.error="Enter a license key";return@button}
+            key.isEnabled=false
+            reset("HomeTV • Activating license")
+            thread{
+                var token:String?=null
+                val error=try{
+                    val result=licenseRequest("/activate",JSONObject().put("device",installationId()).put("password",value))
+                    token=result.getString("token");null
+                }catch(e:Exception){e.message?:"Activation failed"}
+                runOnUiThread{
+                    if(isFinishing||isDestroyed)return@runOnUiThread
+                    if(token!=null){
+                        prefs.edit().putString("license_token",token).apply()
+                        licenseReady=true;startLicensedApp()
+                    }else showLicenseScreen(error)
+                }
+            }
+        }
+        root.addView(activate)
+        root.addView(label("An internet connection is required for activation and license checks."))
+    }
+    private fun surrenderLicense(){
+        AlertDialog.Builder(this).setTitle("Surrender License")
+            .setMessage("Release this device from its license key? You will need a key to activate again.")
+            .setPositiveButton("Surrender"){_,_->
+                reset("HomeTV • Releasing license")
+                thread{
+                    val error=try{licenseRequest("/surrender",licensePayload());null}catch(e:Exception){e.message?:"Unable to release license"}
+                    runOnUiThread{
+                        if(error==null){
+                            prefs.edit().remove("license_token").apply()
+                            licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
+                        }else{
+                            showLicenseScreen("Could not surrender: "+error)
+                        }
+                    }
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
     private var player:ExoPlayer?=null
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
@@ -541,17 +662,8 @@ class MainActivity: Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
         root.setBackgroundColor(0xFF101E31.toInt())
-        setContentView(root)
-        channels=cachedChannels()
-        checkEpgTune()
-        // Start directly in the last channel; do not briefly display Home first.
-        if(channels.isNotEmpty()){
-            resumeLast()
-        }else{
-            refresh({
-                if(channels.isNotEmpty())resumeLast() else showHome()
-            })
-        }
+        setContentView(android.widget.ScrollView(this).apply{fillViewport=true;addView(root)})
+        beginLicensedSession()
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
     private fun button(s:String, action:()->Unit)=Button(this).apply {
@@ -570,13 +682,13 @@ class MainActivity: Activity() {
         }
         setOnClickListener{action()}
     }
-    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(root); root.removeAllViews(); root.addView(label(title)) }
+    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{fillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
-        return MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }
+        return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
     }
     private fun savePlaylists(list:List<Playlist>) {
-        val arr=JSONArray(); list.forEach { arr.put(JSONObject().put("name",it.name).put("url",it.url).put("enabled",it.enabled)) }
+        val arr=JSONArray(); list.filter{it.url!=licensedPlaylist}.forEach { arr.put(JSONObject().put("name",it.name).put("url",it.url).put("enabled",it.enabled)) }
         prefs.edit().putString("playlists",arr.toString()).apply()
     }
     private fun showHome() {
@@ -801,6 +913,7 @@ class MainActivity: Activity() {
         return java.io.File(filesDir,"playlist_"+digest+".m3u")
     }
     private fun cachedChannels():MutableList<Channel>{
+        if(!licenseReady)return mutableListOf()
         val found=mutableListOf<Channel>()
         playlists().filter{it.enabled}.forEach{p->
             try{
@@ -811,6 +924,7 @@ class MainActivity: Activity() {
         return found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
     }
     private fun refresh(done:()->Unit,forceRebuild:Boolean=false){
+        if(!licenseReady){showLicenseScreen("Please activate your license");return}
         val sources=playlists().filter{it.enabled}
         if(sources.isEmpty()){
             channels.clear()
@@ -825,7 +939,7 @@ class MainActivity: Activity() {
             val workers=sources.mapIndexed{index,p->
                 thread{
                     try{
-                        val connection=URL(p.url).openConnection().apply{
+                        val connection=if(p.url==licensedPlaylist)null else URL(p.url).openConnection().apply{
                             connectTimeout=12000
                             readTimeout=15000
                             useCaches=false
@@ -833,7 +947,7 @@ class MainActivity: Activity() {
                             setRequestProperty("Pragma","no-cache")
                             setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
                         }
-                        val body=connection.getInputStream().bufferedReader().use{it.readText()}
+                        val body=if(p.url==licensedPlaylist)licensedM3u() else connection!!.getInputStream().bufferedReader().use{it.readText()}
                         val parsed=parseM3u(body,p.name)
                         if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
                         results[index]=parsed
@@ -2114,6 +2228,7 @@ class MainActivity: Activity() {
     }
     private fun settings(){
         reset("HomeTV Settings")
+        root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
@@ -2207,6 +2322,7 @@ class MainActivity: Activity() {
         return super.dispatchKeyEvent(event)
     }
     override fun onBackPressed(){
+        if(!licenseReady){confirmExit();return}
         // Back navigates one level; Back from Home exits the application.
         if(active>=0){
             val screen=videoScreen
