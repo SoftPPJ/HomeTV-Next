@@ -1112,6 +1112,65 @@ class MainActivity: Activity() {
     private var probeQueue=java.util.ArrayDeque<Channel>()
     private val probePlayers=mutableSetOf<ExoPlayer>()
     private var probeInFlight=0
+    private val vlcProbeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
+    private val vlcProbeQueue=java.util.ArrayDeque<Channel>()
+    private var vlcProbeCore:LibVLC?=null
+    private var vlcProbePlayer:VlcPlayer?=null
+    private var vlcProbeWatchdog:Runnable?=null
+    private fun stopVlcProbe(){
+        vlcProbeWatchdog?.let{handler.removeCallbacks(it)}
+        vlcProbeWatchdog=null
+        vlcProbePlayer?.let{try{it.stop();it.release()}catch(_:Exception){}}
+        vlcProbePlayer=null
+        vlcProbeCore?.let{try{it.release()}catch(_:Exception){}}
+        vlcProbeCore=null
+    }
+    private fun launchNextVlcProbe(generation:Int){
+        if(generation!=backgroundProbeGeneration || !licenseReady || vlcProbePlayer!=null)return
+        while(vlcProbeQueue.isNotEmpty()){
+            val channel=vlcProbeQueue.removeFirst()
+            val url=channel.url.lowercase(java.util.Locale.ROOT)
+            if(!(url.startsWith("http://") || url.startsWith("https://")) ||
+                "youtube.com" in url || "youtu.be" in url ||
+                channel.url==channels.getOrNull(active)?.url)continue
+            try{
+                val core=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200","--http-reconnect"))
+                val probe=VlcPlayer(core)
+                vlcProbeCore=core
+                vlcProbePlayer=probe
+                var completed=false
+                fun finish(working:Boolean){
+                    if(completed)return
+                    completed=true
+                    if(working && generation==backgroundProbeGeneration)vlcProbeReachable[channel.url]=true
+                    handler.post{
+                        if(vlcProbePlayer===probe){
+                            stopVlcProbe()
+                            handler.post{launchNextVlcProbe(generation)}
+                        }
+                    }
+                }
+                probe.setEventListener{event->
+                    when(event.type){
+                        VlcPlayer.Event.Playing->finish(true)
+                        VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->finish(false)
+                    }
+                }
+                val media=VlcMedia(core,Uri.parse(channel.url))
+                media.addOption(":no-audio")
+                media.addOption(":no-video")
+                channel.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
+                channel.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+                probe.media=media
+                media.release()
+                vlcProbeWatchdog=Runnable{finish(false)}
+                handler.postDelayed(vlcProbeWatchdog!!,6500L)
+                probe.play()
+                return
+            }catch(_:Exception){stopVlcProbe()}
+        }
+    }
+
     private fun startBackgroundChannelChecks(){
         if(!licenseReady)return
         backgroundProbeGeneration++
@@ -1121,6 +1180,8 @@ class MainActivity: Activity() {
         probePlayers.clear()
         probeInFlight=0
         probeQueue.clear()
+        stopVlcProbe()
+        vlcProbeQueue.clear()
         // Keep failed-start channels hidden until the app session ends.
         val snapshot=channels.toList().distinctBy{it.url}.filter{it.url!=channels.getOrNull(active)?.url}
         val prioritized=snapshot.sortedWith(compareBy<Channel>{
@@ -1130,8 +1191,9 @@ class MainActivity: Activity() {
                 else -> 2
             }
         })
-        prioritized.forEach{probeQueue.addLast(it)}
+        prioritized.forEach{probeQueue.addLast(it);vlcProbeQueue.addLast(it)}
         launchNextProbe(generation)
+        launchNextVlcProbe(generation)
     }
     private fun launchNextProbe(generation:Int){
         if(generation!=backgroundProbeGeneration || !licenseReady)return
@@ -2690,5 +2752,5 @@ class MainActivity: Activity() {
         web?.onPause();web?.destroy();web=null
         active=-1
     }
-    override fun onDestroy(){backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
+    override fun onDestroy(){stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
 }
