@@ -1783,7 +1783,7 @@ class MainActivity: Activity() {
         startupWatchdog=null
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
         val sessionKey=channelKey(c)
-        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey}
+        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();fallbackEngineOverride=null}
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;fallbackEngineOverride=null}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
@@ -1946,7 +1946,7 @@ class MainActivity: Activity() {
                 exo.setMediaItem(MediaItem.fromUri(c.url))
                 exo.prepare()
                 exo.play()
-            }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true)}
+            }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true);handleEngineFailure(index,screen)}
         }
         updateClock()
         screen.requestFocus()
@@ -1993,7 +1993,7 @@ class MainActivity: Activity() {
                         android.os.SystemClock.elapsedRealtime()-lastHealthy>18000L){
                         failed=true
                         android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
-                        reconnectCurrentChannel(c,index,screen)
+                        handleEngineFailure(index,screen)
                         return
                     }
                     handler.postDelayed(this,5000)
@@ -2022,7 +2022,7 @@ class MainActivity: Activity() {
                     VlcPlayer.Event.Stopped, VlcPlayer.Event.EndReached->handler.post{
                         if(active==index && vlcPlayer===vlc && !failed){
                             failed=true
-                            reconnectCurrentChannel(c,index,screen)
+                            handleEngineFailure(index,screen)
                         }
                     }
                     VlcPlayer.Event.EncounteredError->handler.post{
