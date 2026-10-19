@@ -29,25 +29,27 @@ async function readLicenses(env){
  if(!Array.isArray(records))throw Error("License file must be a JSON array");
  return {records,sha:file.sha};
 }
+const sessions=x=>x.sessions|| (x.device&&x.tokenHash?{[x.device]:x.tokenHash}:{});
+const deviceLimit=x=>x.maxDevices==="unlimited"?"unlimited":Math.max(1,Number(x.maxDevices)||1);
 const expired=x=>x.expiry!=="unlimited" && (!/^\d{4}-\d{2}-\d{2}$/.test(x.expiry||"") || Date.now()>Date.parse(x.expiry+"T23:59:59Z"));
 async function serve(req,env){
  if(!env.GITHUB_TOKEN||!env.GITHUB_REPO)return json({error:"Worker not configured"},503);
  const u=new URL(req.url),path=u.pathname;
- if(path==="/admin"&&req.method==="GET")return new Response("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>HomeTV Admin</title><style>body{font:16px Arial;background:#101e31;color:white;max-width:960px;margin:auto;padding:20px}section{background:#233b58;padding:18px;margin:16px 0;border-radius:10px}input,select,button{padding:10px;margin:5px}button{background:#ffb900;border:0;border-radius:5px;cursor:pointer}td,th{padding:10px;border-bottom:1px solid #607087;text-align:left}table{width:100%}#result{overflow-wrap:anywhere}</style></head><body><h1>HomeTV License Manager</h1><section><input type=\"password\" id=\"secret\" placeholder=\"Administrator token\" size=\"40\"><button onclick=\"load()\">Sign in / Refresh</button></section><div id=\"private\" hidden><section><h2>Generate License Key</h2><select id=\"expiry\"><option value=\"unlimited\">Unlimited</option><option value=\"date\">Expiry date</option></select><input type=\"date\" id=\"date\"><button onclick=\"create()\">Generate License Key</button><p id=\"result\"></p></section><section><h2>Licenses</h2><div style=\"overflow-x:auto\"><table><thead><tr><th>Reference</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead><tbody id=\"records\"></tbody></table></div></section></div><p id=\"message\"></p><script>\nconst el=x=>document.getElementById(x);\nasync function request(path,body={}){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+el('secret').value},body:JSON.stringify(body),cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}\nasync function load(){try{const d=await request('/admin/list');el('private').hidden=false;el('records').replaceChildren();for(const x of d.licenses){const tr=document.createElement('tr');for(const v of [x.id,x.expiry,x.status]){const td=document.createElement('td');td.textContent=v;tr.append(td)}const td=document.createElement('td');for(const action of ['release','revoke']){const b=document.createElement('button');b.textContent=action;b.disabled=x.revoked;b.onclick=()=>change(x.id,action);td.append(b)}tr.append(td);el('records').append(tr)}el('message').textContent=d.licenses.length+' licenses loaded'}catch(e){el('private').hidden=true;el('message').textContent=e.message}}\nasync function create(){try{const expiry=el('expiry').value==='unlimited'?'unlimited':el('date').value;if(!expiry)throw Error('Choose an expiry date');const d=await request('/admin/create',{expiry});el('result').textContent='NEW LICENSE KEY — SAVE NOW: '+d.password;await load()}catch(e){el('message').textContent=e.message}}\nasync function change(id,action){if(!confirm(action+' '+id+'?'))return;try{await request('/admin/'+action,{id});await load()}catch(e){el('message').textContent=e.message}}\n</script></body></html>",{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'","x-content-type-options":"nosniff"}});
+ if(path==="/admin"&&req.method==="GET")return new Response("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>HomeTV Admin</title><style>body{font:16px Arial;background:#101e31;color:white;max-width:960px;margin:auto;padding:20px}section{background:#233b58;padding:18px;margin:16px 0;border-radius:10px}input,select,button{padding:10px;margin:5px}button{background:#ffb900;border:0;border-radius:5px;cursor:pointer}td,th{padding:10px;border-bottom:1px solid #607087;text-align:left}table{width:100%}#result{overflow-wrap:anywhere}</style></head><body><h1>HomeTV License Manager</h1><section><input type=\"password\" id=\"secret\" placeholder=\"Administrator token\" size=\"40\"><button onclick=\"load()\">Sign in / Refresh</button></section><div id=\"private\" hidden><section><h2>Generate License Key</h2><select id=\"expiry\" onchange=\"el('date').hidden=this.value!=='date';if(this.value!=='date')el('date').value=''\"><option value=\"unlimited\">Unlimited</option><option value=\"date\">Expiry date</option></select><input type=\"date\" id=\"date\" hidden><label>Device limit <select id=\"limit\"><option value=\"1\">1 device</option><option value=\"2\">2 devices</option><option value=\"3\">3 devices</option><option value=\"5\">5 devices</option><option value=\"unlimited\">Unlimited devices</option></select></label><button onclick=\"create()\">Generate License Key</button><p id=\"result\"></p></section><section><h2>Licenses</h2><div style=\"overflow-x:auto\"><table><thead><tr><th>Reference</th><th>Expiry</th><th>Device limit</th><th>Used</th><th>Status</th><th>Actions</th></tr></thead><tbody id=\"records\"></tbody></table></div></section></div><p id=\"message\"></p><script>\nconst el=x=>document.getElementById(x);\nasync function request(path,body={}){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+el('secret').value},body:JSON.stringify(body),cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}\nasync function load(){try{const d=await request('/admin/list');el('private').hidden=false;el('records').replaceChildren();for(const x of d.licenses){const tr=document.createElement('tr');for(const v of [x.id,x.expiry,x.maxDevices,x.used,x.status]){const td=document.createElement('td');td.textContent=v;tr.append(td)}const td=document.createElement('td');for(const action of ['release','revoke']){const b=document.createElement('button');b.textContent=action;b.disabled=x.revoked;b.onclick=()=>change(x.id,action);td.append(b)}tr.append(td);el('records').append(tr)}el('message').textContent=d.licenses.length+' licenses loaded'}catch(e){el('private').hidden=true;el('message').textContent=e.message}}\nasync function create(){try{const expiry=el('expiry').value==='unlimited'?'unlimited':el('date').value;if(!expiry)throw Error('Choose an expiry date');const d=await request('/admin/create',{expiry,maxDevices:el('limit').value});el('result').textContent='NEW LICENSE KEY — SAVE NOW: '+d.password;await load()}catch(e){el('message').textContent=e.message}}\nasync function change(id,action){if(!confirm(action+' '+id+'?'))return;try{await request('/admin/'+action,{id});await load()}catch(e){el('message').textContent=e.message}}\n</script></body></html>",{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store","content-security-policy":"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'","x-content-type-options":"nosniff"}});
  if(path==="/health")return json({ok:true});
  if(req.method!=="POST")return json({error:"Use POST"},405);
  let body;try{body=await req.json()}catch{return json({error:"Invalid JSON"},400)}
  if(path==="/admin/list"){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
   const {records}=await readLicenses(env);
-  return json({licenses:records.map(x=>({id:x.id||x.passwordHash.slice(0,12),expiry:x.expiry,status:x.revoked?"Revoked":expired(x)?"Expired":x.device?"Active":"Available",revoked:!!x.revoked}))});
+  return json({licenses:records.map(x=>({id:x.id||x.passwordHash.slice(0,12),expiry:x.expiry,maxDevices:deviceLimit(x),used:Object.keys(sessions(x)).length,status:x.revoked?"Revoked":expired(x)?"Expired":Object.keys(sessions(x)).length?"Active":"Available",revoked:!!x.revoked}))});
  }
  if(path==="/admin/revoke"){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
   const {records,sha}=await readLicenses(env);
   const row=records.find(x=>(x.id||x.passwordHash.slice(0,12))===body.id);
   if(!row)return json({error:"Not found"},404);
-  row.revoked=true;row.device=null;row.tokenHash=null;
+  row.revoked=true;row.device=null;row.tokenHash=null;row.sessions={};
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
   return json({ok:true});
  }
@@ -55,20 +57,22 @@ async function serve(req,env){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
   const expiry=String(body.expiry||"unlimited");
   if(expiry!=="unlimited" && (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)||!Number.isFinite(Date.parse(expiry+"T23:59:59Z"))))return json({error:"Invalid expiry"},400);
+  const maxDevices=body.maxDevices==="unlimited"?"unlimited":Number(body.maxDevices??1);
+  if(maxDevices!=="unlimited"&&(!Number.isInteger(maxDevices)||maxDevices<1||maxDevices>100))return json({error:"Invalid device limit"},400);
   const {records,sha}=await readLicenses(env);
   const bytes=crypto.getRandomValues(new Uint8Array(24));
   const password=Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("");
   const passwordHash=await hash(password);
-  records.push({passwordHash,expiry,device:null,tokenHash:null});
+  records.push({passwordHash,expiry,maxDevices,sessions:{},device:null,tokenHash:null});
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
-  return json({ok:true,password,expiry});
+  return json({ok:true,password,expiry,maxDevices});
  }
  if(path==="/admin/release"){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
   const {records,sha}=await readLicenses(env);
   const row=records.find(x=>(x.id||x.passwordHash.slice(0,12))===body.id);
   if(!row)return json({error:"Not found"},404);
-  row.device=null;row.tokenHash=null;
+  row.device=null;row.tokenHash=null;row.sessions={};
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
   return json({ok:true});
  }
@@ -84,16 +88,17 @@ async function serve(req,env){
   if(!row)return json({error:"Invalid password"},401);
   if(row.revoked)return json({error:"License revoked"},403);
   if(expired(row))return json({error:"License expired"},403);
-  if(row.device&&row.device!==device)return json({error:"License already assigned to another installation. Surrender or request admin release."},409);
+  const active=sessions(row);
+  if(!active[device]&&deviceLimit(row)!=="unlimited"&&Object.keys(active).length>=deviceLimit(row))return json({error:"Device limit reached. Surrender a device or request admin release."},409);
   const token=crypto.randomUUID()+"-"+crypto.randomUUID();
-  row.device=device;row.tokenHash=await hash(token);
+  active[device]=await hash(token);row.sessions=active;const active=sessions(row);delete active[device];row.sessions=active;row.device=null;row.tokenHash=null;
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
   return json({ok:true,token,expiry:row.expiry});
  }
  const token=String(body.token||"");
  if(token.length<20||token.length>200)return json({error:"Invalid token"},401);
  const tokenHash=await hash(token);
- row=records.find(x=>x.device===device&&x.tokenHash===tokenHash);
+ row=records.find(x=>sessions(x)[device]===tokenHash);
  if(!row)return json({error:"License not active"},401);
  if(path==="/surrender"){
   row.device=null;row.tokenHash=null;
