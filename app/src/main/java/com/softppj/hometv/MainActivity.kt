@@ -348,10 +348,10 @@ class MainActivity: Activity() {
             fallbackEngineOverride=null
             return true
         }
-        unavailableChannels.add(channelKey(c))
+        // A transient playback stall is not proof that a channel is offline.
         engineAttempts.clear()
         fallbackEngineOverride=null
-        showBanner(c.name+" unavailable on both engines • Skipping",true)
+        showBanner(c.name+" temporarily unavailable • Trying next channel",true)
         val available=surfingIndices()
         val currentPosition=numberFor(index)
         val next=if(surfingDirection>=0)
@@ -1078,6 +1078,10 @@ class MainActivity: Activity() {
                 probeInFlight--;continue
             }
             probePlayers.add(probe)
+            // Never start playback or acquire audio output in background checks.
+            probe.volume=0f
+            probe.trackSelectionParameters=probe.trackSelectionParameters.buildUpon()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO,true).build()
             var completed=false
             var watchdog:Runnable?=null
             fun finish(working:Boolean?){
@@ -1090,25 +1094,21 @@ class MainActivity: Activity() {
                 if(generation!=backgroundProbeGeneration)return
                 if(working!=null){
                     probeReachable[channel.url]=working
-                    // Only skip a channel when every known alternative is confirmed failed.
-                    val group=channels.filter{channelKey(it)==channelKey(channel)}
-                    val key=channelKey(channel)
-                    if(group.isNotEmpty() && group.all{probeReachable[it.url]==false})
-                        unavailableChannels.add(key)
-                    else if(group.any{probeReachable[it.url]==true})
-                        unavailableChannels.remove(key)
+                    // Background probing must never declare a channel offline.
+                    if(working)unavailableChannels.remove(channelKey(channel))
                 }
-                launchNextProbe(generation)
+                // Defer next probe to avoid recursive work on the UI event stack.
+                handler.post{launchNextProbe(generation)}
             }
             probe.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_READY)finish(true)
-                    else if(state==Player.STATE_ENDED)finish(false)
+                    else if(state==Player.STATE_ENDED)finish(null)
                 }
-                override fun onPlayerError(error:PlaybackException){finish(false)}
+                override fun onPlayerError(error:PlaybackException){finish(null)}
             })
             watchdog=Runnable{finish(null)} // Timeout is inconclusive, not a failed stream.
-            handler.postDelayed(watchdog!!,10000L)
+            handler.postDelayed(watchdog!!,5000L)
             try{
                 val http=DefaultHttpDataSource.Factory()
                     .setConnectTimeoutMs(5000).setReadTimeoutMs(5000)
@@ -1117,8 +1117,8 @@ class MainActivity: Activity() {
                 http.setDefaultRequestProperties(headers)
                 probe.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(MediaItem.fromUri(channel.url)))
                 probe.prepare()
-                probe.playWhenReady=true
-            }catch(_:Exception){finish(false)}
+                probe.playWhenReady=false
+            }catch(_:Exception){finish(null)}
         }
         if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
