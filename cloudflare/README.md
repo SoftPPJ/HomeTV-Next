@@ -27,6 +27,6 @@ Endpoints (all POST except GET /health):
 - `/validate`: `{"token":"...","device":"..."}`
 - `/playlist`: `{"token":"...","device":"..."}` → protected M3U
 - `/surrender`: `{"token":"...","device":"..."}` → releases license
-- `/admin/release`: Authorization Bearer ADMIN_TOKEN; `{"id":"USER001"}` → releases lost license
+- `/admin/create`: Authorization Bearer ADMIN_TOKEN; `{"expiry":"unlimited"}` or `{"expiry":"2027-12-31"}` → generates a unique password and stores only its hash. Save the returned password securely; it is shown only once. No user ID is required.\n- `/admin/release`: Authorization Bearer ADMIN_TOKEN; `{"id":"USER001"}` → releases lost license
 
 **Limitations:** GitHub Contents API uses optimistic concurrency, so simultaneous activations of the same password cannot both succeed; conflicting writes fail closed and may require retry. GitHub-hosted files are not an ideal high-volume transactional database. For production-scale licensing, Cloudflare D1 with transactional activation is recommended. Installation IDs are not hardware-bound and may be cloned on compromised devices. The app must never access a cached protected playlist before successful online validation; offline mode should remain locked. Android cannot intercept uninstall. Do not distribute protected M3U through a public GitHub URL.
