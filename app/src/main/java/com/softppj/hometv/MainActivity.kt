@@ -1871,7 +1871,9 @@ class MainActivity: Activity() {
             }.setNegativeButton("Cancel",null).show()
     }
     private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original","Zoom 110%","Zoom 125%","Zoom 150%")
+    private var previewScreenMode:String?=null
     private fun screenMode():String{
+        previewScreenMode?.let{return it}
         val url=channels.getOrNull(active)?.url
         if(url!=null){
             val saved=prefs.getString("screen_channel_"+hash(url),null)
@@ -1959,47 +1961,55 @@ class MainActivity: Activity() {
         val universal=prefs.getString("screen_mode","16:9") ?: "16:9"
         val labels=if(target!=null)arrayOf("Use universal default")+screenModes else screenModes
         val selected=if(target!=null && original==null)0 else labels.indexOf(original ?: universal).coerceAtLeast(0)
-        var confirmed=false
         var pending=selected
+        var confirmed=false
         fun preview(position:Int){
-            pending=position
-            val editor=prefs.edit()
-            if(target!=null && position==0)editor.remove(key) else editor.putString(key,labels[position])
-            editor.apply()
+            pending=position.coerceIn(0,labels.lastIndex)
+            // Only the live preview changes; settings are committed on OK.
+            previewScreenMode=if(target!=null && pending==0)universal else labels[pending]
             applyVideoSize()
         }
         val dialog=AlertDialog.Builder(this)
             .setTitle(if(target!=null)"Screen size · "+channels[target].name else "Universal screen size")
             .setSingleChoiceItems(labels,selected){_,position->preview(position)}
-            .setPositiveButton("OK"){_,_->confirmed=true}
+            .setPositiveButton("OK"){_,_->
+                confirmed=true
+                val editor=prefs.edit()
+                if(target!=null && pending==0)editor.remove(key)
+                else editor.putString(key,labels[pending])
+                editor.apply()
+            }
             .setNegativeButton("Cancel",null).create()
         dialog.setOnDismissListener{
-            if(!confirmed){
-                val editor=prefs.edit()
-                if(original==null)editor.remove(key) else editor.putString(key,original)
-                editor.apply();applyVideoSize()
-            }else if(active>=0)showBanner("Screen: "+screenMode())
+            previewScreenMode=null
+            applyVideoSize()
+            if(confirmed && active>=0)showBanner("Screen: "+screenMode())
         }
         dialog.setOnShowListener{
-            val list=dialog.listView
-            list?.setItemChecked(selected,true)
-            list?.setSelection(selected)
-            list?.setOnKeyListener{_,code,event->
+            val list=dialog.listView ?:return@setOnShowListener
+            list.setItemChecked(selected,true)
+            list.setSelection(selected)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
+                    list.setItemChecked(position,true)
+                    preview(position)
+                }
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+            list.setOnKeyListener{_,code,event->
                 if(event.action!=KeyEvent.ACTION_DOWN)false
                 else when(code){
-                    KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN->{
-                        val next=(pending+if(code==KeyEvent.KEYCODE_DPAD_DOWN)1 else -1).coerceIn(0,labels.lastIndex)
-                        list.setItemChecked(next,true);list.setSelection(next);preview(next);true
-                    }
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->{
-                        // Remote OK confirms the highlighted value.
-                        confirmed=true;dialog.dismiss();true
+                        // Center selects the highlighted ratio; explicit OK saves it.
+                        preview(list.selectedItemPosition.takeIf{it>=0} ?: pending)
+                        list.setItemChecked(pending,true)
+                        true
                     }
                     KeyEvent.KEYCODE_BACK->{dialog.dismiss();true}
-                    else->false
+                    else->false // Let ListView handle Up/Down and fire onItemSelected.
                 }
             }
-            list?.requestFocus()
+            list.requestFocus()
         }
         showSideDialog(dialog)
     }
