@@ -101,7 +101,7 @@ async function serve(req,env){
  row=records.find(x=>sessions(x)[device]===tokenHash);
  if(!row)return json({error:"License not active"},401);
  if(path==="/surrender"){
-  row.device=null;row.tokenHash=null;
+  const active=sessions(row);delete active[device];row.sessions=active;row.device=null;row.tokenHash=null;
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
   return json({ok:true});
  }
