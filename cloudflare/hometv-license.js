@@ -1,7 +1,7 @@
 // HomeTV licensing Cloudflare Worker.
 // Secrets: GITHUB_TOKEN (fine-grained Contents read/write), ADMIN_TOKEN.
 // Vars: GITHUB_REPO (private repo owner/name), LICENSE_PATH (optional, defaults licenses.json),
-// PLAYLIST_PATH (optional, defaults playlist.m3u).
+// PLAYLIST_URL (secret, full upstream M3U URL).
 // Never place GITHUB_TOKEN or ADMIN_TOKEN in the Android app.
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 const enc=s=>new TextEncoder().encode(s);
@@ -75,9 +75,14 @@ async function serve(req,env){
  if(expired(row))return json({error:"License expired"},403);
  if(path==="/validate")return json({ok:true,expiry:row.expiry});
  if(path==="/playlist"){
-  const file=await gh(env,env.PLAYLIST_PATH||"playlist.m3u");
-  if(!file.body)return json({error:"Default playlist not found"},404);
-  return new Response(file.body,{headers:{"content-type":"application/vnd.apple.mpegurl; charset=utf-8","cache-control":"no-store"}});
+  // The upstream playlist URL (including its token) must be a Worker secret,
+  // never published in the Android APK or in this repository.
+  if(!env.PLAYLIST_URL)return json({error:"Playlist source not configured"},503);
+  const upstream=await fetch(env.PLAYLIST_URL,{headers:{"User-Agent":"HomeTV-License-Worker","Cache-Control":"no-store"},cf:{cacheTtl:0},redirect:"follow"});
+  if(!upstream.ok)return json({error:"Playlist source unavailable"},502);
+  const body=await upstream.text();
+  if(!body.trimStart().startsWith("#EXTM3U"))return json({error:"Invalid playlist response"},502);
+  return new Response(body,{headers:{"content-type":"application/vnd.apple.mpegurl; charset=utf-8","cache-control":"no-store"}});
  }
  return json({error:"Not found"},404);
 }
