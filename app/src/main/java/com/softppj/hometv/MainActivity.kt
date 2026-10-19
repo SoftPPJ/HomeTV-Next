@@ -314,7 +314,10 @@ class MainActivity: Activity() {
         engineAttempts.clear()
         fallbackEngineOverride=null
         showBanner(c.name+" unavailable on both engines • Skipping",true)
-        val next=surfingIndices().firstOrNull{!sameChannel(channels[it],c)}
+        val available=surfingIndices()
+        val currentPosition=numberFor(index)
+        val next=available.firstOrNull{numberFor(it)>currentPosition}
+            ?:available.firstOrNull{numberFor(it)<currentPosition}
         if(next!=null)handler.postDelayed({if(active==index)playIndex(preferredChannel(next))},1200L)
         return true
     }
@@ -1443,7 +1446,7 @@ class MainActivity: Activity() {
     }
     private fun screenInfoOnStart(index:Int){
         handler.postDelayed({if(active==index)showChannelInfo(index)},500)
-        if(epgGuide.isEmpty())loadEpg{if(active==index)showChannelInfo(index)}
+        if(prefs.getBoolean("show_channel_epg",true) && epgGuide.isEmpty() && !prefs.getString("epg_xmltv_url","").isNullOrBlank())loadEpg{if(active==index)showChannelInfo(index)}
     }
     private fun showChannelInfo(index:Int,extra:String=""){
         val screen=videoScreen ?:return
@@ -1458,7 +1461,8 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            text=numberFor(index).toString()+"  "+channel.name+"\n"+channel.group+"  •  "+channel.source+(if(channel.epgId.isNotBlank())"  •  EPG: "+channel.epgId else "")+"\n"+(if(epgGuide.isNotEmpty())programmeSummary(channel) else "EPG: Loading or unavailable")+(if(extra.isNotBlank())"\n"+extra else "")
+            val epg=if(prefs.getBoolean("show_channel_epg",true) && epgGuide.isNotEmpty() && programmeList(channel).isNotEmpty())programmeSummary(channel) else ""
+            text=numberFor(index).toString()+"  "+channel.name+(if(epg.isNotBlank())"\n"+epg else "")
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -2233,6 +2237,10 @@ class MainActivity: Activity() {
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
+        root.addView(button("Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF"){
+            prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply()
+            settings()
+        })
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
             val choices=arrayOf("Auto","Media3","LibVLC")
             AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3"))){dialog,i->
