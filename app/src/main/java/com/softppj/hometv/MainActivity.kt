@@ -403,11 +403,13 @@ class MainActivity: Activity() {
         }
         channelCollection("All channels",visibleIndices())
     }
+    private val defaultEpgUrl="https://avkb.short.gy/epg.xml.gz"
+    private fun configuredEpgUrl():String=prefs.getString("epg_xmltv_url",null)?.trim()?.takeIf{it.isNotEmpty()} ?:defaultEpgUrl
     private fun configureEpg(){
         val input=EditText(this).apply{
             hint="XMLTV guide URL"
             setSingleLine()
-            setText(prefs.getString("epg_xmltv_url",""))
+            setText(configuredEpgUrl())
         }
         showSideDialog(AlertDialog.Builder(this).setTitle("EPG source")
             .setMessage("Enter an XMLTV guide URL (.xml or .xml.gz).")
@@ -524,7 +526,7 @@ class MainActivity: Activity() {
         }
     }
     private fun loadEpg(done:(Boolean)->Unit){
-        val url=prefs.getString("epg_xmltv_url","")?.trim().orEmpty()
+        val url=configuredEpgUrl()
         if(url.isEmpty()){done(false);return}
         if(epgGuide.isNotEmpty() && System.currentTimeMillis()-epgLoadedAt<60*60*1000L){
             done(true);return
@@ -576,7 +578,7 @@ class MainActivity: Activity() {
         }
     }
     private fun showEpg(){
-        if(prefs.getString("epg_xmltv_url","").isNullOrBlank()){configureEpg();return}
+        if(configuredEpgUrl().isBlank()){configureEpg();return}
         Toast.makeText(this,"Loading TV guide…",Toast.LENGTH_SHORT).show()
         loadEpg{success->
             if(!success){
