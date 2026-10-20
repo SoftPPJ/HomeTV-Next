@@ -272,9 +272,10 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
-        return group.firstOrNull{channels[it].url==saved && probeReachable[channels[it].url]!=false}
-            ?:group.firstOrNull{probeReachable[channels[it].url]==true}
-            ?:group.firstOrNull{probeReachable[channels[it].url]!=false}
+        val usable=group.filter{channels[it].url !in failedUrlsThisSession}
+        return usable.firstOrNull{channels[it].url==saved}
+            ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
+            ?:usable.firstOrNull()
             ?:group.first()
     }
     private fun rememberWorking(c:Channel){
@@ -404,24 +405,29 @@ class MainActivity: Activity() {
             handler.post{if(active==index && videoScreen===screen)playIndex(index)}
             return true
         }
+        // Exhausted both engines: remember this failed URL before moving on.
+        failedUrlsThisSession.add(c.url)
         if(tryNextAlternative(index)){
             fallbackEngineOverride=null
             return true
         }
-        // Only hide channels that have NEVER played in this app session and
-        // whose every URL has exhausted both playback engines.
+        // Both engines have failed for this URL. Record it before evaluating
+        // other sources; previously this happened only after all alternatives.
         failedUrlsThisSession.add(c.url)
         val key=channelKey(c)
         val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
-        if(key !in playedThisSession && allUrls.isNotEmpty() &&
-            allUrls.all{it in failedUrlsThisSession}){
+        if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
             unavailableChannels.add(key)
-            showBanner(c.name+" could not start • Hidden until app restart",true)
-        }
+            showBanner(c.name+" unavailable • Skipping until next restart",true)
+            val available=surfingIndices()
+            if(available.isNotEmpty()){
+                handler.post{if(active==index && videoScreen===screen)playIndex(preferredChannel(available.firstOrNull{it>index} ?: available.first()))}
+            }else{
+                handler.post{if(active==index && videoScreen===screen)showHome()}
+            }
+        }else showBanner(c.name+" failed • Try another stream",true)
         engineAttempts.clear()
         fallbackEngineOverride=null
-        if(key !in unavailableChannels)
-            showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
