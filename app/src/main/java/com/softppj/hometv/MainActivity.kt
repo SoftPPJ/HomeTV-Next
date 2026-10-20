@@ -1622,7 +1622,7 @@ class MainActivity: Activity() {
             tag="clock_overlay"
             setTextColor(android.graphics.Color.WHITE)
             setShadowLayer(3f,1f,2f,android.graphics.Color.BLACK)
-            setBackgroundColor(0x77000000)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             val size=prefs.getInt("clock_size",18).coerceIn(12,36)
             textSize=size.toFloat()
             setPadding(12,8,12,8)
@@ -2363,7 +2363,7 @@ class MainActivity: Activity() {
             val u=Uri.parse(c.url)
             val h=u.host?.lowercase()?.removePrefix("www.") ?: ""
             (u.scheme=="http" || u.scheme=="https") &&
-                (c.webChannel.isNotBlank() || (h=="bhoomtv.org" && u.path?.startsWith("/live/")==true))
+                c.webChannel.isNotBlank()
         }catch(_:Exception){false}
         if(youtubeUri!=null || webPage){
             // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
