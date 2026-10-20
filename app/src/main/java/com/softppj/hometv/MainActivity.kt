@@ -29,7 +29,7 @@ import java.net.URL
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
-data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap(), val epgId:String="")
+data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap(), val epgId:String="", val webChannel:String="")
 data class Playlist(val name:String, val url:String, val enabled:Boolean=true)
 
 class MainActivity: Activity() {
@@ -1257,7 +1257,7 @@ class MainActivity: Activity() {
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
         val out=mutableListOf<Channel>()
-        var name="";var group="Other";var logo="";var epgId=""
+        var name="";var group="Other";var logo="";var epgId="";var webChannel=""
         var headers=mutableMapOf<String,String>()
         fun attr(line:String,key:String)=Regex(Regex.escape(key)+"""="([^"]*)" """.trim()).find(line)?.groupValues?.get(1)?:""
         fun applyHeader(key:String,value:String){
@@ -1277,6 +1277,7 @@ class MainActivity: Activity() {
                     group=attr(line,"group-title").ifBlank{"Other"}
                     logo=attr(line,"tvg-logo")
                     epgId=attr(line,"tvg-id")
+                    webChannel=attr(line,"web-channel")
                     headers=mutableMapOf()
                     applyHeader("user-agent",attr(line,"user-agent"))
                     applyHeader("referer",attr(line,"referrer"))
@@ -1300,7 +1301,7 @@ class MainActivity: Activity() {
                         val pair=kv.split("=",limit=2)
                         if(pair.size==2)applyHeaderTo(localHeaders,pair[0],pair[1])
                     }
-                    out.add(Channel(name,url,group,logo,source,localHeaders,epgId))
+                    out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel))
                 }
             }
         }
@@ -2236,7 +2237,13 @@ class MainActivity: Activity() {
                 else null
             }else null
         }catch(_:Exception){null}
-        if(youtubeUri!=null){
+        val webPage=try{
+            val u=Uri.parse(c.url)
+            val h=u.host?.lowercase()?.removePrefix("www.") ?: ""
+            (u.scheme=="http" || u.scheme=="https") &&
+                (c.webChannel.isNotBlank() || (h=="bhoomtv.org" && u.path?.startsWith("/live/")==true))
+        }catch(_:Exception){false}
+        if(youtubeUri!=null || webPage){
             // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
             // YouTube controls whether its site permits autoplay or full-screen video.
             val viewer=WebView(this)
@@ -2310,7 +2317,36 @@ class MainActivity: Activity() {
             screen.addView(sound,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.RIGHT).apply{
                 rightMargin=12;topMargin=12
             })
-            viewer.loadUrl(if(youtubeUri.path?.startsWith("/embed/")==true) youtubeUri.toString() else youtubeUri.buildUpon().appendQueryParameter("autoplay","1").build().toString())
+            if(webPage){
+                if(c.webChannel.isNotBlank()){
+                    viewer.webViewClient=object:WebViewClient(){
+                        override fun onPageFinished(view:WebView,url:String){
+                            val wanted=JSONObject.quote(c.webChannel.trim())
+                            val js="""(function(){
+                                const norm=s=>String(s||'').replace(/\\s+/g,' ').trim().toLowerCase();
+                                const target=norm($wanted);
+                                const nodes=document.querySelectorAll('button,a,[role="button"],[onclick],label');
+                                for(const el of nodes){
+                                    if(norm(el.innerText||el.textContent||el.getAttribute('aria-label'))===target){
+                                        el.click();return 'selected';
+                                    }
+                                }
+                                return 'not-found';
+                            })();"""
+                            handler.postDelayed({
+                                if(web===viewer)viewer.evaluateJavascript(js){v->
+                                    if(v?.contains("not-found")==true && web===viewer)
+                                        showBanner("Web source not found: "+c.webChannel,true)
+                                }
+                            },1200L)
+                        }
+                    }
+                }
+                viewer.loadUrl(c.url)
+            }else{
+                val yt=youtubeUri!!
+                viewer.loadUrl(if(yt.path?.startsWith("/embed/")==true) yt.toString() else yt.buildUpon().appendQueryParameter("autoplay","1").build().toString())
+            }
             viewer.requestFocus()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
