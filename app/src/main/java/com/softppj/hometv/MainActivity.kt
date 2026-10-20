@@ -2038,7 +2038,7 @@ class MainActivity: Activity() {
                 if(active>=0)showBanner("Quality: "+qualityMode()) else if(index==null)settings()
             }.setNegativeButton("Cancel",null).show()
     }
-    private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","Original","Zoom 110%","Zoom 125%","Zoom 150%")
+    private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","21:9","1:1","Original","Zoom 110%","Zoom 125%","Zoom 150%")
     private var previewScreenMode:String?=null
     private fun screenMode():String{
         previewScreenMode?.let{return it}
@@ -2047,76 +2047,62 @@ class MainActivity: Activity() {
             val saved=prefs.getString("screen_channel_"+hash(url),null)
             if(saved!=null)return saved
         }
-        return prefs.getString("screen_mode","16:9") ?: "16:9"
+        return prefs.getString("screen_mode","Fit") ?: "Fit"
     }
     private fun resizeMode():Int=when(screenMode()){
-        "Fit","16:9","4:3"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
         "Stretch"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
-        "Original"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-        else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        "Fill / Crop","Zoom 110%","Zoom 125%","Zoom 150%"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+        else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
     private fun applyVideoSize(){
         val mode=screenMode()
+        val forcedRatio=when(mode){
+            "16:9"->16f/9f
+            "4:3"->4f/3f
+            "21:9"->21f/9f
+            "1:1"->1f
+            else->0f
+        }
         currentPlayerView?.let{view->
             view.resizeMode=resizeMode()
-            // Apply resize mode to the actual video content.
-            val zoom=when(mode){
-                "Zoom 110%"->1.1f
-                "Zoom 125%"->1.25f
-                "Zoom 150%"->1.5f
-                else->1f
-            }
-            val surface=view.videoSurfaceView
-            if(surface!=null){
+            val frame=view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
+            val format=player?.videoFormat
+            val natural=if(format!=null && format.height>0)
+                format.width.toFloat()*format.pixelWidthHeightRatio/format.height else 0f
+            frame?.setAspectRatio(if(forcedRatio>0f)forcedRatio else natural)
+            // The content frame handles fit, crop and stretch; avoid double-scaling.
+            view.videoSurfaceView?.let{surface->
+                val zoom=when(mode){
+                    "Zoom 110%"->1.10f
+                    "Zoom 125%"->1.25f
+                    "Zoom 150%"->1.50f
+                    else->1f
+                }
                 surface.scaleX=zoom
                 surface.scaleY=zoom
-            }
-            val ratio=when(mode){
-                "16:9"->16f/9f
-                "4:3"->4f/3f
-                else->0f
-            }
-            if(ratio>0f){
-                // Respect selected aspect ratio independently of stream metadata.
-                val frame=view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
-                frame?.setAspectRatio(ratio)
-            }else{
-                val frame=view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)
-                if(frame!=null){
-                    val format=player?.videoFormat
-                    val videoRatio=if(format!=null && format.height>0)format.width.toFloat()*format.pixelWidthHeightRatio/format.height else 0f
-                    frame.setAspectRatio(videoRatio)
-                }
             }
         }
         vlcPlayer?.let{vlc->
             try{
+                val displayRatio=resources.displayMetrics.let{if(it.heightPixels>0)it.widthPixels.toFloat()/it.heightPixels else 16f/9f}
+                val videoRatio=vlc.currentVideoTrack?.let{if(it.height>0)it.width.toFloat()/it.height else 0f} ?: 0f
+                val cropRatio=if(videoRatio>0f)videoRatio else displayRatio
                 vlc.setScale(0f)
                 vlc.setAspectRatio(when(mode){
                     "16:9"->"16:9"
                     "4:3"->"4:3"
+                    "21:9"->"21:9"
+                    "1:1"->"1:1"
+                    "Stretch"->resources.displayMetrics.let{"${it.widthPixels}:${it.heightPixels}"}
                     else->null
                 })
                 val scale=when(mode){
-                    "Fill / Crop"->0f
-                    "Zoom 110%"->1.1f
-                    "Zoom 125%"->1.25f
-                    "Zoom 150%"->1.5f
                     "Original"->1f
+                    "Zoom 110%"->1.10f
+                    "Zoom 125%"->1.25f
+                    "Zoom 150%"->1.50f
+                    "Fill / Crop"->if(cropRatio>0f && displayRatio>0f)maxOf(displayRatio/cropRatio,cropRatio/displayRatio) else 1f
                     else->0f
-                }
-                // The VLC output window must match the TV surface, not the source video. 
-                // For Fill / Crop use a full-size window and zoom instead of forcing
-                // the display aspect ratio (which caused a small offset picture).
-                if(mode=="Fill / Crop"){
-                    // Preserve source aspect ratio and use the native VLC fit/crop mode.
-                    vlc.setAspectRatio(null)
-                    vlc.setScale(0f)
-                }
-                if(mode=="Stretch"){
-                    val metrics=resources.displayMetrics
-                    if(metrics.widthPixels>0 && metrics.heightPixels>0)
-                        vlc.setAspectRatio("${metrics.widthPixels}:${metrics.heightPixels}")
                 }
                 if(scale>0f)vlc.setScale(scale)
             }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
@@ -2126,7 +2112,7 @@ class MainActivity: Activity() {
         val target=channelIndex?.takeIf{it in channels.indices}
         val key=if(target!=null)"screen_channel_"+hash(channels[target].url) else "screen_mode"
         val original=prefs.getString(key,null)
-        val universal=prefs.getString("screen_mode","16:9") ?: "16:9"
+        val universal=prefs.getString("screen_mode","Fit") ?: "Fit"
         val labels=if(target!=null)arrayOf("Use universal default")+screenModes else screenModes
         val selected=if(target!=null && original==null)0 else labels.indexOf(original ?: universal).coerceAtLeast(0)
         var pending=selected
@@ -2138,7 +2124,7 @@ class MainActivity: Activity() {
             applyVideoSize()
         }
         val dialog=AlertDialog.Builder(this)
-            .setTitle(if(target!=null)"Screen size · "+channels[target].name else "Universal screen size")
+            .setTitle(if(target!=null)"Aspect Ratio · "+channels[target].name else "Universal aspect ratio")
             .setSingleChoiceItems(labels,selected){_,position->preview(position)}
             .setPositiveButton("OK"){_,_->
                 confirmed=true
