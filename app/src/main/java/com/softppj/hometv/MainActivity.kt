@@ -1181,6 +1181,7 @@ class MainActivity: Activity() {
             return
         }
         if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
+        val playingUrlBeforeRefresh=channels.getOrNull(active)?.url
         thread {
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
@@ -1237,6 +1238,18 @@ class MainActivity: Activity() {
                         channels=combined.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
                     }else channels=found.toMutableList()
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
+                }
+                // A background refresh can reorder or remove entries while a
+                // channel is playing. Never leave active pointing to a different
+                // channel after replacing the channel list.
+                if(active>=0){
+                    val stillPlaying=playingUrlBeforeRefresh
+                    val relocated=channels.indexOfFirst{it.url==stillPlaying}
+                    if(relocated>=0)active=relocated
+                    else{
+                        stopPlayback()
+                        showHome()
+                    }
                 }
                 startBackgroundChannelChecks()
                 done()
