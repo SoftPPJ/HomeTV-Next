@@ -405,18 +405,31 @@ class MainActivity: Activity() {
     }
     private val defaultEpgUrl="https://avkb.short.gy/epg.xml.gz"
     private fun configuredEpgUrl():String=prefs.getString("epg_xmltv_url",null)?.trim()?.takeIf{it.isNotEmpty()} ?:defaultEpgUrl
+    private fun epgUrls():List<String>{
+        val saved=prefs.getString("epg_xmltv_urls",null)
+        val legacy=prefs.getString("epg_xmltv_url",null)
+        val value=saved ?: legacy?.takeIf{it.isNotBlank()} ?:defaultEpgUrl
+        return value.lineSequence().map{it.trim()}.filter{it.startsWith("https://") || it.startsWith("http://")}.distinct().toList()
+    }
     private fun configureEpg(){
         val input=EditText(this).apply{
-            hint="XMLTV guide URL"
-            setSingleLine()
-            setText(configuredEpgUrl())
+            hint="One XMLTV URL per line"
+            setSingleLine(false)
+            minLines=4
+            maxLines=10
+            setText(epgUrls().joinToString("\n"))
         }
-        showSideDialog(AlertDialog.Builder(this).setTitle("EPG source")
-            .setMessage("Enter an XMLTV guide URL (.xml or .xml.gz).")
+        showSideDialog(AlertDialog.Builder(this).setTitle("EPG sources (priority order)")
+            .setMessage("One .xml or .xml.gz URL per line. First source has priority. Remove a line to disable that source.")
             .setView(input).setPositiveButton("Save"){_,_->
-                prefs.edit().putString("epg_xmltv_url",input.text.toString().trim()).apply()
-                epgGuide=emptyMap();epgLoadedAt=0L
-                showEpg()
+                val urls=input.text.toString().lineSequence().map{it.trim()}.filter{it.isNotBlank()}.distinct().toList()
+                if(urls.any{!it.startsWith("https://") && !it.startsWith("http://")}){
+                    Toast.makeText(this,"Use HTTP or HTTPS EPG URLs",Toast.LENGTH_LONG).show()
+                }else{
+                    prefs.edit().putString("epg_xmltv_urls",urls.joinToString("\n")).apply()
+                    epgGuide=emptyMap();epgLoadedAt=0L
+                    showEpg()
+                }
             }.setNegativeButton("Cancel",null).create())
     }
     private var epgTuneTask:Runnable?=null
@@ -526,59 +539,63 @@ class MainActivity: Activity() {
         }
     }
     private fun loadEpg(done:(Boolean)->Unit){
-        val url=configuredEpgUrl()
-        if(url.isEmpty()){done(false);return}
+        val urls=epgUrls()
+        if(urls.isEmpty()){done(false);return}
         if(epgGuide.isNotEmpty() && System.currentTimeMillis()-epgLoadedAt<60*60*1000L){
             done(true);return
         }
         thread{
-            try{
-                val connection=URL(url).openConnection().apply{
-                    connectTimeout=8000;readTimeout=15000
-                    useCaches=false
-                }
-                val input=connection.getInputStream()
-                val stream=if(url.substringBefore("?").endsWith(".gz",true))
-                    java.util.zip.GZIPInputStream(input) else input
-                val guide=mutableMapOf<String,MutableList<EpgProgramme>>()
-                stream.use{data->
-                    val parser=android.util.Xml.newPullParser()
-                    parser.setInput(data,"UTF-8")
-                    var channel="";var start=0L;var end=0L;var title="";var description=""
-                    var event=parser.eventType
-                    while(event!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT){
-                        if(event==org.xmlpull.v1.XmlPullParser.START_TAG){
-                            when(parser.name){
-                                "programme"->{
-                                    channel=parser.getAttributeValue(null,"channel")?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
-                                    start=epgTime(parser.getAttributeValue(null,"start"))
-                                    end=epgTime(parser.getAttributeValue(null,"stop"))
-                                    title="";description=""
-                                }
-                                "title"->if(channel.isNotEmpty())title=parser.nextText()
-                                "desc"->if(channel.isNotEmpty())description=parser.nextText()
-                            }
-                        }else if(event==org.xmlpull.v1.XmlPullParser.END_TAG && parser.name=="programme"){
-                            if(channel.isNotEmpty() && start>0 && end>start && title.isNotBlank()){
-                                guide.getOrPut(channel){mutableListOf()}.add(EpgProgramme(start,end,title,description))
-                            }
-                            channel=""
-                        }
-                        event=parser.next()
+            val combined=mutableMapOf<String,MutableMap<Long,EpgProgramme>>()
+            var loaded=0
+            for(url in urls){
+                try{
+                    val connection=URL(url).openConnection().apply{
+                        connectTimeout=8000;readTimeout=20000;useCaches=false
                     }
+                    val raw=connection.getInputStream()
+                    val stream=if(url.substringBefore("?").endsWith(".gz",true))
+                        java.util.zip.GZIPInputStream(raw) else raw
+                    stream.use{data->
+                        val parser=android.util.Xml.newPullParser()
+                        parser.setInput(data,"UTF-8")
+                        var channel="";var start=0L;var end=0L;var title="";var description=""
+                        var event=parser.eventType
+                        while(event!=org.xmlpull.v1.XmlPullParser.END_DOCUMENT){
+                            if(event==org.xmlpull.v1.XmlPullParser.START_TAG){
+                                when(parser.name){
+                                    "programme"->{
+                                        channel=parser.getAttributeValue(null,"channel")?.trim()?.lowercase(java.util.Locale.ROOT).orEmpty()
+                                        start=epgTime(parser.getAttributeValue(null,"start"))
+                                        end=epgTime(parser.getAttributeValue(null,"stop"))
+                                        title="";description=""
+                                    }
+                                    "title"->if(channel.isNotEmpty())title=parser.nextText()
+                                    "desc"->if(channel.isNotEmpty())description=parser.nextText()
+                                }
+                            }else if(event==org.xmlpull.v1.XmlPullParser.END_TAG && parser.name=="programme"){
+                                if(channel.isNotEmpty() && start>0 && end>start && title.isNotBlank()){
+                                    // Keep the first source's programme for a matching channel and start time.
+                                    combined.getOrPut(channel){mutableMapOf()}.putIfAbsent(start,EpgProgramme(start,end,title,description))
+                                }
+                                channel=""
+                            }
+                            event=parser.next()
+                        }
+                    }
+                    loaded++
+                }catch(e:Exception){
+                    android.util.Log.w("HomeTV","EPG source failed: "+url,e)
                 }
-                val sorted=guide.mapValues{(_,v)->v.sortedBy{it.start}}
-                epgGuide=sorted
-                epgLoadedAt=System.currentTimeMillis()
-                runOnUiThread{done(true)}
-            }catch(e:Exception){
-                android.util.Log.w("HomeTV","EPG download failed",e)
-                runOnUiThread{done(epgGuide.isNotEmpty())}
             }
+            if(loaded>0){
+                epgGuide=combined.mapValues{(_,v)->v.values.sortedBy{it.start}}
+                epgLoadedAt=System.currentTimeMillis()
+            }
+            runOnUiThread{done(loaded>0 || epgGuide.isNotEmpty())}
         }
     }
     private fun showEpg(){
-        if(configuredEpgUrl().isBlank()){configureEpg();return}
+        if(epgUrls().isEmpty()){configureEpg();return}
         Toast.makeText(this,"Loading TV guide…",Toast.LENGTH_SHORT).show()
         loadEpg{success->
             if(!success){
