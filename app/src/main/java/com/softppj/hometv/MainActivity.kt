@@ -2669,10 +2669,90 @@ class MainActivity: Activity() {
             }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
     }
+    private fun exportSettings(){
+        val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
+        val data=JSONObject()
+        prefs.all.forEach{(key,value)->
+            if(key in excluded || key.startsWith("license_"))return@forEach
+            when(value){
+                is String->data.put(key,JSONObject().put("type","string").put("value",value))
+                is Boolean->data.put(key,JSONObject().put("type","boolean").put("value",value))
+                is Int->data.put(key,JSONObject().put("type","int").put("value",value))
+                is Long->data.put(key,JSONObject().put("type","long").put("value",value))
+                is Float->data.put(key,JSONObject().put("type","float").put("value",value.toDouble()))
+                is Set<*>->data.put(key,JSONObject().put("type","strings").put("value",JSONArray(value.filterIsInstance<String>())))
+            }
+        }
+        val payload=JSONObject().put("format","HomeTV-settings-v1").put("settings",data).toString(2)
+        val intent=Intent(Intent.ACTION_SEND).apply{
+            type="text/plain";putExtra(Intent.EXTRA_SUBJECT,"HomeTV settings backup")
+            putExtra(Intent.EXTRA_TEXT,payload)
+        }
+        startActivity(Intent.createChooser(intent,"Export HomeTV settings"))
+    }
+    private fun importSettings(){
+        val input=EditText(this).apply{
+            hint="Paste HomeTV-settings-v1 JSON backup"
+            minLines=6;maxLines=12;setSingleLine(false)
+        }
+        AlertDialog.Builder(this).setTitle("Restore settings (not license or PIN)")
+            .setView(input).setPositiveButton("Restore"){_,_->
+                try{
+                    val backup=JSONObject(input.text.toString())
+                    require(backup.optString("format")=="HomeTV-settings-v1")
+                    val values=backup.getJSONObject("settings")
+                    val edit=prefs.edit()
+                    val iterator=values.keys()
+                    var count=0
+                    while(iterator.hasNext()){
+                        val key=iterator.next()
+                        if(key=="pin" || key=="last_url" || key.startsWith("license_"))continue
+                        val item=values.getJSONObject(key)
+                        when(item.getString("type")){
+                            "string"->edit.putString(key,item.getString("value"))
+                            "boolean"->edit.putBoolean(key,item.getBoolean("value"))
+                            "int"->edit.putInt(key,item.getInt("value"))
+                            "long"->edit.putLong(key,item.getLong("value"))
+                            "float"->edit.putFloat(key,item.getDouble("value").toFloat())
+                            "strings"->{
+                                val arr=item.getJSONArray("value")
+                                edit.putStringSet(key,(0 until arr.length()).map{arr.getString(it)}.toSet())
+                            }
+                            else->continue
+                        }
+                        count++
+                    }
+                    edit.apply()
+                    Toast.makeText(this,"Restored "+count+" settings. Restart HomeTV to apply all changes.",Toast.LENGTH_LONG).show()
+                }catch(e:Exception){
+                    Toast.makeText(this,"Invalid backup: "+e.message,Toast.LENGTH_LONG).show()
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun showPlaybackDiagnostics(){
+        val current=channels.getOrNull(active)
+        val lines=listOf(
+            "Channel: "+(current?.name ?: "None"),
+            "Source: "+(current?.source ?: "None"),
+            "Playback engine: "+(current?.let{engineFor(it)} ?: "Not playing"),
+            "Buffering profile: "+bufferProfile(),
+            "Auto reconnect: "+prefs.getBoolean("auto_reconnect",true),
+            "Background checked URLs: "+probeReachable.size,
+            "Background unavailable URLs: "+probeReachable.values.count{!it},
+            "Retry attempts: "+retryCount,
+            "Channel alternatives attempted: "+alternativeAttempted.size
+        )
+        AlertDialog.Builder(this).setTitle("Playback diagnostics")
+            .setMessage(lines.joinToString("\\n"))
+            .setPositiveButton("Close",null).show()
+    }
     private fun settings(){
         reset("HomeTV Settings")
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
+        root.addView(button("Export settings backup"){exportSettings()})
+        root.addView(button("Restore settings backup"){importSettings()})
+        root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
