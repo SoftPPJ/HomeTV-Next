@@ -859,23 +859,48 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Aspect Ratio","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality","Alternative stream / URL")
-        AlertDialog.Builder(this).setTitle("Setting for "+c.name).setItems(opts){_,v->
-            when(v){
-                0->playIndex(preferredChannel(i))
-                1->{favorite(c);if(active<0)allChannels()}
-                2->toggleLock(id(c),false)
-                3->{toggleChannelSkip(c);if(active<0)allChannels()}
-                4->selectScreenMode(i)
-                5->allChannels()
-                6->liveSettings()
-                7->confirmExit()
-                8->audioTracks()
-                9->chooseChannelEngine(i)
-                10->selectQuality(i)
-                11->selectAlternative(i)
+        val opts=arrayOf(
+            "Watch channel",
+            "Aspect ratio",
+            "Picture quality",
+            "Audio tracks",
+            "Playback engine",
+            "Alternative stream / URL",
+            if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
+            "Lock / Unlock",
+            if(isSkipped(c))"Unhide channel" else "Hide channel",
+            "All channels",
+            "Settings",
+            "Exit"
+        )
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(c.name+" · Channel options")
+            .setSingleChoiceItems(opts,-1){d,v->
+                d.dismiss()
+                when(v){
+                    0->playIndex(preferredChannel(i))
+                    1->selectScreenMode(i)
+                    2->selectQuality(i)
+                    3->audioTracks()
+                    4->chooseChannelEngine(i)
+                    5->selectAlternative(i)
+                    6->{favorite(c);if(active<0)allChannels()}
+                    7->toggleLock(id(c),false)
+                    8->{toggleChannelSkip(c);if(active<0)allChannels()}
+                    9->allChannels()
+                    10->liveSettings()
+                    11->confirmExit()
+                }
             }
-        }.show()
+            .setNegativeButton("Back",null).create()
+        dialog.setOnShowListener{
+            dialog.listView?.apply{
+                choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+                setSelection(0)
+                requestFocus()
+            }
+        }
+        showSideDialog(dialog)
     }
 
     override fun onCreate(savedInstanceState:Bundle?) {
