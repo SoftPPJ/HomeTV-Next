@@ -748,8 +748,8 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Screen size (this channel)","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality (this channel)","Alternative stream / URL")
-        AlertDialog.Builder(this).setTitle(c.name).setItems(opts){_,v->
+        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Aspect Ratio","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality","Alternative stream / URL")
+        AlertDialog.Builder(this).setTitle("Setting for "+c.name).setItems(opts){_,v->
             when(v){
                 0->playIndex(preferredChannel(i))
                 1->{favorite(c);if(active<0)allChannels()}
