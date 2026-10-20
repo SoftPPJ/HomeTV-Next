@@ -283,7 +283,10 @@ class MainActivity: Activity() {
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
         val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
-        if(engine=="Media3")probeReachable[c.url]=true
+        if(engine=="Media3"){
+            probeReachable[c.url]=true
+            prefs.edit().putBoolean("media3_verified_"+hash(c.url),true).apply()
+        }
         // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
         if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
@@ -857,9 +860,12 @@ class MainActivity: Activity() {
         fallbackEngineOverride?.let{return it}
         val manual=prefs.getString("manual_engine_"+channelKey(c),null)
         if(manual=="Media3" || manual=="LibVLC")return manual
-        // A previous automatic LibVLC fallback must not block later Media3 verification.
-        // Always begin automatic playback with LibVLC. Background Media3
-        // readiness is only a hint; it must not preempt the visible player.
+        val preferred=prefs.getString("engine","Auto") ?: "Auto"
+        // A successful Media3 test is remembered per URL across restarts.
+        // A global Media3 preference must also be honoured for untested URLs.
+        if(prefs.getBoolean("media3_verified_"+hash(c.url),false))return "Media3"
+        if(preferred=="Media3")return "Media3"
+        if(preferred=="LibVLC")return "LibVLC"
         return "LibVLC"
     }
     private fun chooseChannelEngine(i:Int){
@@ -867,7 +873,7 @@ class MainActivity: Activity() {
         val c=channels[i]
         val choices=arrayOf("Auto","Media3","LibVLC")
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
-            .setSingleChoiceItems(choices,choices.indexOf(engineFor(c)).coerceAtLeast(0)){dialog,which->
+            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("manual_engine_"+channelKey(c),"Auto")).coerceAtLeast(0)){dialog,which->
                 prefs.edit().apply{
                     if(choices[which]=="Auto")remove("manual_engine_"+channelKey(c))
                     else putString("manual_engine_"+channelKey(c),choices[which])
@@ -1396,6 +1402,11 @@ class MainActivity: Activity() {
                 if(generation!=backgroundProbeGeneration)return
                 if(working!=null){
                     probeReachable[channel.url]=working
+                    if(working){
+                        // Readiness is positive evidence; timeouts/errors are not
+                        // grounds to erase a previously verified Media3 preference.
+                        prefs.edit().putBoolean("media3_verified_"+hash(channel.url),true).apply()
+                    }
                     // Background probing must never declare a channel offline.
                     // Do not unhide a failed-start channel until the next login.
                 }
