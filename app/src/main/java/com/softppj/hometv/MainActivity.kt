@@ -594,6 +594,42 @@ class MainActivity: Activity() {
             runOnUiThread{done(loaded>0 || epgGuide.isNotEmpty())}
         }
     }
+    private fun showChannelEpg(i:Int){
+        val c=channels.getOrNull(i) ?:return
+        val now=System.currentTimeMillis()
+        val entries=programmeList(c).filter{it.end>now-3600000L}.take(80)
+        if(entries.isEmpty()){
+            showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • TV Guide")
+                .setMessage("No matching EPG programmes. Check this channel's tvg-id and your EPG sources.")
+                .setPositiveButton("Close",null).create())
+            return
+        }
+        val lines=entries.map{p->
+            val status=if(p.start<=now && p.end>now)"▶ NOW  " else ""
+            status+programmeTime(p.start)+"–"+programmeTime(p.end)+"  "+p.title+
+                if(p.description.isNotBlank())"\n"+p.description.take(140) else ""
+        }
+        showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • Programme schedule")
+            .setItems(lines.toTypedArray()){_,selected->
+                val programme=entries[selected]
+                showSideDialog(AlertDialog.Builder(this)
+                    .setTitle(programme.title)
+                    .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\n"+programme.description)
+                    .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch at start"){_,_->scheduleEpgTune(c,programme)}
+                    .setNegativeButton("Cancel",null).create())
+            }
+            .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(i))}
+            .setNegativeButton("Close",null).create())
+    }
+    private fun openCurrentChannelEpg(){
+        val i=active
+        if(i !in channels.indices)return
+        loadEpg{success->if(success)showChannelEpg(i) else
+            showSideDialog(AlertDialog.Builder(this).setTitle("EPG unavailable")
+                .setMessage("Could not load your EPG sources.")
+                .setPositiveButton("EPG sources"){_,_->configureEpg()}
+                .setNegativeButton("Close",null).create())}
+    }
     private fun showEpg(){
         if(epgUrls().isEmpty()){configureEpg();return}
         Toast.makeText(this,"Loading TV guide…",Toast.LENGTH_SHORT).show()
@@ -615,25 +651,7 @@ class MainActivity: Activity() {
                 }
                 showSideDialog(AlertDialog.Builder(this).setTitle("TV Guide • Channels")
                     .setItems(items.map{it.second}.toTypedArray()){_,position->
-                        val i=items[position].first
-                        val c=channels[i]
-                        val entries=programmeList(c).filter{it.end>now-3600000L}.take(80)
-                        val lines=entries.map{p->
-                            val status=if(p.start<=now && p.end>now)"▶ NOW  " else ""
-                            status+programmeTime(p.start)+"–"+programmeTime(p.end)+"  "+p.title+
-                                if(p.description.isNotBlank())"\n"+p.description.take(140) else ""
-                        }
-                        showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" • Programme schedule")
-                            .setItems(lines.toTypedArray()){_,selected->
-                                val programme=entries[selected]
-                                showSideDialog(AlertDialog.Builder(this)
-                                    .setTitle(programme.title)
-                                    .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\n"+programme.description)
-                                    .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch at start"){_,_->scheduleEpgTune(c,programme)}
-                                    .setNegativeButton("Cancel",null).create())
-                            }
-                            .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(i))}
-                            .setNegativeButton("Close",null).create())
+                        showChannelEpg(items[position].first)
                     }
                     .setNeutralButton("Scheduled"){_,_->showEpgSchedules()}
                     .setPositiveButton("EPG source"){_,_->configureEpg()}
@@ -1410,7 +1428,7 @@ class MainActivity: Activity() {
             this.text=message
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
-            setBackgroundColor(if(error) 0xDD842020.toInt() else 0xDD15283C.toInt())
+            setBackgroundColor(informationColor(if(error)0x842020 else 0x15283C))
             setPadding(24,18,24,18)
         }
         banner=text
@@ -1426,7 +1444,7 @@ class MainActivity: Activity() {
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
             window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
-            window.setDimAmount(0.12f)
+            window.setDimAmount(0.06f)\n            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))\n            dialog.listView?.apply{\n                selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())\n                setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{\n                    override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}\n                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}\n                })\n            }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
@@ -1727,6 +1745,19 @@ class MainActivity: Activity() {
         handler.postDelayed({if(active==index)showChannelInfo(index)},500)
         if(prefs.getBoolean("show_channel_epg",true) && epgGuide.isEmpty() && !prefs.getString("epg_xmltv_url","").isNullOrBlank())loadEpg{if(active==index)showChannelInfo(index)}
     }
+    private fun informationAlpha():Int=prefs.getInt("information_opacity",65).coerceIn(20,100)*255/100
+    private fun informationColor(rgb:Int):Int=(informationAlpha() shl 24) or (rgb and 0xFFFFFF)
+    private fun chooseInformationTransparency(){
+        val levels=arrayOf("20% • Very transparent","35% • Transparent","50% • Medium","65% • Recommended","80% • Darker","100% • Solid")
+        val values=intArrayOf(20,35,50,65,80,100)
+        val selected=values.indexOf(prefs.getInt("information_opacity",65)).coerceAtLeast(0)
+        showSideDialog(AlertDialog.Builder(this).setTitle("Information panel opacity")
+            .setSingleChoiceItems(levels,selected){dialog,which->
+                prefs.edit().putInt("information_opacity",values[which]).apply()
+                dialog.dismiss()
+                if(active in channels.indices)showChannelInfo(active)
+            }.setNegativeButton("Cancel",null).create())
+    }
     private fun showChannelInfo(index:Int,extra:String=""){
         val screen=videoScreen ?:return
         val channel=channels.getOrNull(index) ?:return
@@ -1736,11 +1767,11 @@ class MainActivity: Activity() {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER_VERTICAL
             setPadding(18,12,18,12)
-            setBackgroundColor(0xE515283C.toInt())
+            setBackgroundColor(informationColor(0x15283C))
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            val epg=if(prefs.getBoolean("show_channel_epg",true) && epgGuide.isNotEmpty() && programmeList(channel).isNotEmpty())programmeSummary(channel) else ""
+            val now=System.currentTimeMillis()\n            val epg=if(prefs.getBoolean("show_channel_epg",true))programmeList(channel).filter{it.end>now}.take(3).joinToString("\n"){programmeTime(it.start)+"  "+it.title} else ""
             val expiry=prefs.getString("license_expiry","").orEmpty()
             val licenseLine=when(expiry){
                 ""->""
@@ -1838,7 +1869,7 @@ class MainActivity: Activity() {
         val drawer=LinearLayout(this).apply{
             tag="channel_drawer"
             orientation=LinearLayout.VERTICAL
-            setBackgroundColor(0xF015283C.toInt())
+            setBackgroundColor(informationColor(0x15283C))
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
@@ -2600,7 +2631,7 @@ class MainActivity: Activity() {
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
-        root.addView(button("EPG / XMLTV guide"){configureEpg()})
+        root.addView(button("EPG / XMLTV guide"){configureEpg()})\n        root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
         root.addView(button("Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF"){
             prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply()
             settings()
@@ -2733,7 +2764,7 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
                     KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_NUMPAD_ENTER->{if(previewIndex>=0)confirmPreview() else if(active in channels.indices)showChannelInfo(active);return true}
+                    KeyEvent.KEYCODE_NUMPAD_ENTER->{if(previewIndex>=0)confirmPreview() else if(active in channels.indices){if(banner!=null)openCurrentChannelEpg() else showChannelInfo(active)};return true}
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
                     KeyEvent.KEYCODE_DPAD_RIGHT->{showChannelOptions();return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
