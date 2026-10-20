@@ -2231,13 +2231,13 @@ class MainActivity: Activity() {
                         path.startsWith("/live/") || path.startsWith("/embed/") || path.startsWith("/shorts/")->path.trim('/').substringAfter('/').substringBefore('/')
                         else->null
                     }
-                if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))Uri.parse("https://www.youtube.com/watch?v="+id)
+                if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))Uri.parse("https://www.youtube-nocookie.com/embed/"+id+"?autoplay=1&playsinline=1&controls=1&rel=0")
                 else if(path.startsWith("/channel/") || path.startsWith("/@") || path.startsWith("/playlist"))uri
                 else null
             }else null
         }catch(_:Exception){null}
         if(youtubeUri!=null){
-            // Open the regular YouTube watch page within HomeTV, not an iframe.
+            // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
             // YouTube controls whether its site permits autoplay or full-screen video.
             val viewer=WebView(this)
             web=viewer
@@ -2310,7 +2310,7 @@ class MainActivity: Activity() {
             screen.addView(sound,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.RIGHT).apply{
                 rightMargin=12;topMargin=12
             })
-            viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("autoplay","1").build().toString())
+            viewer.loadUrl(if(youtubeUri.path?.startsWith("/embed/")==true) youtubeUri.toString() else youtubeUri.buildUpon().appendQueryParameter("autoplay","1").build().toString())
             viewer.requestFocus()
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
