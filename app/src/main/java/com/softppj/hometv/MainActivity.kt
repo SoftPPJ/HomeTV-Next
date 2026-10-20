@@ -1450,7 +1450,9 @@ class MainActivity: Activity() {
                 selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())
                 setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
                     override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}
-                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}\n                })\n            }
+                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+                })
+            }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
