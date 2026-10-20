@@ -285,7 +285,10 @@ class MainActivity: Activity() {
         val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
         if(engine=="Media3"){
             probeReachable[c.url]=true
-            prefs.edit().putBoolean("media3_verified_"+hash(c.url),true).apply()
+            prefs.edit().putBoolean("media3_verified_"+hash(c.url),true)
+                .remove("libvlc_only_"+hash(c.url)).apply()
+        }else if(engine=="LibVLC" && engineAttempts[c.url]?.contains("Media3")==true){
+            prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
         }
         // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
@@ -401,6 +404,10 @@ class MainActivity: Activity() {
         }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
+        if(current=="LibVLC"){
+            // The saved fallback stopped working: re-evaluate with Media3.
+            prefs.edit().remove("libvlc_only_"+hash(c.url)).apply()
+        }
         val other=if(current=="Media3")"LibVLC" else "Media3"
         if(!tried.contains(other)){
             fallbackEngineOverride=other
@@ -858,15 +865,13 @@ class MainActivity: Activity() {
     }
     private fun engineFor(c:Channel):String{
         fallbackEngineOverride?.let{return it}
-        val manual=prefs.getString("manual_engine_"+channelKey(c),null)
-        if(manual=="Media3" || manual=="LibVLC")return manual
-        val preferred=prefs.getString("engine","Auto") ?: "Auto"
-        // A successful Media3 test is remembered per URL across restarts.
-        // A global Media3 preference must also be honoured for untested URLs.
-        if(prefs.getBoolean("media3_verified_"+hash(c.url),false))return "Media3"
-        if(preferred=="Media3")return "Media3"
-        if(preferred=="LibVLC")return "LibVLC"
-        return "LibVLC"
+        prefs.getString("manual_engine_"+channelKey(c),null)?.let{
+            if(it=="Media3" || it=="LibVLC")return it
+        }
+        // Media3 is the universal default. Only a confirmed Media3 failure
+        // followed by successful LibVLC playback creates a persistent fallback.
+        if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
+        return "Media3"
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
@@ -1943,7 +1948,18 @@ class MainActivity: Activity() {
                 "unlimited"->"License: Unlimited"
                 else->"License expires: "+expiry
             }
-            text=numberFor(index).toString()+"  "+channel.name+(if(licenseLine.isNotBlank())"\n"+licenseLine else "")+(if(epg.isNotBlank())"\n"+epg else "")
+            val configured=engineFor(channel)
+            val playing=if(index==active)when{
+                player!=null->"Media3"
+                vlcPlayer!=null->"LibVLC"
+                else->"Starting"
+            } else configured
+            val engineLine="Player: "+playing+(if(playing!=configured)" (preferred: "+configured+")" else "")+
+                if(prefs.getBoolean("libvlc_only_"+hash(channel.url),false))" • Media3 fallback saved" else ""
+            val qualityLine="Quality: "+qualityMode(index)+
+                if(playing=="LibVLC")" (stream-controlled on LibVLC)" else ""
+            text=numberFor(index).toString()+"  "+channel.name+"\n"+engineLine+"\n"+qualityLine+
+                (if(licenseLine.isNotBlank())"\n"+licenseLine else "")+(if(epg.isNotBlank())"\n"+epg else "")
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -2231,8 +2247,7 @@ class MainActivity: Activity() {
         }
         val builder=exo.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
-        if(mode=="Auto" || mode=="Best Available")builder.setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
-        builder.setForceHighestSupportedBitrate(false)
+            .setForceHighestSupportedBitrate(mode=="Best Available")
         exo.trackSelectionParameters=builder.build()
     }
     private fun selectQuality(index:Int?=null){
