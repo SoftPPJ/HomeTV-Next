@@ -1548,11 +1548,21 @@ class MainActivity: Activity() {
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
-                selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())
-                setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
-                    override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}
-                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
-                })
+                // A selected-row callback that paints item backgrounds leaves
+                // previously selected rows blue when Android recycles the views.
+                // Use the native focused/selected drawable instead.
+                selector=android.graphics.drawable.StateListDrawable().apply{
+                    addState(intArrayOf(android.R.attr.state_pressed),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(android.R.attr.state_focused),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(android.R.attr.state_selected),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(),
+                        android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                }
+                isFocusable=true
+                isFocusableInTouchMode=true
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
