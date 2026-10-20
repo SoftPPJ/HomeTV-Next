@@ -274,6 +274,7 @@ class MainActivity: Activity() {
         val saved=prefs.getString("working_url_"+channelKey(c),null)
         val usable=group.filter{channels[it].url !in failedUrlsThisSession}
         return usable.firstOrNull{channels[it].url==saved}
+            ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
             ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
             ?:usable.firstOrNull()
             ?:group.first()
@@ -1325,7 +1326,11 @@ class MainActivity: Activity() {
                 fun finish(working:Boolean){
                     if(completed)return
                     completed=true
-                    if(working && generation==backgroundProbeGeneration)vlcProbeReachable[channel.url]=true
+                    if(working && generation==backgroundProbeGeneration){
+                        vlcProbeReachable[channel.url]=true
+                        // This is a compatibility hint, not a proven LibVLC-only
+                        // stream: only actual playback may persist that preference.
+                    }
                     handler.post{
                         if(vlcProbePlayer===probe){
                             stopVlcProbe()
@@ -1365,16 +1370,20 @@ class MainActivity: Activity() {
         probeQueue.clear()
         stopVlcProbe()
         vlcProbeQueue.clear()
-        // Keep failed-start channels hidden until the app session ends.
-        val snapshot=channels.toList().distinctBy{it.url}.filter{it.url!=channels.getOrNull(active)?.url}
-        val prioritized=snapshot.sortedWith(compareBy<Channel>{
-            when {
-                probeReachable[it.url]==false -> 0
-                channels.getOrNull(active)?.let{current->channelKey(current)==channelKey(it)}==true -> 1
-                else -> 2
-            }
-        })
-        prioritized.forEach{probeQueue.addLast(it);vlcProbeQueue.addLast(it)}
+        // Probe closest channels first in the last remote-control direction.
+        // Never interrupt the on-screen channel or probe it a second time.
+        val snapshot=channels.toList().distinctBy{it.url}
+            .filter{it.url!=channels.getOrNull(active)?.url}
+        val anchor=active.coerceAtLeast(0)
+        val count=channels.size.coerceAtLeast(1)
+        val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
+            val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+            if(surfingDirection<0)(anchor-position+count)%count
+            else (position-anchor+count)%count
+        }.thenBy{it.name})
+        ordered.forEach{probeQueue.addLast(it)}
+        // LibVLC is expensive; enqueue only URLs for which Media3 already
+        // failed in this scan. No speculative VLC probe for every channel.
         launchNextProbe(generation)
         launchNextVlcProbe(generation)
     }
@@ -1412,6 +1421,12 @@ class MainActivity: Activity() {
                         // grounds to erase a previously verified Media3 preference.
                         prefs.edit().putBoolean("media3_verified_"+hash(channel.url),true).apply()
                     }
+                    // A definite Media3 error may warrant one LibVLC fallback
+                    // probe. Timeout remains inconclusive, not an offline verdict.
+                    if(working==false && !prefs.getBoolean("libvlc_only_"+hash(channel.url),false)){
+                        vlcProbeQueue.addLast(channel)
+                        launchNextVlcProbe(generation)
+                    }
                     // Background probing must never declare a channel offline.
                     // Do not unhide a failed-start channel until the next login.
                 }
@@ -1423,7 +1438,7 @@ class MainActivity: Activity() {
                     if(state==Player.STATE_READY)finish(true)
                     else if(state==Player.STATE_ENDED)finish(null)
                 }
-                override fun onPlayerError(error:PlaybackException){finish(null)}
+                override fun onPlayerError(error:PlaybackException){finish(false)}
             })
             watchdog=Runnable{finish(null)} // Timeout is inconclusive, not a failed stream.
             handler.postDelayed(watchdog!!,5000L)
