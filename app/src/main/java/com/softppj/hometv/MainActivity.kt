@@ -838,7 +838,8 @@ class MainActivity: Activity() {
         val manual=prefs.getString("manual_engine_"+channelKey(c),null)
         if(manual=="Media3" || manual=="LibVLC")return manual
         // A previous automatic LibVLC fallback must not block later Media3 verification.
-        if(probeReachable[c.url]==true)return "Media3"
+        // Always begin automatic playback with LibVLC. Background Media3
+        // readiness is only a hint; it must not preempt the visible player.
         return "LibVLC"
     }
     private fun chooseChannelEngine(i:Int){
@@ -2199,7 +2200,7 @@ class MainActivity: Activity() {
         }
         val builder=exo.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
-        if(mode=="Auto" || mode=="Best Available")builder.setMaxVideoSize(Int.MAX_VALUE,720)
+        if(mode=="Auto" || mode=="Best Available")builder.setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
         builder.setForceHighestSupportedBitrate(false)
         exo.trackSelectionParameters=builder.build()
     }
