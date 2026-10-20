@@ -2,7 +2,7 @@ name: Build HomeTV APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, feature/hometv-reliability-updates]
     paths:
       - 'app/**'
       - '*.gradle.kts'
@@ -32,5 +32,5 @@ jobs:
         run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HomeTV-v0.9.0
+          name: HomeTV-v0.9.0-${{ github.ref_name }}
           path: app/build/outputs/apk/debug/*.apk
