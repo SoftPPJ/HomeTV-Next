@@ -128,10 +128,15 @@ class MainActivity: Activity() {
     }
     private fun startLicensedApp(){
         if(!licenseReady)return
+        // Refresh every enabled playlist on each successful launch, before tuning.
+        // The existing refresh implementation downloads sources concurrently and
+        // falls back to previously cached sources on transient network failures.
         channels=cachedChannels()
         checkEpgTune()
-        if(channels.isNotEmpty()){startBackgroundChannelChecks();resumeLast()}
-        else refresh({if(channels.isNotEmpty())resumeLast() else showHome()})
+        refresh({
+            if(!licenseReady)return@refresh
+            if(channels.isNotEmpty())resumeLast() else showHome()
+        })
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
