@@ -108,29 +108,66 @@ class MainActivity: Activity() {
     }
     private fun beginLicensedSession(){
         if(licenseChecking)return
-        licenseReady=false;licenseChecking=true
-        showLicenseCheckingScreen()
         val token=prefs.getString("license_token",null)
-        if(token.isNullOrBlank()){licenseChecking=false;showLicenseScreen();return}
+        if(token.isNullOrBlank()){
+            licenseReady=false
+            showLicenseScreen()
+            return
+        }
+        // Optimistic startup is permitted only for a previously server-validated
+        // installation that has not been blocked by any subsequent failed check.
+        // This is a convenience tradeoff, NOT cryptographic offline authorization.
+        val mayResume=prefs.getBoolean("license_last_verified",false) &&
+            !prefs.getBoolean("license_validation_blocked",false)
+        licenseChecking=true
+        if(mayResume){
+            licenseReady=true
+            channels=cachedChannels()
+            if(channels.isNotEmpty()){
+                checkEpgTune()
+                resumeLast()
+            }else showLicenseCheckingScreen()
+        }else{
+            licenseReady=false
+            showLicenseCheckingScreen()
+        }
         thread{
-            val error=try{saveLicenseExpiry(licenseRequest("/validate",licensePayload()));null}catch(e:Exception){e.message?:"License validation failed"}
+            val result=try{
+                saveLicenseExpiry(licenseRequest("/validate",licensePayload()))
+                null
+            }catch(e:Exception){e.message?:"License validation failed"}
             runOnUiThread{
                 licenseChecking=false
                 if(isFinishing||isDestroyed)return@runOnUiThread
-                if(error==null){licenseReady=true;startLicensedApp()}
-                else{
-                    if(error.contains("expired",true)||error.contains("revoked",true)||error.contains("not active",true)||error.contains("Invalid token",true))
+                if(result==null){
+                    prefs.edit().putBoolean("license_last_verified",true)
+                        .putBoolean("license_validation_blocked",false).apply()
+                    licenseReady=true
+                    // Refresh all playlist sources on every start, including fast starts.
+                    // Retune only if nothing was playing already.
+                    if(mayResume && channels.isNotEmpty()){
+                        refresh({
+                            if(licenseReady && active !in channels.indices){
+                                if(channels.isNotEmpty())resumeLast() else showHome()
+                            }
+                        })
+                    }else startLicensedApp()
+                }else{
+                    // Persist the failure BEFORE stopping playback so subsequent
+                    // launches cannot resume optimistically.
+                    prefs.edit().putBoolean("license_validation_blocked",true)
+                        .putBoolean("license_last_verified",false).commit()
+                    licenseReady=false
+                    if(result.contains("expired",true)||result.contains("revoked",true)||
+                        result.contains("not active",true)||result.contains("Invalid token",true))
                         prefs.edit().remove("license_token").remove("license_expiry").apply()
-                    showLicenseScreen(error)
+                    showLicenseScreen("License verification failed: "+result)
                 }
             }
         }
     }
     private fun startLicensedApp(){
         if(!licenseReady)return
-        // Refresh every enabled playlist on each successful launch, before tuning.
-        // The existing refresh implementation downloads sources concurrently and
-        // falls back to previously cached sources on transient network failures.
         channels=cachedChannels()
         checkEpgTune()
         refresh({
@@ -167,7 +204,7 @@ class MainActivity: Activity() {
                 runOnUiThread{
                     if(isFinishing||isDestroyed)return@runOnUiThread
                     if(token!=null){
-                        prefs.edit().putString("license_token",token).apply()
+                        prefs.edit().putString("license_token",token).putBoolean("license_last_verified",true).putBoolean("license_validation_blocked",false).apply()
                         activationResult?.let{saveLicenseExpiry(it)}
                         licenseReady=true;startLicensedApp()
                     }else showLicenseScreen(error)
@@ -186,7 +223,7 @@ class MainActivity: Activity() {
                     val error=try{licenseRequest("/surrender",licensePayload());null}catch(e:Exception){e.message?:"Unable to release license"}
                     runOnUiThread{
                         if(error==null){
-                            prefs.edit().remove("license_token").remove("license_expiry").apply()
+                            prefs.edit().remove("license_token").remove("license_expiry").putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
                             showLicenseScreen("Could not surrender: "+error)
