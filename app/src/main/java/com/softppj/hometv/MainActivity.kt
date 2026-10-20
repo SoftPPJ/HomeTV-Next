@@ -395,6 +395,38 @@ class MainActivity: Activity() {
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
         return marks+numberFor(index)+". "+c.name
     }
+    private fun searchChannels(){
+        val input=EditText(this).apply{hint="Channel name, group or current programme"}
+        AlertDialog.Builder(this).setTitle("Search channels").setView(input)
+            .setPositiveButton("Search"){_,_->
+                val q=input.text.toString().trim()
+                if(q.isBlank()){allChannels();return@setPositiveButton}
+                val matches=visibleIndices().filter{i->
+                    val c=channels[i]
+                    c.name.contains(q,true) || c.group.contains(q,true) ||
+                        programmeList(c).any{it.title.contains(q,true)}
+                }
+                channelCollection("Search: "+q,matches)
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun rememberRecentChannel(channel:Channel){
+        val key=channelKey(channel)
+        val recent=JSONArray(prefs.getString("recent_channels","[]"))
+        val updated=JSONArray().put(key)
+        for(i in 0 until recent.length()){
+            val value=recent.optString(i)
+            if(value!=key && updated.length()<20)updated.put(value)
+        }
+        prefs.edit().putString("recent_channels",updated.toString()).apply()
+    }
+    private fun recentlyWatched(){
+        val saved=JSONArray(prefs.getString("recent_channels","[]"))
+        val keys=(0 until saved.length()).map{saved.optString(it)}
+        val indices=keys.mapNotNull{key->
+            visibleIndices().firstOrNull{channelKey(channels[it])==key}
+        }
+        channelCollection("Recently watched",indices)
+    }
     private fun allChannels(){
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
@@ -845,6 +877,8 @@ class MainActivity: Activity() {
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
         root.addView(button("★  My favorites"){favorites()})
+        root.addView(button("⌕  Search channels and programmes"){searchChannels()})
+        root.addView(button("◷  Recently watched"){recentlyWatched()})
         root.addView(button("🙈  Hidden channels"){hiddenChannels()})
         root.addView(button("▤  TV programme guide (EPG)"){showEpg()})
         root.addView(button("☷  Browse by category"){showChannels()})
@@ -2261,6 +2295,7 @@ class MainActivity: Activity() {
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
+        rememberRecentChannel(c)
         screenInfoOnStart(index)
         window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
