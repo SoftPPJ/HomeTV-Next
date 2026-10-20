@@ -2254,20 +2254,25 @@ class MainActivity: Activity() {
         var confirmed=false
         fun preview(position:Int){
             pending=position.coerceIn(0,labels.lastIndex)
-            // Only the live preview changes; settings are committed on OK.
             previewScreenMode=if(target!=null && pending==0)universal else labels[pending]
             applyVideoSize()
         }
+        fun commit(){
+            confirmed=true
+            val editor=prefs.edit()
+            if(target!=null && pending==0)editor.remove(key)
+            else editor.putString(key,labels[pending])
+            editor.apply()
+        }
         val dialog=AlertDialog.Builder(this)
             .setTitle(if(target!=null)"Aspect Ratio · "+channels[target].name else "Universal aspect ratio")
-            .setSingleChoiceItems(labels,selected){_,position->preview(position)}
-            .setPositiveButton("OK"){_,_->
-                confirmed=true
-                val editor=prefs.edit()
-                if(target!=null && pending==0)editor.remove(key)
-                else editor.putString(key,labels[pending])
-                editor.apply()
+            .setSingleChoiceItems(labels,selected){d,position->
+                preview(position)
+                // Android TV remote OK on a list row is a completed selection.
+                commit()
+                d.dismiss()
             }
+            .setPositiveButton("Apply"){_,_->commit()}
             .setNegativeButton("Cancel",null).create()
         dialog.setOnDismissListener{
             previewScreenMode=null
@@ -2276,6 +2281,7 @@ class MainActivity: Activity() {
         }
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
             list.setItemChecked(selected,true)
             list.setSelection(selected)
             list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
@@ -2285,19 +2291,8 @@ class MainActivity: Activity() {
                 }
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
-            list.setOnKeyListener{_,code,event->
-                if(event.action!=KeyEvent.ACTION_DOWN)false
-                else when(code){
-                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->{
-                        // Center selects the highlighted ratio; explicit OK saves it.
-                        preview(list.selectedItemPosition.takeIf{it>=0} ?: pending)
-                        list.setItemChecked(pending,true)
-                        true
-                    }
-                    KeyEvent.KEYCODE_BACK->{dialog.dismiss();true}
-                    else->false // Let ListView handle Up/Down and fire onItemSelected.
-                }
-            }
+            // Do not consume DPAD_CENTER: ListView must dispatch its normal click,
+            // which commits the previewed ratio and closes the menu.
             list.requestFocus()
         }
         showSideDialog(dialog)
