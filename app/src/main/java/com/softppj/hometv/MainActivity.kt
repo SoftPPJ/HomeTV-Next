@@ -421,7 +421,12 @@ class MainActivity: Activity() {
             showBanner(c.name+" unavailable • Skipping until next restart",true)
             val available=surfingIndices()
             if(available.isNotEmpty()){
-                handler.post{if(active==index && videoScreen===screen)playIndex(preferredChannel(available.firstOrNull{it>index} ?: available.first()))}
+                handler.post{if(active==index && videoScreen===screen){
+                    val next=if(surfingDirection<0)
+                        available.lastOrNull{it<index} ?: available.last()
+                    else available.firstOrNull{it>index} ?: available.first()
+                    playIndex(preferredChannel(next))
+                }}
             }else{
                 handler.post{if(active==index && videoScreen===screen)showHome()}
             }
