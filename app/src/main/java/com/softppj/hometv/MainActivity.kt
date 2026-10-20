@@ -599,9 +599,12 @@ class MainActivity: Activity() {
             format.parse(m.groupValues[1])?.time ?:0L
         }catch(_:Exception){0L}
     }
-    private fun programmeList(c:Channel):List<EpgProgramme> =
-        epgGuide[c.epgId.trim().lowercase(java.util.Locale.ROOT)]
-            ?:epgGuide[c.name.trim().lowercase(java.util.Locale.ROOT)] ?:emptyList()
+    private fun programmeList(c:Channel):List<EpgProgramme> {
+        val id=c.epgId.trim().lowercase(java.util.Locale.ROOT)
+        val name=c.name.trim().lowercase(java.util.Locale.ROOT)
+        return epgGuide[id]?.takeIf{it.isNotEmpty()}
+            ?:epgGuide[name] ?:emptyList()
+    }
     private fun programmeTime(t:Long):String =
         java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(t))
     private fun programmeSummary(c:Channel):String{
@@ -633,8 +636,14 @@ class MainActivity: Activity() {
                         connectTimeout=8000;readTimeout=20000;useCaches=false
                     }
                     val raw=connection.getInputStream()
-                    val stream=if(url.substringBefore("?").endsWith(".gz",true))
-                        java.util.zip.GZIPInputStream(raw) else raw
+                    val buffered=java.io.BufferedInputStream(raw)
+                    buffered.mark(4)
+                    val magic0=buffered.read()
+                    val magic1=buffered.read()
+                    buffered.reset()
+                    // Some XMLTV providers serve gzip without a .gz suffix.
+                    val stream=if(magic0==0x1f && magic1==0x8b)
+                        java.util.zip.GZIPInputStream(buffered) else buffered
                     stream.use{data->
                         val parser=android.util.Xml.newPullParser()
                         parser.setInput(data,"UTF-8")
