@@ -1444,7 +1444,13 @@ class MainActivity: Activity() {
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
             window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
-            window.setDimAmount(0.06f)\n            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))\n            dialog.listView?.apply{\n                selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())\n                setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{\n                    override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}\n                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}\n                })\n            }
+            window.setDimAmount(0.06f)
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
+            dialog.listView?.apply{
+                selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())
+                setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
+                    override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}
+                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}\n                })\n            }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
@@ -1771,7 +1777,8 @@ class MainActivity: Activity() {
         }
         panel.addView(logoView(channel,64))
         panel.addView(TextView(this).apply{
-            val now=System.currentTimeMillis()\n            val epg=if(prefs.getBoolean("show_channel_epg",true))programmeList(channel).filter{it.end>now}.take(3).joinToString("\n"){programmeTime(it.start)+"  "+it.title} else ""
+            val now=System.currentTimeMillis()
+            val epg=if(prefs.getBoolean("show_channel_epg",true))programmeList(channel).filter{it.end>now}.take(3).joinToString("\n"){programmeTime(it.start)+"  "+it.title} else ""
             val expiry=prefs.getString("license_expiry","").orEmpty()
             val licenseLine=when(expiry){
                 ""->""
@@ -2631,7 +2638,8 @@ class MainActivity: Activity() {
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
-        root.addView(button("EPG / XMLTV guide"){configureEpg()})\n        root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
+        root.addView(button("EPG / XMLTV guide"){configureEpg()})
+        root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
         root.addView(button("Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF"){
             prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply()
             settings()
