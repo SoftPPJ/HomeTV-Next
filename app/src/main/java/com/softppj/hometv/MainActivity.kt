@@ -291,10 +291,10 @@ class MainActivity: Activity() {
             probeReachable[c.url]=true
             prefs.edit().putBoolean("media3_verified_"+hash(c.url),true)
                 .remove("libvlc_only_"+hash(c.url)).apply()
-        }else if(engine=="LibVLC" && engineAttempts[c.url]?.contains("Media3")==true){
+        }else if(engine=="LibVLC"){
+            // Keep the proven working engine for this URL across channel changes/restarts.
             prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
         }
-        // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
         if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
@@ -439,14 +439,14 @@ class MainActivity: Activity() {
         }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
-        if(current=="LibVLC"){
-            prefs.edit().remove("libvlc_only_"+hash(c.url)).apply()
-        }
+        // A LibVLC playback failure does not prove that Media3 can play this URL.
+        // Preserve the remembered LibVLC preference until the user changes it.
         // Exhaust all Media3 alternatives before starting the LibVLC pass.
         // A previously verified working engine is still used first by engineFor.
         val options=alternateIndices(index)
         val nextMedia3=options.firstOrNull{
-            !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
+            !prefs.getBoolean("libvlc_only_"+hash(channels[it].url),false) &&
+                !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
         }
         val nextVlc=if(nextMedia3==null)options.firstOrNull{
             !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("LibVLC")
@@ -1012,8 +1012,8 @@ class MainActivity: Activity() {
             if(it=="Media3" || it=="LibVLC")return it
         }
         val universal=prefs.getString("engine","Auto") ?: "Auto"
-        if(universal=="Media3" || universal=="LibVLC")return universal
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
+        if(universal=="Media3" || universal=="LibVLC")return universal
         return "Media3"
     }
     private fun chooseChannelEngine(i:Int){
