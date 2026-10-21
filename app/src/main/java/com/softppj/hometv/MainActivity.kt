@@ -2545,7 +2545,7 @@ class MainActivity: Activity() {
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
         val sessionKey=channelKey(c)
         if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();fallbackEngineOverride=null}
-        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;fallbackEngineOverride=null}
+        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
