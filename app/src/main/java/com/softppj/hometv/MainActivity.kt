@@ -1304,13 +1304,13 @@ class MainActivity: Activity() {
         if(!licenseReady){showLicenseScreen("Please activate your license");return}
         val sources=playlists().filter{it.enabled}
         if(sources.isEmpty()){
-            channels.clear()
-            Toast.makeText(this,"No enabled playlists to refresh",Toast.LENGTH_LONG).show()
+            Toast.makeText(this,"No enabled playlists. Existing channels preserved.",Toast.LENGTH_LONG).show()
             done()
             return
         }
         if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
-        val playingUrlBeforeRefresh=channels.getOrNull(active)?.url
+        val playingBeforeRefresh=channels.getOrNull(active)
+        val playingUrlBeforeRefresh=playingBeforeRefresh?.url
         thread {
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
@@ -1352,8 +1352,8 @@ class MainActivity: Activity() {
             val updated=refreshed.count{it}
             val found=results.flatMap{it}.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
             runOnUiThread{
-                if(forceRebuild && updated==0){
-                    Toast.makeText(this,"Refresh failed: could not download any playlist. Saved channels unchanged.",Toast.LENGTH_LONG).show()
+                if(updated==0 && results.all{it.isEmpty()}){
+                    Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
                 }else{
                     if(forceRebuild && updated<sources.size){
                         val combined=mutableListOf<Channel>()
@@ -1373,7 +1373,8 @@ class MainActivity: Activity() {
                 // channel after replacing the channel list.
                 if(active>=0){
                     val stillPlaying=playingUrlBeforeRefresh
-                    val relocated=channels.indexOfFirst{it.url==stillPlaying}
+                    val relocated=channels.indexOfFirst{it.url==stillPlaying &&
+                        (playingBeforeRefresh==null || it.source==playingBeforeRefresh.source)}
                     if(relocated>=0)active=relocated
                     else{
                         stopPlayback()
