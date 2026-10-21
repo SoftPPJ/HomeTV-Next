@@ -1576,7 +1576,6 @@ class MainActivity: Activity() {
         periodicProbeTask=null
         probeQueue.clear()
         probeInFlight=0
-        stopVlcProbe()
         vlcProbeQueue.clear()
         // Resume optional checking only after the requested channel has had time to start.
         if(prefs.getBoolean("background_url_checks",false)){
@@ -1589,11 +1588,11 @@ class MainActivity: Activity() {
         backgroundProbeGeneration++
         val generation=backgroundProbeGeneration
         periodicProbeTask?.let{handler.removeCallbacks(it)}
-        probePlayers.toList().forEach{it.release()}
-        probePlayers.clear()
-        probeInFlight=0
+        // Background probes are nonessential. Avoid tearing down decoders
+        // while a foreground channel is playing; old HTTP checks are ignored
+        // by the generation guard.
         probeQueue.clear()
-        stopVlcProbe()
+        probeInFlight=0
         vlcProbeQueue.clear()
         // Probe closest channels first in the last remote-control direction.
         // Never interrupt the on-screen channel or probe it a second time.
