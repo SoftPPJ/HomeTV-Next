@@ -269,6 +269,43 @@ class MainActivity: Activity() {
         channelIndexOwner=channels
         channelIndexSize=channels.size
     }
+    // Parallel, bounded URL reachability checks; no extra video decoders or player switches.
+    private fun checkChannelAlternativesInParallel(index:Int){
+        val candidates=alternateIndices(index).filter{candidate->
+            val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
+            (url.startsWith("http://") || url.startsWith("https://")) &&
+                !url.contains("youtube.com") && !url.contains("youtu.be") &&
+                !prefs.getBoolean("libvlc_only_"+hash(channels[candidate].url),false)
+        }
+        if(candidates.size<2)return
+        val generation=playbackGeneration
+        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates)
+        repeat(minOf(3,candidates.size)){
+            thread(name="HomeTV-channel-url-check"){
+                while(true){
+                    val candidate=queue.poll() ?:break
+                    if(generation!=playbackGeneration)break
+                    val channel=channels.getOrNull(candidate) ?:continue
+                    val reachable=try{
+                        val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
+                        try{
+                            connection.connectTimeout=2500
+                            connection.readTimeout=2500
+                            connection.instanceFollowRedirects=true
+                            connection.setRequestProperty("Range","bytes=0-1023")
+                            connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                            channel.headers.forEach{(key,value)->
+                                if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                            }
+                            connection.responseCode in 200..299 &&
+                                !(connection.contentType ?: "").contains("text/html",true)
+                        }finally{connection.disconnect()}
+                    }catch(_:Exception){false}
+                    if(generation==playbackGeneration)probeReachable[channel.url]=reachable
+                }
+            }
+        }
+    }
     private fun preferredChannel(index:Int):Int{
         val c=channels.getOrNull(index) ?:return index
         ensureChannelIndex()
@@ -2677,6 +2714,7 @@ class MainActivity: Activity() {
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
         setContentView(screen)
+        if(alternateIndices(index).size>1)checkChannelAlternativesInParallel(index)
         val youtubeUri=try{
             val uri=Uri.parse(c.url)
             val host=uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.")
