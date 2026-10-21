@@ -2531,7 +2531,12 @@ class MainActivity: Activity() {
             val format=player?.videoFormat
             val natural=if(format!=null && format.height>0)
                 format.width.toFloat()*format.pixelWidthHeightRatio/format.height else 0f
-            frame?.setAspectRatio(if(forcedRatio>0f)forcedRatio else natural)
+            // Preserve a user-selected ratio even when Media3 updates its video dimensions.
+            if(forcedRatio>0f){
+                frame?.setAspectRatio(forcedRatio)
+            }else if(natural>0f){
+                frame?.setAspectRatio(natural)
+            }
             // The content frame handles fit, crop and stretch; avoid double-scaling.
             view.videoSurfaceView?.let{surface->
                 val zoom=when(mode){
@@ -2727,6 +2732,7 @@ class MainActivity: Activity() {
                                 exo.addListener(object:Player.Listener {
                                     override fun onPlayerError(error:PlaybackException) { fallback.run() }
                                 })
+                                applyVideoSize()
                                 exo.setMediaItem(MediaItem.fromUri(stream.url))
                                 exo.prepare()
                                 exo.play()
