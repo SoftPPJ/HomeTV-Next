@@ -2647,31 +2647,6 @@ class MainActivity: Activity() {
         if(index>=0 && index!=active)playIndex(index)
         else showBanner("Previous channel is unavailable")
     }
-    private fun openYoutubeApp(url:String){
-        // YouTube's embedded WebView player can reject Android TV clients (Error 153).
-        // Hand the original link to an installed YouTube application instead.
-        val uri=Uri.parse(url)
-        val packages=listOf("com.google.android.youtube.tv","com.google.android.youtube")
-        for(packageName in packages){
-            try{
-                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,uri).apply{
-                    setPackage(packageName)
-                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                })
-                return
-            }catch(_:android.content.ActivityNotFoundException){}
-            catch(e:Exception){android.util.Log.w("HomeTV","YouTube app launch failed",e)}
-        }
-        try{
-            startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,uri).apply{
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
-        }catch(e:Exception){
-            android.util.Log.w("HomeTV","No YouTube player available",e)
-            showBanner("YouTube app unavailable. Install or enable YouTube for Android TV.",true)
-            showHome()
-        }
-    }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -2728,7 +2703,9 @@ class MainActivity: Activity() {
             val generation=playbackGeneration
             val fallback=Runnable {
                 if(active==index && videoScreen===screen && playbackGeneration==generation) {
-                    openYoutubeApp(c.url)
+                    prefs.edit().putString("youtube_smart_mode","webview").apply()
+                    playIndex(index)
+                    prefs.edit().putString("youtube_smart_mode","hybrid").apply()
                 }
             }
             val completed=java.util.concurrent.atomic.AtomicBoolean(false)
@@ -2769,12 +2746,7 @@ class MainActivity: Activity() {
             showChannelInfo(index)
             return
         }
-        if(youtubeUri!=null && !webPage){
-            // Never send YouTube videos to the embedded WebView: Error 153.
-            openYoutubeApp(c.url)
-            return
-        }
-        if(webPage){
+        if(youtubeUri!=null || webPage){
             // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
             // YouTube controls whether its site permits autoplay or full-screen video.
             val viewer=WebView(this)
