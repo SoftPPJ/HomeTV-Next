@@ -200,6 +200,7 @@ class MainActivity: Activity() {
     private val unavailableChannels=mutableSetOf<String>()
     private val playedThisSession=mutableSetOf<String>()
     private val workingEngineThisSession=mutableMapOf<String,String>()
+    private val workingUrlThisSession=mutableMapOf<String,String>()
     private val failedUrlsThisSession=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
@@ -232,8 +233,8 @@ class MainActivity: Activity() {
         val group=channelByKey[channelKey(c)] ?:return index
         val manual=prefs.getString("manual_url_"+channelKey(c),null)
         if(manual!=null)group.firstOrNull{channels[it].url==manual}?.let{return it}
-        val saved=prefs.getString("working_url_"+channelKey(c),null)
-        return group.firstOrNull{channels[it].url==saved && probeReachable[channels[it].url]!=false}
+        val saved=workingUrlThisSession[channelKey(c)] ?: prefs.getString("working_url_"+channelKey(c),null)
+        return group.firstOrNull{channels[it].url==saved}
             ?:group.firstOrNull{probeReachable[channels[it].url]==true}
             ?:group.firstOrNull{probeReachable[channels[it].url]!=false}
             ?:group.first()
@@ -244,6 +245,8 @@ class MainActivity: Activity() {
         unavailableChannels.remove(channelKey(c))
         val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
         workingEngineThisSession[channelKey(c)]=engine
+        workingUrlThisSession[channelKey(c)]=c.url
+        prefs.edit().putString("working_engine_"+channelKey(c),engine).apply()
         if(engine=="Media3")probeReachable[c.url]=true
         // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
@@ -326,6 +329,8 @@ class MainActivity: Activity() {
         alternativeAttempted.clear()
         alternativeSessionKey=null
         val target=options[(current+1)%options.size]
+        workingUrlThisSession.remove(channelKey(channels[target]))
+        workingEngineThisSession.remove(channelKey(channels[target]))
         prefs.edit().putString("manual_url_"+channelKey(channels[target]),channels[target].url).commit()
         raceBypass=true
         playIndex(target)
@@ -378,10 +383,11 @@ class MainActivity: Activity() {
         }
         // After successful playback, do not change the source or engine on interruption.
         val key=channelKey(c)
-        if(key in playedThisSession &&
-            prefs.getString("working_url_"+key,c.url)==c.url){
+        if(workingUrlThisSession[key]==c.url){
             fallbackEngineOverride=workingEngineThisSession[key] ?: current
-            showBanner(c.name+" interrupted. Staying on saved source; press OK to retry.",true)
+            // This channel has played successfully during this run. A later
+            // interruption is not permission to change its URL or engine.
+            showBanner(c.name+" offline. Saved source and player retained; press OK to retry.",true)
             return true
         }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
@@ -795,6 +801,10 @@ class MainActivity: Activity() {
         val manual=prefs.getString("manual_engine_"+channelKey(c),null)
         if(manual=="Media3" || manual=="LibVLC")return manual
         workingEngineThisSession[channelKey(c)]?.let{return it}
+        if(prefs.getString("working_url_"+channelKey(c),null)==c.url)
+            prefs.getString("working_engine_"+channelKey(c),null)?.let{
+                if(it=="Media3" || it=="LibVLC")return it
+            }
         if(probeReachable[c.url]==true)return "Media3"
         return "LibVLC"
     }
@@ -2386,6 +2396,9 @@ class MainActivity: Activity() {
         val sessionKey=channelKey(c)
         if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();if(!bypassRace)fallbackEngineOverride=null}
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;if(!bypassRace)fallbackEngineOverride=null}
+        // Preserve the successful engine when a playback retry rebuilds the view.
+        if(workingUrlThisSession[sessionKey]==c.url)
+            fallbackEngineOverride=workingEngineThisSession[sessionKey]
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
@@ -2599,7 +2612,7 @@ class MainActivity: Activity() {
     }
     private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
         if(active!=index || videoScreen!==screen)return
-        if(tryNextAlternative(index))return
+        if(workingUrlThisSession[channelKey(c)]!=c.url && tryNextAlternative(index))return
         if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
             retryCount++
             showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/2)")
