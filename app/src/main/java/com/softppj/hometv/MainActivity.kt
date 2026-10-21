@@ -282,6 +282,19 @@ class MainActivity: Activity() {
         val skipped=!isSkipped(c)
         alternateIndices(channels.indexOf(c)).forEach{val entry=channels[it];if(skipped)values.add(id(entry)) else values.remove(id(entry))}
         prefs.edit().putStringSet("skip_channel_surfing",values).apply()
+        // When hiding the currently tuned channel, advance in the last remote
+        // key direction, using its original position as the anchor.
+        if(skipped && active in channels.indices && sameChannel(channels[active],c)){
+            val available=surfingIndices()
+            val anchor=channelNumbers().firstOrNull{sameChannel(channels[it],c)} ?: active
+            val next=if(surfingDirection>=0)
+                available.firstOrNull{it>anchor} ?: available.firstOrNull()
+                else available.lastOrNull{it<anchor} ?: available.lastOrNull()
+            if(next!=null){
+                previewIndex=-1
+                playIndex(preferredChannel(next))
+            }else showBanner("No other visible channels available",true)
+        }
         Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
     }
     private fun manageSkippedChannels(){
