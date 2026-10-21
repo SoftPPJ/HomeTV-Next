@@ -323,7 +323,12 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+    private fun surfingIndices():List<Int>{
+        val base=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+        val favoritesOnly=prefs.getBoolean("favorites_surfing",false)
+        val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
+        return orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
+    }
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
@@ -453,7 +458,7 @@ class MainActivity: Activity() {
     }
     private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
-    private fun visibleIndices()=channelNumbers()
+    private fun visibleIndices()=channelNumbers().filter{!isManuallyHidden(channels[it])}
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
@@ -492,6 +497,7 @@ class MainActivity: Activity() {
         channelCollection("Recently watched",indices)
     }
     private fun allChannels(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
             if(playlists().any{it.enabled})refresh({channelCollection("All channels",visibleIndices())})
@@ -771,8 +777,19 @@ class MainActivity: Activity() {
             }
         }
     }
-    private fun hiddenChannels(){channelCollection("Hidden channels",visibleIndices().filter{isSkipped(channels[it])})}
-    private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
+    private val manuallyHiddenIds get()=prefs.getStringSet("manually_hidden_channels",emptySet()) ?: emptySet()
+    private fun isManuallyHidden(c:Channel)=manuallyHiddenIds.contains(id(c))
+    private fun toggleManualHide(c:Channel){
+        val updated=manuallyHiddenIds.toMutableSet()
+        if(!updated.add(id(c)))updated.remove(id(c))
+        prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+        Toast.makeText(this,if(isManuallyHidden(c))"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
+    }
+    private fun hiddenChannels(){channelCollection("Hidden channels",channels.indices.filter{isManuallyHidden(channels[it])})}
+    private fun favorites(){
+        prefs.edit().putBoolean("favorites_surfing",true).apply()
+        channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && favoriteIds.contains(id(channels[it]))})
+    }
     // User-defined ordering is stored independently for Favorites and each channel list.
     // The stable source + channel + URL identifier avoids mixing different playlists.
     private fun orderedChannelIndices(title:String,raw:List<Int>):List<Int>{
@@ -948,7 +965,7 @@ class MainActivity: Activity() {
             "Alternative stream / URL",
             if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
             "Lock / Unlock",
-            if(isSkipped(c))"Unhide channel" else "Hide channel",
+            if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
             "All channels",
             "Settings",
             "Exit"
@@ -966,7 +983,7 @@ class MainActivity: Activity() {
                     5->selectAlternative(i)
                     6->{favorite(c);if(active<0)allChannels()}
                     7->toggleLock(id(c),false)
-                    8->{toggleChannelSkip(c);if(active<0)allChannels()}
+                    8->{toggleManualHide(c);if(active<0)allChannels()}
                     9->allChannels()
                     10->liveSettings()
                     11->confirmExit()
@@ -1720,7 +1737,7 @@ class MainActivity: Activity() {
         val c=channels[active]
         val opts=arrayOf(
             if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"Remove favorite" else "Add favorite",
-            if(isSkipped(c))"Unhide channel" else "Hide channel",
+            if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
             if(isLocked(c))"Unlock channel" else "Lock channel",
             "Alternative Source",
             "Aspect Ratio",
@@ -2808,8 +2825,9 @@ class MainActivity: Activity() {
         surfingDirection=if(delta>=0)1 else -1
         val available=surfingIndices()
         if(available.isEmpty())return
-        val anchor=channels.getOrNull(active)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
-        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
+        val anchor=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        val next=if(delta>0)available[(anchor+1).mod(available.size)]
+            else available[(anchor-1).mod(available.size)]
         playIndex(preferredChannel(next))
     }
     private fun resumeLast(){
