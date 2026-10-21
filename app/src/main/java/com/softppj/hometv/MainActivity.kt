@@ -765,9 +765,36 @@ class MainActivity: Activity() {
         }
     }
     private fun hiddenChannels(){channelCollection("Hidden channels",visibleIndices().filter{isSkipped(channels[it])})}
-    private fun favorites(){channelCollection("Favorites",visibleIndices().filter{i->channels.any{sameChannel(it,channels[i]) && favoriteIds.contains(id(it))}})}
+    private fun favorites(){channelCollection("Favorites",channels.indices.filter{favoriteIds.contains(id(channels[it]))})}
+    // User-defined ordering is stored independently for Favorites and each channel list.
+    // The stable source + channel + URL identifier avoids mixing different playlists.
+    private fun orderedChannelIndices(title:String,raw:List<Int>):List<Int>{
+        val distinct=raw.filter{it in channels.indices}.distinctBy{id(channels[it])}
+        val key=if(title=="Favorites")"channel_order_favorites" else "channel_order_all"
+        val saved=prefs.getString(key,"") ?: ""
+        if(saved.isBlank())return distinct
+        val positions=try{
+            val array=JSONArray(saved)
+            (0 until array.length()).associate{array.optString(it) to it}
+        }catch(_:Exception){emptyMap<String,Int>()}
+        return distinct.withIndex().sortedWith(compareBy<IndexedValue<Int>>{
+            positions[id(channels[it.value])] ?: Int.MAX_VALUE
+        }.thenBy{it.index}).map{it.value}
+    }
+    private fun moveChannelInList(title:String,items:List<Int>,position:Int,direction:Int){
+        val destination=position+direction
+        if(destination !in items.indices)return
+        val reordered=items.toMutableList()
+        val moved=reordered.removeAt(position)
+        reordered.add(destination,moved)
+        val key=if(title=="Favorites")"channel_order_favorites" else "channel_order_all"
+        val array=JSONArray()
+        reordered.forEach{array.put(id(channels[it]))}
+        prefs.edit().putString(key,array.toString()).apply()
+        channelCollection(title,reordered)
+    }
     private fun channelCollection(title:String,indices:List<Int>){
-        val indices=indices.filter{it in channels.indices}.distinctBy{numberFor(it)}
+        val indices=orderedChannelIndices(title,indices)
         reset(title+" ("+indices.size+")")
         val list=ListView(this).apply{
             dividerHeight=1
@@ -797,7 +824,20 @@ class MainActivity: Activity() {
             }
         }
         list.setOnItemClickListener{_,_,position,_->playIndex(preferredChannel(indices[position]))}
-        list.setOnItemLongClickListener{_,_,position,_->channelOptions(indices[position]);true}
+        list.setOnItemLongClickListener{_,_,position,_->
+            val i=indices[position]
+            val options=arrayOf("Channel Settings","Move Up","Move Down")
+            showSideDialog(AlertDialog.Builder(this)
+                .setTitle(numberFor(i).toString()+". "+channels[i].name+" Settings")
+                .setItems(options){_,selection->
+                    when(selection){
+                        0->channelOptions(i)
+                        1->moveChannelInList(title,indices,position,-1)
+                        2->moveChannelInList(title,indices,position,1)
+                    }
+                }.setNegativeButton("Back",null).create())
+            true
+        }
         if(title=="All channels"){
             val last=prefs.getString("last_url",null)
             val previous=indices.firstOrNull{channels[it].url==last}
@@ -808,7 +848,7 @@ class MainActivity: Activity() {
                 list.post{list.setSelection(position)}
             }
         }
-        root.addView(label("Long press: Favorite · Lock / Unlock · Hide / Unhide"))
+        root.addView(label("Long press: Channel Settings · Move Up · Move Down"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
