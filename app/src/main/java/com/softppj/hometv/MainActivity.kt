@@ -425,11 +425,11 @@ class MainActivity: Activity() {
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
         // Retry the current engine before switching after an intermittent black screen.
         val attempts=recoveryAttempts[c.url] ?: 0
-        if(prefs.getBoolean("auto_reconnect",true) && attempts<2){
+        if(prefs.getBoolean("auto_reconnect",true) && attempts<1){
             recoveryAttempts[c.url]=attempts+1
             autoBufferStalled()
             fallbackEngineOverride=current
-            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/2)")
+            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/1)")
             val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
             retryTask=task
             handler.postDelayed(task,1500L*(attempts+1))
