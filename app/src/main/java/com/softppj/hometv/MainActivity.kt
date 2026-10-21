@@ -2752,7 +2752,7 @@ class MainActivity: Activity() {
                         path.startsWith("/live/") || path.startsWith("/embed/") || path.startsWith("/shorts/")->path.trim('/').substringAfter('/').substringBefore('/')
                         else->null
                     }
-                if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))Uri.parse("https://www.youtube-nocookie.com/embed/"+id+"?autoplay=1&playsinline=1&controls=1&rel=0")
+                if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))Uri.parse("https://www.youtube.com/watch?v="+id)
                 else if(path.startsWith("/channel/") || path.startsWith("/@") || path.startsWith("/playlist"))uri
                 else null
             }else null
@@ -2763,56 +2763,11 @@ class MainActivity: Activity() {
             (u.scheme=="http" || u.scheme=="https") &&
                 c.webChannel.isNotBlank()
         }catch(_:Exception){false}
-        if(youtubeUri!=null && !webPage && prefs.getString("youtube_smart_mode","hybrid")!="webview") {
-            val generation=playbackGeneration
-            val fallback=Runnable {
-                if(active==index && videoScreen===screen && playbackGeneration==generation) {
-                    prefs.edit().putString("youtube_smart_mode","webview").apply()
-                    playIndex(index)
-                    prefs.edit().putString("youtube_smart_mode","hybrid").apply()
-                }
-            }
-            val completed=java.util.concurrent.atomic.AtomicBoolean(false)
-            handler.postDelayed({
-                if(completed.compareAndSet(false,true)) fallback.run()
-            },8000L)
-            thread {
-                val stream=YouTubeStreamResolver.resolve(c.url)
-                handler.post {
-                    if(completed.compareAndSet(false,true) && active==index && videoScreen===screen && playbackGeneration==generation) {
-                        if(stream==null) fallback.run()
-                        else {
-                            try {
-                                val exo=ExoPlayer.Builder(this).build()
-                                player=exo
-                                val view=PlayerView(this).apply {
-                                    player=exo
-                                    useController=false
-                                    resizeMode=resizeMode()
-                                }
-                                currentPlayerView=view
-                                prepareVideoView(view)
-                                screen.addView(view,FrameLayout.LayoutParams(-1,-1))
-                                exo.addListener(object:Player.Listener {
-                                    override fun onPlayerError(error:PlaybackException) { fallback.run() }
-                                })
-                                applyVideoSize()
-                                exo.setMediaItem(MediaItem.fromUri(stream.url))
-                                exo.prepare()
-                                exo.play()
-                            } catch(_:Exception) { fallback.run() }
-                        }
-                    }
-                }
-            }
-            updateClock()
-            screen.requestFocus()
-            showChannelInfo(index)
-            return
-        }
+        // Restore the original WebView watch-page route for YouTube.
+        // Native stream scraping and embed mode are not reliable substitutes here.
         if(youtubeUri!=null || webPage){
-            // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
-            // YouTube controls whether its site permits autoplay or full-screen video.
+            // Use the original YouTube watch page inside WebView.
+            // Keep regular IPTV streams on their existing Media3/LibVLC path.
             val viewer=WebView(this)
             web=viewer
             viewer.setBackgroundColor(android.graphics.Color.BLACK)
