@@ -1343,6 +1343,8 @@ class MainActivity: Activity() {
         if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
         val playingBeforeRefresh=channels.getOrNull(active)
         val playingUrlBeforeRefresh=playingBeforeRefresh?.url
+        // Preserve each existing source when a network rebuild and its cache both fail.
+        val previousBySource=channels.groupBy{it.source}
         thread {
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
@@ -1391,13 +1393,25 @@ class MainActivity: Activity() {
                         val combined=mutableListOf<Channel>()
                         sources.forEachIndexed{index,p->
                             if(refreshed[index])combined.addAll(results[index])
-                            else try{
-                                val file=cacheFile(p)
-                                if(file.exists())combined.addAll(parseM3u(file.readText(),p.name))
-                            }catch(_:Exception){}
+                            else{
+                                val cached=try{
+                                    val file=cacheFile(p)
+                                    if(file.exists())parseM3u(file.readText(),p.name) else emptyList()
+                                }catch(_:Exception){emptyList()}
+                                if(cached.isNotEmpty())combined.addAll(cached)
+                                else combined.addAll(previousBySource[p.name].orEmpty())
+                            }
                         }
                         channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
-                    }else channels=found.toMutableList()
+                    }else{
+                        val combined=mutableListOf<Channel>()
+                        sources.forEachIndexed{index,p->
+                            val loaded=results[index]
+                            if(loaded.isNotEmpty())combined.addAll(loaded)
+                            else combined.addAll(previousBySource[p.name].orEmpty())
+                        }
+                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
+                    }
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
                 }
                 // A background refresh can reorder or remove entries while a
