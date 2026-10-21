@@ -34,3 +34,5 @@ jobs:
         with:
           name: HomeTV-v0.9.0-${{ github.run_id }}-${{ github.run_attempt }}
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 3
+        continue-on-error: true
