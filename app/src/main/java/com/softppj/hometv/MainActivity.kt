@@ -276,7 +276,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && (!prefs.getBoolean("auto_skip_unavailable",true) || !unavailableChannels.contains(channelKey(channels[it])))}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
@@ -2704,6 +2704,7 @@ class MainActivity: Activity() {
             "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
             "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"Fit"),
             "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
+            "Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_unavailable",true))"ON" else "OFF",
             "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
             "Date & time overlay",
             "Manage playlists (leave playback)",
@@ -2730,15 +2731,20 @@ class MainActivity: Activity() {
                         showBanner("Auto-reconnect setting saved")
                     }
                     5->{
+                        val enabled=!prefs.getBoolean("auto_skip_unavailable",true)
+                        prefs.edit().putBoolean("auto_skip_unavailable",enabled).apply()
+                        showBanner("Auto-skip non-working channels "+if(enabled)"ON" else "OFF")
+                    }
+                    6->{
                         prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply()
                         showBanner("Resume setting saved")
                     }
-                    6->clockSettings()
-                    7->AlertDialog.Builder(this).setTitle("Leave live TV?")
+                    7->clockSettings()
+                    8->AlertDialog.Builder(this).setTitle("Leave live TV?")
                         .setMessage("Managing playlists will stop the current channel.")
                         .setPositiveButton("Continue"){_,_->managePlaylists()}
                         .setNegativeButton("Stay on TV",null).show()
-                    8->showHome()
+                    9->showHome()
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
@@ -2771,6 +2777,11 @@ class MainActivity: Activity() {
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
+        root.addView(button("Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_unavailable",true))"ON" else "OFF"){
+            prefs.edit().putBoolean("auto_skip_unavailable",!prefs.getBoolean("auto_skip_unavailable",true)).apply()
+            settings()
+        })
+        root.addView(label("ON: Up/Down and CH+/− skip a channel only after all its URLs fail with both Media3 and LibVLC. OFF: Keep failed channels in channel surfing. The current channel is never changed automatically."))
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
         root.addView(button("Set / change lock password"){
