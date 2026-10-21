@@ -108,20 +108,60 @@ class MainActivity: Activity() {
     }
     private fun beginLicensedSession(){
         if(licenseChecking)return
-        licenseReady=false;licenseChecking=true
-        showLicenseCheckingScreen()
         val token=prefs.getString("license_token",null)
-        if(token.isNullOrBlank()){licenseChecking=false;showLicenseScreen();return}
+        if(token.isNullOrBlank()){
+            licenseReady=false
+            showLicenseScreen()
+            return
+        }
+        // Optimistic startup is permitted only for a previously server-validated
+        // installation that has not been blocked by any subsequent failed check.
+        // This is a convenience tradeoff, NOT cryptographic offline authorization.
+        val mayResume=prefs.getBoolean("license_last_verified",false) &&
+            !prefs.getBoolean("license_validation_blocked",false)
+        licenseChecking=true
+        if(mayResume){
+            licenseReady=true
+            channels=cachedChannels()
+            if(channels.isNotEmpty()){
+                checkEpgTune()
+                resumeLast()
+            }else showLicenseCheckingScreen()
+        }else{
+            licenseReady=false
+            showLicenseCheckingScreen()
+        }
         thread{
-            val error=try{saveLicenseExpiry(licenseRequest("/validate",licensePayload()));null}catch(e:Exception){e.message?:"License validation failed"}
+            val result=try{
+                saveLicenseExpiry(licenseRequest("/validate",licensePayload()))
+                null
+            }catch(e:Exception){e.message?:"License validation failed"}
             runOnUiThread{
                 licenseChecking=false
                 if(isFinishing||isDestroyed)return@runOnUiThread
-                if(error==null){licenseReady=true;startLicensedApp()}
-                else{
-                    if(error.contains("expired",true)||error.contains("revoked",true)||error.contains("not active",true)||error.contains("Invalid token",true))
+                if(result==null){
+                    prefs.edit().putBoolean("license_last_verified",true)
+                        .putBoolean("license_validation_blocked",false).apply()
+                    licenseReady=true
+                    // Refresh all playlist sources on every start, including fast starts.
+                    // Retune only if nothing was playing already.
+                    if(mayResume && channels.isNotEmpty()){
+                        refresh({
+                            if(licenseReady && active !in channels.indices){
+                                if(channels.isNotEmpty())resumeLast() else showHome()
+                            }
+                        })
+                    }else startLicensedApp()
+                }else{
+                    // Persist the failure BEFORE stopping playback so subsequent
+                    // launches cannot resume optimistically.
+                    prefs.edit().putBoolean("license_validation_blocked",true)
+                        .putBoolean("license_last_verified",false).commit()
+                    licenseReady=false
+                    if(result.contains("expired",true)||result.contains("revoked",true)||
+                        result.contains("not active",true)||result.contains("Invalid token",true))
                         prefs.edit().remove("license_token").remove("license_expiry").apply()
-                    showLicenseScreen(error)
+                    showLicenseScreen("License verification failed: "+result)
                 }
             }
         }
@@ -130,8 +170,10 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         channels=cachedChannels()
         checkEpgTune()
-        if(channels.isNotEmpty()){startBackgroundChannelChecks();resumeLast()}
-        else refresh({if(channels.isNotEmpty())resumeLast() else showHome()})
+        refresh({
+            if(!licenseReady)return@refresh
+            if(channels.isNotEmpty())resumeLast() else showHome()
+        })
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
@@ -162,7 +204,7 @@ class MainActivity: Activity() {
                 runOnUiThread{
                     if(isFinishing||isDestroyed)return@runOnUiThread
                     if(token!=null){
-                        prefs.edit().putString("license_token",token).apply()
+                        prefs.edit().putString("license_token",token).putBoolean("license_last_verified",true).putBoolean("license_validation_blocked",false).apply()
                         activationResult?.let{saveLicenseExpiry(it)}
                         licenseReady=true;startLicensedApp()
                     }else showLicenseScreen(error)
@@ -181,7 +223,7 @@ class MainActivity: Activity() {
                     val error=try{licenseRequest("/surrender",licensePayload());null}catch(e:Exception){e.message?:"Unable to release license"}
                     runOnUiThread{
                         if(error==null){
-                            prefs.edit().remove("license_token").remove("license_expiry").apply()
+                            prefs.edit().remove("license_token").remove("license_expiry").putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
                             showLicenseScreen("Could not surrender: "+error)
@@ -199,14 +241,13 @@ class MainActivity: Activity() {
     private val recoveryAttempts=mutableMapOf<String,Int>()
     private val unavailableChannels=mutableSetOf<String>()
     private val playedThisSession=mutableSetOf<String>()
-    private val workingEngineThisSession=mutableMapOf<String,String>()
-    private val workingUrlThisSession=mutableMapOf<String,String>()
     private val failedUrlsThisSession=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
     private var active=-1
     private var previousChannelUrl:String?=null
+    private var previousChannelIdentity:String?=null
     private var alternativeAttempted=mutableSetOf<String>()
     private var alternativeSessionKey:String?=null
     private var playbackGeneration=0
@@ -216,7 +257,8 @@ class MainActivity: Activity() {
     private var channelRepresentatives=emptyList<Int>()
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
-    private fun channelKey(c:Channel)=c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
+    private fun channelKey(c:Channel)=c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
+        c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
     private fun ensureChannelIndex(){
         if(channelIndexOwner===channels && channelIndexSize==channels.size)return
         val groups=linkedMapOf<String,MutableList<Int>>()
@@ -227,31 +269,71 @@ class MainActivity: Activity() {
         channelIndexOwner=channels
         channelIndexSize=channels.size
     }
+    // Parallel, bounded URL reachability checks; no extra video decoders or player switches.
+    private fun checkChannelAlternativesInParallel(index:Int){
+        val candidates=alternateIndices(index).filter{candidate->
+            val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
+            (url.startsWith("http://") || url.startsWith("https://")) &&
+                !url.contains("youtube.com") && !url.contains("youtu.be") &&
+                !prefs.getBoolean("libvlc_only_"+hash(channels[candidate].url),false)
+        }
+        if(candidates.size<2)return
+        val generation=playbackGeneration
+        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates)
+        repeat(minOf(3,candidates.size)){
+            thread(name="HomeTV-channel-url-check"){
+                while(true){
+                    val candidate=queue.poll() ?:break
+                    if(generation!=playbackGeneration)break
+                    val channel=channels.getOrNull(candidate) ?:continue
+                    val reachable=try{
+                        val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
+                        try{
+                            connection.connectTimeout=2500
+                            connection.readTimeout=2500
+                            connection.instanceFollowRedirects=true
+                            connection.setRequestProperty("Range","bytes=0-1023")
+                            connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                            channel.headers.forEach{(key,value)->
+                                if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                            }
+                            connection.responseCode in 200..299 &&
+                                !(connection.contentType ?: "").contains("text/html",true)
+                        }finally{connection.disconnect()}
+                    }catch(_:Exception){false}
+                    if(generation==playbackGeneration)probeReachable[channel.url]=reachable
+                }
+            }
+        }
+    }
     private fun preferredChannel(index:Int):Int{
         val c=channels.getOrNull(index) ?:return index
         ensureChannelIndex()
         val group=channelByKey[channelKey(c)] ?:return index
-        val manual=prefs.getString("manual_url_"+channelKey(c),null)
-        if(manual!=null)group.firstOrNull{channels[it].url==manual}?.let{return it}
-        val saved=workingUrlThisSession[channelKey(c)] ?: prefs.getString("working_url_"+channelKey(c),null)
-        return group.firstOrNull{channels[it].url==saved}
-            ?:group.firstOrNull{probeReachable[channels[it].url]==true}
-            ?:group.firstOrNull{probeReachable[channels[it].url]!=false}
+        val saved=prefs.getString("working_url_"+channelKey(c),null)
+        val usable=group.filter{channels[it].url !in failedUrlsThisSession}
+        return usable.firstOrNull{channels[it].url==saved}
+            ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
+            ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
+            ?:usable.firstOrNull()
             ?:group.first()
     }
     private fun rememberWorking(c:Channel){
         playedThisSession.add(channelKey(c))
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
+        // Record the player that actually reached playback, not a pending fallback hint.
         val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
-        workingEngineThisSession[channelKey(c)]=engine
-        workingUrlThisSession[channelKey(c)]=c.url
-        prefs.edit().putString("working_engine_"+channelKey(c),engine).apply()
-        if(engine=="Media3")probeReachable[c.url]=true
-        // Do not permanently pin automatic playback to an engine.
+        if(engine=="Media3"){
+            probeReachable[c.url]=true
+            prefs.edit().putBoolean("media3_verified_"+hash(c.url),true)
+                .remove("libvlc_only_"+hash(c.url)).apply()
+        }else if(engine=="LibVLC"){
+            // Keep the proven working engine for this URL across channel changes/restarts.
+            prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
+        }
         engineAttempts.remove(c.url)
-        if(prefs.getString("manual_url_"+channelKey(c),null)==null &&
-            prefs.getString("working_url_"+channelKey(c),null)!=c.url)
+        if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
     }
     private var youtubeUnmuteTask:Runnable?=null
@@ -281,25 +363,17 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && (!prefs.getBoolean("auto_skip_unavailable",true) || !unavailableChannels.contains(channelKey(channels[it])))}
+    private fun surfingIndices():List<Int>{
+        val base=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+        val favoritesOnly=prefs.getBoolean("favorites_surfing",false)
+        val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
+        return orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
+    }
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
         alternateIndices(channels.indexOf(c)).forEach{val entry=channels[it];if(skipped)values.add(id(entry)) else values.remove(id(entry))}
         prefs.edit().putStringSet("skip_channel_surfing",values).apply()
-        // When hiding the currently tuned channel, advance in the last remote
-        // key direction, using its original position as the anchor.
-        if(skipped && active in channels.indices && sameChannel(channels[active],c)){
-            val available=surfingIndices()
-            val anchor=channelNumbers().firstOrNull{sameChannel(channels[it],c)} ?: active
-            val next=if(surfingDirection>=0)
-                available.firstOrNull{it>anchor} ?: available.firstOrNull()
-                else available.lastOrNull{it<anchor} ?: available.lastOrNull()
-            if(next!=null){
-                previewIndex=-1
-                playIndex(preferredChannel(next))
-            }else showBanner("No other visible channels available",true)
-        }
         Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
     }
     private fun manageSkippedChannels(){
@@ -328,29 +402,22 @@ class MainActivity: Activity() {
         val current=options.indexOf(active)
         alternativeAttempted.clear()
         alternativeSessionKey=null
-        val target=options[(current+1)%options.size]
-        workingUrlThisSession.remove(channelKey(channels[target]))
-        workingEngineThisSession.remove(channelKey(channels[target]))
-        prefs.edit().putString("manual_url_"+channelKey(channels[target]),channels[target].url).commit()
-        raceBypass=true
-        playIndex(target)
+        playIndex(options[(current+1)%options.size])
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
     private fun selectAlternative(index:Int){
         val options=alternateIndices(index)
         if(options.size<=1){
-            Toast.makeText(this,"No alternative URL for this channel",Toast.LENGTH_SHORT).show()
+            Toast.makeText(this,"No alternative stream for this channel",Toast.LENGTH_SHORT).show()
             return
         }
         val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
             .setItems(options.mapIndexed{n,i->
-                "Source "+(n+1)+(if(i==active)"  •  Playing" else "")+"  ·  "+(try{Uri.parse(channels[i].url).host?:"Stream"}catch(_:Exception){"Stream"})
+                "Stream option "+(n+1)+(if(i==active)"  •  Playing" else "")
             }.toTypedArray()){_,choice->
                 val target=options[choice]
                 alternativeAttempted.clear()
                 alternativeSessionKey=null
-                prefs.edit().putString("manual_url_"+channelKey(channels[target]),channels[target].url).commit()
-                raceBypass=true
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
@@ -365,56 +432,89 @@ class MainActivity: Activity() {
         handler.post{if(active==index)playIndex(next)}
         return true
     }
+    private fun hasNetworkConnection():Boolean{
+        val manager=getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        return try{manager?.activeNetworkInfo?.isConnected==true}catch(_:Exception){true}
+    }
+    private var networkRecoveryTask:Runnable?=null
+    private fun awaitNetworkRecovery(index:Int,screen:FrameLayout){
+        networkRecoveryTask?.let{handler.removeCallbacks(it)}
+        if(index !in channels.indices || active!=index || videoScreen!==screen)return
+        showBanner("Internet disconnected • Waiting to reconnect",true)
+        val task=object:Runnable{
+            override fun run(){
+                if(active!=index || videoScreen!==screen)return
+                if(hasNetworkConnection()){
+                    networkRecoveryTask=null
+                    if(active==index && videoScreen===screen)playIndex(index)
+                }else handler.postDelayed(this,3000L)
+            }
+        }
+        networkRecoveryTask=task
+        handler.postDelayed(task,3000L)
+    }
     private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
+        // A device-wide outage is not evidence that an individual stream is broken.
+        if(!hasNetworkConnection()){
+            awaitNetworkRecovery(index,screen)
+            return true
+        }
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
         // Retry the current engine before switching after an intermittent black screen.
         val attempts=recoveryAttempts[c.url] ?: 0
-        if(prefs.getBoolean("auto_reconnect",true) && attempts<2){
+        if(prefs.getBoolean("auto_reconnect",true) && attempts<1){
             recoveryAttempts[c.url]=attempts+1
             autoBufferStalled()
             fallbackEngineOverride=current
-            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/2)")
+            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/1)")
             val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
             retryTask=task
             handler.postDelayed(task,1500L*(attempts+1))
             return true
         }
-        // After successful playback, do not change the source or engine on interruption.
-        val key=channelKey(c)
-        if(workingUrlThisSession[key]==c.url){
-            fallbackEngineOverride=workingEngineThisSession[key] ?: current
-            // This channel has played successfully during this run. A later
-            // interruption is not permission to change its URL or engine.
-            showBanner(c.name+" offline. Saved source and player retained; press OK to retry.",true)
-            return true
-        }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
-        val other=if(current=="Media3")"LibVLC" else "Media3"
-        if(!tried.contains(other)){
-            fallbackEngineOverride=other
-            showBanner("Trying "+other+" for "+c.name)
-            handler.post{if(active==index && videoScreen===screen)playIndex(index)}
+        // A LibVLC playback failure does not prove that Media3 can play this URL.
+        // Preserve the remembered LibVLC preference until the user changes it.
+        // Exhaust all Media3 alternatives before starting the LibVLC pass.
+        // A previously verified working engine is still used first by engineFor.
+        val options=alternateIndices(index)
+        val nextMedia3=options.firstOrNull{
+            !prefs.getBoolean("libvlc_only_"+hash(channels[it].url),false) &&
+                !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
+        }
+        val nextVlc=if(nextMedia3==null)options.firstOrNull{
+            !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("LibVLC")
+        }else null
+        val next=nextMedia3 ?: nextVlc
+        if(next!=null){
+            val engine=if(nextMedia3!=null)"Media3" else "LibVLC"
+            fallbackEngineOverride=engine
+            showBanner("Trying "+engine+" alternative for "+c.name)
+            handler.post{if(active==index && videoScreen===screen)playIndex(next)}
             return true
         }
-        // This URL is exhausted only after both playback engines have failed.
-        failedUrlsThisSession.add(c.url)
-        if(tryNextAlternative(index)){
-            fallbackEngineOverride=null
-            return true
-        }
-        val allUrls=alternateIndices(index).map{channels[it].url}.distinct()
-        // Skip in automatic surfing only when EVERY URL has exhausted BOTH engines.
-        // Never remove the channel from the guide, and never jump away from
-        // the channel currently on screen.
+        // Every source has now failed with both players.
+        options.forEach{failedUrlsThisSession.add(channels[it].url)}
+        val key=channelKey(c)
+        val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
         if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
             unavailableChannels.add(key)
-            showBanner(c.name+" unavailable on all sources. Press OK to retry.",true)
-        }else{
-            showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
-        }
+            showBanner(c.name+" unavailable • Skipping until next restart",true)
+            val available=surfingIndices()
+            if(available.isNotEmpty()){
+                handler.post{if(active==index && videoScreen===screen){
+                    val next=if(surfingDirection<0)
+                        available.lastOrNull{it<index} ?: available.last()
+                    else available.firstOrNull{it>index} ?: available.first()
+                    playIndex(preferredChannel(next))
+                }}
+            }else{
+                handler.post{if(active==index && videoScreen===screen)showHome()}
+            }
+        }else showBanner(c.name+" failed • Try another stream",true)
         engineAttempts.clear()
         fallbackEngineOverride=null
         return true
@@ -426,13 +526,63 @@ class MainActivity: Activity() {
     }
     private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
-    private fun visibleIndices()=channelNumbers()
+    private val manuallyHiddenGroups get()=prefs.getStringSet("manually_hidden_groups",emptySet()) ?: emptySet()
+    private fun isGroupHidden(group:String)=manuallyHiddenGroups.contains(group)
+    private fun toggleGroupHidden(group:String){
+        val updated=manuallyHiddenGroups.toMutableSet()
+        if(!updated.add(group))updated.remove(group)
+        prefs.edit().putStringSet("manually_hidden_groups",updated).apply()
+        Toast.makeText(this,if(isGroupHidden(group))"Group hidden until manually restored" else "Group restored",Toast.LENGTH_SHORT).show()
+    }
+    private fun groupOptions(group:String){
+        showSideDialog(AlertDialog.Builder(this).setTitle(group+" Settings")
+            .setItems(arrayOf("Lock / Unlock Group",if(isGroupHidden(group))"Unhide Group" else "Hide Group")){_,choice->
+                when(choice){
+                    0->toggleLock(group,true)
+                    1->{toggleGroupHidden(group);if(active<0)showChannels()}
+                }
+            }.setNegativeButton("Back",null).create())
+    }
+    private fun visibleIndices()=channelNumbers().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group)}
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
         return marks+numberFor(index)+". "+c.name
     }
+    private fun searchChannels(){
+        val input=EditText(this).apply{hint="Channel name, group or current programme"}
+        AlertDialog.Builder(this).setTitle("Search channels").setView(input)
+            .setPositiveButton("Search"){_,_->
+                val q=input.text.toString().trim()
+                if(q.isBlank()){allChannels();return@setPositiveButton}
+                val matches=visibleIndices().filter{i->
+                    val c=channels[i]
+                    c.name.contains(q,true) || c.group.contains(q,true) ||
+                        programmeList(c).any{it.title.contains(q,true)}
+                }
+                channelCollection("Search: "+q,matches)
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun rememberRecentChannel(channel:Channel){
+        val key=channelKey(channel)
+        val recent=JSONArray(prefs.getString("recent_channels","[]"))
+        val updated=JSONArray().put(key)
+        for(i in 0 until recent.length()){
+            val value=recent.optString(i)
+            if(value!=key && updated.length()<20)updated.put(value)
+        }
+        prefs.edit().putString("recent_channels",updated.toString()).apply()
+    }
+    private fun recentlyWatched(){
+        val saved=JSONArray(prefs.getString("recent_channels","[]"))
+        val keys=(0 until saved.length()).map{saved.optString(it)}
+        val indices=keys.mapNotNull{key->
+            visibleIndices().firstOrNull{channelKey(channels[it])==key}
+        }
+        channelCollection("Recently watched",indices)
+    }
     private fun allChannels(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         if(channels.isEmpty()){
             channelCollection("All channels",emptyList())
             if(playlists().any{it.enabled})refresh({channelCollection("All channels",visibleIndices())})
@@ -516,7 +666,14 @@ class MainActivity: Activity() {
         prefs.edit().putString("epg_tune_schedules",keep.toString()).apply()
         if(target!=null){
             val index=channels.indexOfFirst{it.url==target}
-            if(index>=0)playIndex(preferredChannel(index))
+            if(index>=0){
+                val channelName=channels[index].name
+                showSideDialog(AlertDialog.Builder(this)
+                    .setTitle("Programme reminder")
+                    .setMessage("The scheduled programme on "+channelName+" is starting. Switch to this channel?")
+                    .setPositiveButton("OK"){_,_->playIndex(preferredChannel(index))}
+                    .setNegativeButton("Stay here",null).create())
+            }
         }
         armEpgTune()
     }
@@ -556,9 +713,12 @@ class MainActivity: Activity() {
             format.parse(m.groupValues[1])?.time ?:0L
         }catch(_:Exception){0L}
     }
-    private fun programmeList(c:Channel):List<EpgProgramme> =
-        epgGuide[c.epgId.trim().lowercase(java.util.Locale.ROOT)]
-            ?:epgGuide[c.name.trim().lowercase(java.util.Locale.ROOT)] ?:emptyList()
+    private fun programmeList(c:Channel):List<EpgProgramme> {
+        val id=c.epgId.trim().lowercase(java.util.Locale.ROOT)
+        val name=c.name.trim().lowercase(java.util.Locale.ROOT)
+        return epgGuide[id]?.takeIf{it.isNotEmpty()}
+            ?:epgGuide[name] ?:emptyList()
+    }
     private fun programmeTime(t:Long):String =
         java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(t))
     private fun programmeSummary(c:Channel):String{
@@ -590,8 +750,14 @@ class MainActivity: Activity() {
                         connectTimeout=8000;readTimeout=20000;useCaches=false
                     }
                     val raw=connection.getInputStream()
-                    val stream=if(url.substringBefore("?").endsWith(".gz",true))
-                        java.util.zip.GZIPInputStream(raw) else raw
+                    val buffered=java.io.BufferedInputStream(raw)
+                    buffered.mark(4)
+                    val magic0=buffered.read()
+                    val magic1=buffered.read()
+                    buffered.reset()
+                    // Some XMLTV providers serve gzip without a .gz suffix.
+                    val stream=if(magic0==0x1f && magic1==0x8b)
+                        java.util.zip.GZIPInputStream(buffered) else buffered
                     stream.use{data->
                         val parser=android.util.Xml.newPullParser()
                         parser.setInput(data,"UTF-8")
@@ -696,10 +862,59 @@ class MainActivity: Activity() {
             }
         }
     }
-    private fun hiddenChannels(){channelCollection("Hidden channels",visibleIndices().filter{isSkipped(channels[it])})}
-    private fun favorites(){channelCollection("Favorites",visibleIndices().filter{i->channels.any{sameChannel(it,channels[i]) && favoriteIds.contains(id(it))}})}
+    private val manuallyHiddenIds get()=prefs.getStringSet("manually_hidden_channels",emptySet()) ?: emptySet()
+    private fun isManuallyHidden(c:Channel)=manuallyHiddenIds.contains(id(c))
+    private fun toggleManualHide(c:Channel){
+        val updated=manuallyHiddenIds.toMutableSet()
+        if(!updated.add(id(c)))updated.remove(id(c))
+        prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+        Toast.makeText(this,if(isManuallyHidden(c))"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
+    }
+    private fun hiddenChannels(){
+        val hidden=channels.indices.filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
+        channelCollection("Hidden channels",hidden)
+        if(manuallyHiddenGroups.isNotEmpty()){
+            root.addView(button("Restore hidden group"){
+                val groups=manuallyHiddenGroups.toList().sorted()
+                showSideDialog(AlertDialog.Builder(this).setTitle("Unhide Group")
+                    .setItems(groups.toTypedArray()){_,position->toggleGroupHidden(groups[position]);hiddenChannels()}
+                    .setNegativeButton("Back",null).create())
+            })
+        }
+    }
+    private fun favorites(){
+        prefs.edit().putBoolean("favorites_surfing",true).apply()
+        channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && favoriteIds.contains(id(channels[it]))})
+    }
+    // User-defined ordering is stored independently for Favorites and each channel list.
+    // The stable source + channel + URL identifier avoids mixing different playlists.
+    private fun orderedChannelIndices(title:String,raw:List<Int>):List<Int>{
+        val distinct=raw.filter{it in channels.indices}.distinctBy{id(channels[it])}
+        val key=if(title=="Favorites")"channel_order_favorites" else "channel_order_all"
+        val saved=prefs.getString(key,"") ?: ""
+        if(saved.isBlank())return distinct
+        val positions=try{
+            val array=JSONArray(saved)
+            (0 until array.length()).associate{array.optString(it) to it}
+        }catch(_:Exception){emptyMap<String,Int>()}
+        return distinct.withIndex().sortedWith(compareBy<IndexedValue<Int>>{
+            positions[id(channels[it.value])] ?: Int.MAX_VALUE
+        }.thenBy{it.index}).map{it.value}
+    }
+    private fun moveChannelInList(title:String,items:List<Int>,position:Int,direction:Int){
+        val destination=position+direction
+        if(destination !in items.indices)return
+        val reordered=items.toMutableList()
+        val moved=reordered.removeAt(position)
+        reordered.add(destination,moved)
+        val key=if(title=="Favorites")"channel_order_favorites" else "channel_order_all"
+        val array=JSONArray()
+        reordered.forEach{array.put(id(channels[it]))}
+        prefs.edit().putString(key,array.toString()).apply()
+        channelCollection(title,reordered)
+    }
     private fun channelCollection(title:String,indices:List<Int>){
-        val indices=indices.filter{it in channels.indices}.distinctBy{numberFor(it)}
+        val indices=orderedChannelIndices(title,indices)
         reset(title+" ("+indices.size+")")
         val list=ListView(this).apply{
             dividerHeight=1
@@ -728,8 +943,26 @@ class MainActivity: Activity() {
                 return view
             }
         }
-        list.setOnItemClickListener{_,_,position,_->playIndex(preferredChannel(indices[position]))}
-        list.setOnItemLongClickListener{_,_,position,_->channelOptions(indices[position]);true}
+        list.setOnItemClickListener{_,_,position,_->
+            val selected=indices[position]
+            if(title=="Hidden channels" && (isManuallyHidden(channels[selected]) || isGroupHidden(channels[selected].group)))
+                channelOptions(selected)
+            else playIndex(preferredChannel(selected))
+        }
+        list.setOnItemLongClickListener{_,_,position,_->
+            val i=indices[position]
+            val options=arrayOf("Channel Settings","Move Up","Move Down")
+            showSideDialog(AlertDialog.Builder(this)
+                .setTitle(numberFor(i).toString()+". "+channels[i].name+" Settings")
+                .setItems(options){_,selection->
+                    when(selection){
+                        0->channelOptions(i)
+                        1->moveChannelInList(title,indices,position,-1)
+                        2->moveChannelInList(title,indices,position,1)
+                    }
+                }.setNegativeButton("Back",null).create())
+            true
+        }
         if(title=="All channels"){
             val last=prefs.getString("last_url",null)
             val previous=indices.firstOrNull{channels[it].url==last}
@@ -740,7 +973,21 @@ class MainActivity: Activity() {
                 list.post{list.setSelection(position)}
             }
         }
-        root.addView(label("Long press: Favorite · Lock / Unlock · Hide / Unhide"))
+        if(title=="All channels" || title=="Favorites"){
+            val playingUrl=channels.getOrNull(active)?.url ?: prefs.getString("last_url",null)
+            val position=indices.indexOfFirst{channels[it].url==playingUrl}
+            if(position>=0){
+                list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+                list.setItemChecked(position,true)
+                list.setSelection(position)
+                list.post{
+                    list.setItemChecked(position,true)
+                    list.setSelection(position)
+                    list.requestFocus()
+                }
+            }
+        }
+        root.addView(label("Long press: Channel Settings · Move Up · Move Down"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
@@ -798,27 +1045,25 @@ class MainActivity: Activity() {
     }
     private fun engineFor(c:Channel):String{
         fallbackEngineOverride?.let{return it}
-        val manual=prefs.getString("manual_engine_"+channelKey(c),null)
-        if(manual=="Media3" || manual=="LibVLC")return manual
-        workingEngineThisSession[channelKey(c)]?.let{return it}
-        if(prefs.getString("working_url_"+channelKey(c),null)==c.url)
-            prefs.getString("working_engine_"+channelKey(c),null)?.let{
-                if(it=="Media3" || it=="LibVLC")return it
-            }
-        if(probeReachable[c.url]==true)return "Media3"
-        return "LibVLC"
+        prefs.getString("manual_engine_"+channelKey(c),null)?.let{
+            if(it=="Media3" || it=="LibVLC")return it
+        }
+        val universal=prefs.getString("engine","Auto") ?: "Auto"
+        if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
+        if(universal=="Media3" || universal=="LibVLC")return universal
+        return "Media3"
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
         val choices=arrayOf("Auto","Media3","LibVLC")
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
-            .setSingleChoiceItems(choices,choices.indexOf(engineFor(c)).coerceAtLeast(0)){dialog,which->
+            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("manual_engine_"+channelKey(c),"Auto")).coerceAtLeast(0)){dialog,which->
                 prefs.edit().apply{
                     if(choices[which]=="Auto")remove("manual_engine_"+channelKey(c))
                     else putString("manual_engine_"+channelKey(c),choices[which])
                 }.apply()
-                engineAttempts.clear();fallbackEngineOverride=null;workingEngineThisSession.remove(channelKey(c));unavailableChannels.remove(channelKey(c))
+                engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
                 dialog.dismiss()
                 if(active==i)playIndex(i)
             }.setNegativeButton("Cancel",null).show()
@@ -826,23 +1071,49 @@ class MainActivity: Activity() {
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val opts=arrayOf("Watch","Favorite / Unfavorite","Lock / Unlock",if(isSkipped(c))"Hide / Unhide (Unhide)" else "Hide / Unhide (Hide)","Aspect Ratio","All channels","Settings","Exit","Audio tracks","Playback engine","Picture quality","Alternative stream / URL")
-        AlertDialog.Builder(this).setTitle("Setting for "+c.name).setItems(opts){_,v->
-            when(v){
-                0->playIndex(preferredChannel(i))
-                1->{favorite(c);if(active<0)allChannels()}
-                2->toggleLock(id(c),false)
-                3->{toggleChannelSkip(c);if(active<0)allChannels()}
-                4->selectScreenMode(i)
-                5->allChannels()
-                6->liveSettings()
-                7->confirmExit()
-                8->audioTracks()
-                9->chooseChannelEngine(i)
-                10->selectQuality(i)
-                11->selectAlternative(i)
+        val opts=arrayOf(
+            "Watch channel",
+            "Aspect ratio",
+            "Picture quality",
+            "Audio tracks",
+            "Playback engine",
+            "Alternative stream",
+            if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
+            "Lock / Unlock",
+            if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
+            "All channels",
+            "Settings",
+            "Exit"
+        )
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(numberFor(i).toString()+". "+c.name+" Settings")
+            .setItems(opts){d,v->
+                d.dismiss()
+                when(v){
+                    0->playIndex(preferredChannel(i))
+                    1->selectScreenMode(i)
+                    2->selectQuality(i)
+                    3->audioTracks()
+                    4->chooseChannelEngine(i)
+                    5->selectAlternative(i)
+                    6->{favorite(c);if(active<0)allChannels()}
+                    7->toggleLock(id(c),false)
+                    8->{toggleManualHide(c);if(active<0)allChannels()}
+                    9->allChannels()
+                    10->liveSettings()
+                    11->confirmExit()
+                }
             }
-        }.show()
+            .setNegativeButton("Back",null).create()
+        dialog.setOnShowListener{
+            dialog.listView?.apply{
+                choiceMode=android.widget.ListView.CHOICE_MODE_NONE
+                clearChoices()
+                setSelection(0)
+                requestFocus()
+            }
+        }
+        showSideDialog(dialog)
     }
 
     override fun onCreate(savedInstanceState:Bundle?) {
@@ -886,6 +1157,8 @@ class MainActivity: Activity() {
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
         root.addView(button("★  My favorites"){favorites()})
+        root.addView(button("⌕  Search channels and programmes"){searchChannels()})
+        root.addView(button("◷  Recently watched"){recentlyWatched()})
         root.addView(button("🙈  Hidden channels"){hiddenChannels()})
         root.addView(button("▤  TV programme guide (EPG)"){showEpg()})
         root.addView(button("☷  Browse by category"){showChannels()})
@@ -1115,12 +1388,15 @@ class MainActivity: Activity() {
         if(!licenseReady){showLicenseScreen("Please activate your license");return}
         val sources=playlists().filter{it.enabled}
         if(sources.isEmpty()){
-            channels.clear()
-            Toast.makeText(this,"No enabled playlists to refresh",Toast.LENGTH_LONG).show()
+            Toast.makeText(this,"No enabled playlists. Existing channels preserved.",Toast.LENGTH_LONG).show()
             done()
             return
         }
         if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
+        val playingBeforeRefresh=channels.getOrNull(active)
+        val playingUrlBeforeRefresh=playingBeforeRefresh?.url
+        // Preserve each existing source when a network rebuild and its cache both fail.
+        val previousBySource=channels.groupBy{it.source}
         thread {
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
@@ -1160,23 +1436,48 @@ class MainActivity: Activity() {
             }
             workers.forEach{it.join()}
             val updated=refreshed.count{it}
-            val found=results.flatMap{it}.distinctBy{it.name.lowercase()+"|"+it.url}
+            val found=results.flatMap{it}.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
             runOnUiThread{
-                if(forceRebuild && updated==0){
-                    Toast.makeText(this,"Refresh failed: could not download any playlist. Saved channels unchanged.",Toast.LENGTH_LONG).show()
+                if(updated==0 && results.all{it.isEmpty()}){
+                    Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
                 }else{
                     if(forceRebuild && updated<sources.size){
                         val combined=mutableListOf<Channel>()
                         sources.forEachIndexed{index,p->
                             if(refreshed[index])combined.addAll(results[index])
-                            else try{
-                                val file=cacheFile(p)
-                                if(file.exists())combined.addAll(parseM3u(file.readText(),p.name))
-                            }catch(_:Exception){}
+                            else{
+                                val cached=try{
+                                    val file=cacheFile(p)
+                                    if(file.exists())parseM3u(file.readText(),p.name) else emptyList()
+                                }catch(_:Exception){emptyList()}
+                                if(cached.isNotEmpty())combined.addAll(cached)
+                                else combined.addAll(previousBySource[p.name].orEmpty())
+                            }
                         }
-                        channels=combined.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
-                    }else channels=found.toMutableList()
+                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
+                    }else{
+                        val combined=mutableListOf<Channel>()
+                        sources.forEachIndexed{index,p->
+                            val loaded=results[index]
+                            if(loaded.isNotEmpty())combined.addAll(loaded)
+                            else combined.addAll(previousBySource[p.name].orEmpty())
+                        }
+                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
+                    }
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
+                }
+                // A background refresh can reorder or remove entries while a
+                // channel is playing. Never leave active pointing to a different
+                // channel after replacing the channel list.
+                if(active>=0){
+                    val stillPlaying=playingUrlBeforeRefresh
+                    val relocated=channels.indexOfFirst{it.url==stillPlaying &&
+                        (playingBeforeRefresh==null || it.source==playingBeforeRefresh.source)}
+                    if(relocated>=0)active=relocated
+                    else{
+                        stopPlayback()
+                        showHome()
+                    }
                 }
                 startBackgroundChannelChecks()
                 done()
@@ -1220,7 +1521,11 @@ class MainActivity: Activity() {
                 fun finish(working:Boolean){
                     if(completed)return
                     completed=true
-                    if(working && generation==backgroundProbeGeneration)vlcProbeReachable[channel.url]=true
+                    if(working && generation==backgroundProbeGeneration){
+                        vlcProbeReachable[channel.url]=true
+                        // This is a compatibility hint, not a proven LibVLC-only
+                        // stream: only actual playback may persist that preference.
+                    }
                     handler.post{
                         if(vlcProbePlayer===probe){
                             stopVlcProbe()
@@ -1260,73 +1565,81 @@ class MainActivity: Activity() {
         probeQueue.clear()
         stopVlcProbe()
         vlcProbeQueue.clear()
-        // Keep failed-start channels hidden until the app session ends.
-        val snapshot=channels.toList().distinctBy{it.url}.filter{it.url!=channels.getOrNull(active)?.url}
-        val prioritized=snapshot.sortedWith(compareBy<Channel>{
-            when {
-                probeReachable[it.url]==false -> 0
-                channels.getOrNull(active)?.let{current->channelKey(current)==channelKey(it)}==true -> 1
-                else -> 2
-            }
-        })
-        prioritized.forEach{probeQueue.addLast(it);vlcProbeQueue.addLast(it)}
-        launchNextProbe(generation)
-        launchNextVlcProbe(generation)
+        // Probe closest channels first in the last remote-control direction.
+        // Never interrupt the on-screen channel or probe it a second time.
+        val snapshot=channels.toList().distinctBy{it.url}
+            .filter{it.url!=channels.getOrNull(active)?.url}
+        val anchor=active.coerceAtLeast(0)
+        val count=channels.size.coerceAtLeast(1)
+        val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
+            val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+            if(surfingDirection<0)(anchor-position+count)%count
+            else (position-anchor+count)%count
+        }.thenBy{it.name})
+        ordered.forEach{probeQueue.addLast(it)}
+        // LibVLC is expensive; enqueue only URLs for which Media3 already
+        // failed in this scan. No speculative VLC probe for every channel.
+        if(prefs.getBoolean("background_url_checks",false))launchNextProbe(generation)
     }
+    // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
-        if(generation!=backgroundProbeGeneration || !licenseReady)return
-        while(probeInFlight<2 && probeQueue.isNotEmpty()){
+        if(generation!=backgroundProbeGeneration || !licenseReady || !prefs.getBoolean("background_url_checks",false))return
+        if(!hasNetworkConnection()){
+            periodicProbeTask?.let{handler.removeCallbacks(it)}
+            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+            handler.postDelayed(periodicProbeTask!!,15000L)
+            return
+        }
+        val busy=active>=0 && (player?.playbackState==Player.STATE_BUFFERING ||
+            player?.playbackState==Player.STATE_IDLE)
+        val limit=if(busy)1 else 2
+        while(probeInFlight<limit && probeQueue.isNotEmpty()){
+            // Re-rank outstanding checks whenever CH+/CH- changes direction.
+            val anchor=active.coerceAtLeast(0)
+            val count=channels.size.coerceAtLeast(1)
+            val pending=probeQueue.toList()
+            probeQueue.clear()
+            pending.sortedBy{candidate->
+                val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+                if(surfingDirection<0)(anchor-position+count)%count
+                else (position-anchor+count)%count
+            }.forEach{probeQueue.addLast(it)}
             val channel=probeQueue.removeFirst()
             val uri=channel.url.lowercase(java.util.Locale.ROOT)
-            // YouTube pages and non-HTTP protocols cannot be validated by Media3 here.
             if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
                 "youtube.com" in uri || "youtu.be" in uri)continue
             probeInFlight++
-            val probe=try{ExoPlayer.Builder(this).build()}catch(e:Exception){
-                probeInFlight--;continue
-            }
-            probePlayers.add(probe)
-            // Never start playback or acquire audio output in background checks.
-            probe.volume=0f
-            probe.trackSelectionParameters=probe.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO,true).build()
-            var completed=false
-            var watchdog:Runnable?=null
-            fun finish(working:Boolean?){
-                if(completed)return
-                completed=true
-                watchdog?.let{handler.removeCallbacks(it)}
-                probePlayers.remove(probe)
-                probe.release()
-                probeInFlight--
-                if(generation!=backgroundProbeGeneration)return
-                if(working!=null){
-                    probeReachable[channel.url]=working
-                    // Background probing must never declare a channel offline.
-                    // Do not unhide a failed-start channel until the next login.
+            thread(name="HomeTV-stream-check"){
+                val reachable:Boolean?=try{
+                    val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
+                    try{
+                        connection.connectTimeout=3500
+                        connection.readTimeout=3500
+                        connection.instanceFollowRedirects=true
+                        connection.setRequestProperty("Range","bytes=0-1023")
+                        connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                        channel.headers.forEach{(key,value)->
+                            if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                        }
+                        val code=connection.responseCode
+                        val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
+                        when{
+                            code in 200..299 && !contentType.contains("text/html")->true
+                            code==404 || code==410->false
+                            else->null
+                        }
+                    }finally{connection.disconnect()}
+                }catch(_:Exception){null}
+                handler.post{
+                    if(generation!=backgroundProbeGeneration)return@post
+                    probeInFlight=(probeInFlight-1).coerceAtLeast(0)
+                    if(reachable!=null)probeReachable[channel.url]=reachable
+                    // A successful HTTP check can restore surfing eligibility,
+                    // but only actual playback can establish engine compatibility.
+                    if(reachable==true)unavailableChannels.remove(channelKey(channel))
+                    launchNextProbe(generation)
                 }
-                // Defer next probe to avoid recursive work on the UI event stack.
-                handler.post{launchNextProbe(generation)}
             }
-            probe.addListener(object:Player.Listener{
-                override fun onPlaybackStateChanged(state:Int){
-                    if(state==Player.STATE_READY)finish(true)
-                    else if(state==Player.STATE_ENDED)finish(null)
-                }
-                override fun onPlayerError(error:PlaybackException){finish(null)}
-            })
-            watchdog=Runnable{finish(null)} // Timeout is inconclusive, not a failed stream.
-            handler.postDelayed(watchdog!!,5000L)
-            try{
-                val http=DefaultHttpDataSource.Factory()
-                    .setConnectTimeoutMs(5000).setReadTimeoutMs(5000)
-                    .setUserAgent(channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                val headers=channel.headers.filterKeys{!it.equals("User-Agent",true)}
-                http.setDefaultRequestProperties(headers)
-                probe.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(MediaItem.fromUri(channel.url)))
-                probe.prepare()
-                probe.playWhenReady=false
-            }catch(_:Exception){finish(null)}
         }
         if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
@@ -1395,17 +1708,21 @@ class MainActivity: Activity() {
         map[name]=java.net.URLDecoder.decode(value,"UTF-8")
     }
     private fun showChannels(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
         val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
-            list.addView(button("▸ $group"){showGroup(group)})
+            list.addView(button("▸ $group"){showGroup(group)}.apply{
+                setOnLongClickListener{groupOptions(group);true}
+            })
         }
         scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Home"){showHome()})
     }
     private fun showGroup(group:String){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset(group)
         root.addView(button("Lock group"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
@@ -1488,18 +1805,35 @@ class MainActivity: Activity() {
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
-                selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())
-                // Use ListView's selector for focus. Painting each selected row's
-                // background permanently leaves several rows looking selected.
+                // A selected-row callback that paints item backgrounds leaves
+                // previously selected rows blue when Android recycles the views.
+                // Use the native focused/selected drawable instead.
+                selector=android.graphics.drawable.StateListDrawable().apply{
+                    addState(intArrayOf(android.R.attr.state_pressed),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(android.R.attr.state_focused),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(android.R.attr.state_selected),
+                        android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
+                    addState(intArrayOf(),
+                        android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                }
+                choiceMode=android.widget.ListView.CHOICE_MODE_NONE
+                clearChoices()
+                isFocusable=true
+                isFocusableInTouchMode=true
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
     private fun confirmExit(){
-        showSideDialog(AlertDialog.Builder(this).setTitle("Exit HomeTV?")
-            .setMessage("Stop playback and close the app?")
-            .setPositiveButton("Exit"){_,_->stopPlayback();finishAffinity()}
-            .setNegativeButton("Continue watching",null).create())
+        val dialog=AlertDialog.Builder(this).setTitle("Exit HomeTV?")
+            .setMessage("Do you want to exit the application?")
+            .setPositiveButton("Yes"){_,_->stopPlayback();finishAffinity()}
+            .setNegativeButton("No",null).create()
+        showSideDialog(dialog)
+        // Android TV: initial OK confirms Yes; Back dismisses and resumes playback.
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
     }
     private fun audioTracks(){
         val exo=player
@@ -1532,16 +1866,16 @@ class MainActivity: Activity() {
         val c=channels[active]
         val opts=arrayOf(
             if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"Remove favorite" else "Add favorite",
-            if(isSkipped(c))"Unhide channel" else "Hide channel",
+            if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
             if(isLocked(c))"Unlock channel" else "Lock channel",
-            "Alternative URL / Source",
-            "Screen size for this channel",
-            "Picture quality for this channel",
+            "Alternative Source",
+            "Aspect Ratio",
+            "Picture Quality",
             "Audio tracks",
-            "Playback engine for this channel",
+            "Playback Engine",
             "Channel list"
         )
-        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Channel options")
+        val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
                 when(choice){
                     0->favorite(c)
@@ -1585,7 +1919,7 @@ class MainActivity: Activity() {
             tag="clock_overlay"
             setTextColor(android.graphics.Color.WHITE)
             setShadowLayer(3f,1f,2f,android.graphics.Color.BLACK)
-            setBackgroundColor(0x77000000)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             val size=prefs.getInt("clock_size",18).coerceIn(12,36)
             textSize=size.toFloat()
             setPadding(12,8,12,8)
@@ -1820,13 +2154,25 @@ class MainActivity: Activity() {
         panel.addView(TextView(this).apply{
             val now=System.currentTimeMillis()
             val epg=if(prefs.getBoolean("show_channel_epg",true))programmeList(channel).filter{it.end>now}.take(3).joinToString("\n"){programmeTime(it.start)+"  "+it.title} else ""
-            val expiry=prefs.getString("license_expiry","").orEmpty()
-            val licenseLine=when(expiry){
-                ""->""
-                "unlimited"->"License: Unlimited"
-                else->"License expires: "+expiry
+            val playing=if(index==active)when{
+                player!=null->"Media3"
+                vlcPlayer!=null->"LibVLC"
+                else->"Starting"
+            } else engineFor(channel)
+            val current=if(prefs.getBoolean("show_channel_epg",true))
+                programmeList(channel).firstOrNull{it.start<=now && it.end>now} else null
+            val next=if(prefs.getBoolean("show_channel_epg",true))
+                programmeList(channel).filter{it.start>now}.minByOrNull{it.start} else null
+            text=buildString{
+                append(numberFor(index)).append(". ").append(channel.name)
+                append("\nPlayer: ").append(playing)
+                if(current!=null)append("\nNow: ").append(current.title)
+                    .append(" (").append(programmeTime(current.start)).append(" – ")
+                    .append(programmeTime(current.end)).append(")")
+                if(next!=null)append("\nNext: ").append(next.title)
+                    .append(" (").append(programmeTime(next.start)).append(" – ")
+                    .append(programmeTime(next.end)).append(")")
             }
-            text=numberFor(index).toString()+"  "+channel.name+(if(licenseLine.isNotBlank())"\n"+licenseLine else "")+(if(epg.isNotBlank())"\n"+epg else "")
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
@@ -1909,6 +2255,7 @@ class MainActivity: Activity() {
         }
     }
     private fun showOverlayList(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it);return}
@@ -1949,7 +2296,12 @@ class MainActivity: Activity() {
                 close();true
             }else false
         }
-        list.setSelection(available.indexOf(active).coerceAtLeast(0))
+        val playingPosition=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        if(playingPosition>=0){
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(playingPosition,true)
+            list.setSelection(playingPosition)
+        }
         list.requestFocus()
     }
     private fun showLeftNavigation(){
@@ -1977,6 +2329,10 @@ class MainActivity: Activity() {
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemLongClickListener{_,_,choice,_->
+            val group=groups.getOrNull(choice-7)
+            if(group!=null){close();groupOptions(group);true}else false
+        }
         list.setOnItemClickListener{_,_,choice,_->
             close()
             when(choice){
@@ -1998,9 +2354,16 @@ class MainActivity: Activity() {
                 close();showOverlayList();true
             }else false
         }
+        val currentGroup=channels.getOrNull(active)?.group
+        val selectedGroup=groups.indexOf(currentGroup)
+        if(selectedGroup>=0){
+            list.setSelection(selectedGroup+7)
+            list.setItemChecked(selectedGroup+7,true)
+        }
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val indices=visibleIndices().filter{channels[it].group==group}
@@ -2027,6 +2390,12 @@ class MainActivity: Activity() {
             else if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){close();true}
             else false
         }
+        val playingPosition=indices.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        if(playingPosition>=0){
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(playingPosition,true)
+            list.setSelection(playingPosition)
+        }
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
@@ -2034,7 +2403,7 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val options=arrayOf(
-            "Universal aspect ratio: "+(prefs.getString("screen_mode","16:9") ?: "Fit"),
+            "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine",
             "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
@@ -2090,17 +2459,32 @@ class MainActivity: Activity() {
         qualityUpgradeTask?.let{handler.removeCallbacks(it)}
         qualityUpgradeTask=null
         val exo=player ?:return
-        if(qualityMode()!="Auto" && qualityMode()!="Best Available")return
-        val task=Runnable{
-            if(player===exo && active>=0 && exo.playbackState==Player.STATE_READY){
-                exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
-                    .setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
-                    .setForceHighestSupportedBitrate(false)
-                    .build()
+        // Best Available must remain highest quality; never silently revert it to Auto.
+        if(qualityMode()!="Auto")return
+        // Start Auto at a conservative adaptive cap; upgrade only after playback
+        // has actually remained ready, never after a fixed elapsed wall-clock delay.
+        exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE,480)
+            .setForceHighestSupportedBitrate(false).build()
+        val generation=playbackGeneration
+        var stableSamples=0
+        val task=object:Runnable{
+            override fun run(){
+                if(player!==exo || generation!=playbackGeneration || active<0 ||
+                    qualityMode()!="Auto")return
+                if(exo.playbackState==Player.STATE_READY && exo.isPlaying){
+                    stableSamples++
+                }else stableSamples=0
+                if(stableSamples>=3){
+                    exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                        .setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
+                        .setForceHighestSupportedBitrate(false).build()
+                    qualityUpgradeTask=null
+                }else handler.postDelayed(this,1000L)
             }
         }
         qualityUpgradeTask=task
-        handler.postDelayed(task,8000)
+        handler.postDelayed(task,1000L)
     }
     private fun applyQuality(){
         val exo=player ?:return
@@ -2114,8 +2498,7 @@ class MainActivity: Activity() {
         }
         val builder=exo.trackSelectionParameters.buildUpon()
             .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
-        if(mode=="Auto" || mode=="Best Available")builder.setMaxVideoSize(Int.MAX_VALUE,720)
-        builder.setForceHighestSupportedBitrate(false)
+            .setForceHighestSupportedBitrate(mode=="Best Available")
         exo.trackSelectionParameters=builder.build()
     }
     private fun selectQuality(index:Int?=null){
@@ -2124,12 +2507,15 @@ class MainActivity: Activity() {
         val options=if(key!=null)arrayOf("Use universal default")+qualityModes else qualityModes
         val current=if(key!=null)prefs.getString(key,null) else prefs.getString("quality_global","Auto")
         val selected=if(key!=null && current==null)0 else options.indexOf(current).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(if(index!=null)"Picture quality · "+channels[index].name else "Universal picture quality")
+        AlertDialog.Builder(this).setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Universal picture quality")
             .setSingleChoiceItems(options,selected){dialog,choice->
                 val editor=prefs.edit()
                 if(key!=null){
                     if(choice==0)editor.remove(key) else editor.putString(key,options[choice])
-                }else editor.putString("quality_global",options[choice])
+                }else{
+                    editor.putString("quality_global",options[choice])
+                    prefs.all.keys.filter{it.startsWith("quality_channel_")}.forEach{editor.remove(it)}
+                }
                 editor.apply()
                 applyQuality()
                 dialog.dismiss()
@@ -2152,6 +2538,21 @@ class MainActivity: Activity() {
         "Fill / Crop","Zoom 110%","Zoom 125%","Zoom 150%"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
+    private fun prepareVideoView(view:PlayerView){
+        val mode=screenMode()
+        view.resizeMode=resizeMode()
+        view.setBackgroundColor(android.graphics.Color.BLACK)
+        val ratio=when(mode){
+            "16:9"->16f/9f
+            "4:3"->4f/3f
+            "21:9"->21f/9f
+            "1:1"->1f
+            else->0f
+        }
+        if(ratio>0f){
+            view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)?.setAspectRatio(ratio)
+        }
+    }
     private fun applyVideoSize(){
         val mode=screenMode()
         val forcedRatio=when(mode){
@@ -2167,7 +2568,12 @@ class MainActivity: Activity() {
             val format=player?.videoFormat
             val natural=if(format!=null && format.height>0)
                 format.width.toFloat()*format.pixelWidthHeightRatio/format.height else 0f
-            frame?.setAspectRatio(if(forcedRatio>0f)forcedRatio else natural)
+            // Preserve a user-selected ratio even when Media3 updates its video dimensions.
+            if(forcedRatio>0f){
+                frame?.setAspectRatio(forcedRatio)
+            }else if(natural>0f){
+                frame?.setAspectRatio(natural)
+            }
             // The content frame handles fit, crop and stretch; avoid double-scaling.
             view.videoSurfaceView?.let{surface->
                 val zoom=when(mode){
@@ -2217,20 +2623,29 @@ class MainActivity: Activity() {
         var confirmed=false
         fun preview(position:Int){
             pending=position.coerceIn(0,labels.lastIndex)
-            // Only the live preview changes; settings are committed on OK.
             previewScreenMode=if(target!=null && pending==0)universal else labels[pending]
             applyVideoSize()
         }
-        val dialog=AlertDialog.Builder(this)
-            .setTitle(if(target!=null)"Aspect Ratio · "+channels[target].name else "Universal aspect ratio")
-            .setSingleChoiceItems(labels,selected){_,position->preview(position)}
-            .setPositiveButton("OK"){_,_->
-                confirmed=true
-                val editor=prefs.edit()
-                if(target!=null && pending==0)editor.remove(key)
-                else editor.putString(key,labels[pending])
-                editor.apply()
+        fun commit(){
+            confirmed=true
+            val editor=prefs.edit()
+            if(target!=null && pending==0)editor.remove(key)
+            else editor.putString(key,labels[pending])
+            if(target==null){
+                // Universal change wins for aspect ratio; unrelated per-channel settings stay intact.
+                prefs.all.keys.filter{it.startsWith("screen_channel_")}.forEach{editor.remove(it)}
             }
+            editor.apply()
+        }
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(if(target!=null)numberFor(target).toString()+". "+channels[target].name+" Settings — Aspect Ratio" else "Universal aspect ratio")
+            .setSingleChoiceItems(labels,selected){d,position->
+                preview(position)
+                // Android TV remote OK on a list row is a completed selection.
+                commit()
+                d.dismiss()
+            }
+            .setPositiveButton("Apply"){_,_->commit()}
             .setNegativeButton("Cancel",null).create()
         dialog.setOnDismissListener{
             previewScreenMode=null
@@ -2239,6 +2654,7 @@ class MainActivity: Activity() {
         }
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
             list.setItemChecked(selected,true)
             list.setSelection(selected)
             list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
@@ -2248,19 +2664,8 @@ class MainActivity: Activity() {
                 }
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
-            list.setOnKeyListener{_,code,event->
-                if(event.action!=KeyEvent.ACTION_DOWN)false
-                else when(code){
-                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER->{
-                        // Center selects the highlighted ratio; explicit OK saves it.
-                        preview(list.selectedItemPosition.takeIf{it>=0} ?: pending)
-                        list.setItemChecked(pending,true)
-                        true
-                    }
-                    KeyEvent.KEYCODE_BACK->{dialog.dismiss();true}
-                    else->false // Let ListView handle Up/Down and fire onItemSelected.
-                }
-            }
+            // Do not consume DPAD_CENTER: ListView must dispatch its normal click,
+            // which commits the previewed ratio and closes the menu.
             list.requestFocus()
         }
         showSideDialog(dialog)
@@ -2275,106 +2680,9 @@ class MainActivity: Activity() {
     }
     private fun returnToPreviousChannel(){
         val url=previousChannelUrl ?:run{showBanner("No previous channel");return}
-        val index=channels.indexOfFirst{it.url==url}
+        val index=channels.indexOfFirst{it.url==url && (previousChannelIdentity==null || id(it)==previousChannelIdentity)}
         if(index>=0 && index!=active)playIndex(index)
         else showBanner("Previous channel is unavailable")
-    }
-    // Media3 race is confined to the currently requested channel. Probes never
-    // attach a view, and are released before the winning URL starts normally.
-    private val racePlayers=mutableListOf<ExoPlayer>()
-    private var raceToken=0
-    private var raceBypass=false
-    private fun cancelMedia3Race(){
-        raceToken++
-        racePlayers.toList().forEach{try{it.release()}catch(_:Exception){}}
-        racePlayers.clear()
-    }
-    private fun isWebStream(c:Channel):Boolean{
-        val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
-        val h=u.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.") ?: ""
-        return h=="youtube.com" || h=="youtube-nocookie.com" || h=="youtu.be" ||
-            c.webChannel.isNotBlank() || (h=="bhoomtv.org" && u.path?.startsWith("/live/")==true)
-    }
-    private fun raceMedia3(index:Int):Boolean{
-        val c=channels.getOrNull(index) ?:return false
-        if(fallbackEngineOverride!=null || channelKey(c) in playedThisSession || prefs.getString("working_url_"+channelKey(c),null)!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
-            prefs.getString("manual_url_"+channelKey(c),null)!=null)return false
-        val options=alternateIndices(index).filter{!isWebStream(channels[it])}
-        if(options.size<2 || isWebStream(c))return false
-        stopPlayback()
-        val token=++raceToken
-        val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
-        active=index
-        videoScreen=screen
-        setContentView(screen)
-        window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
-        showBanner("Checking "+options.size+" streams simultaneously…")
-        var remaining=options.size
-        var finished=false
-        fun failed(){
-            if(token!=raceToken || finished)return
-            remaining--
-            if(remaining==0){
-                finished=true
-                cancelMedia3Race()
-                fallbackEngineOverride="LibVLC"
-                raceBypass=true
-                playIndex(index)
-            }
-        }
-        options.forEach{candidate->
-            if(token!=raceToken)return@forEach
-            val stream=channels[candidate]
-            try{
-                val factory=DefaultHttpDataSource.Factory()
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(6500).setReadTimeoutMs(8500)
-                    .setUserAgent(stream.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
-                    .setDefaultRequestProperties(stream.headers.filterKeys{!it.equals("User-Agent",true)})
-                val buffer=bufferValues()
-                val control=DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(buffer[0],buffer[1],buffer[2],buffer[3]).build()
-                val probe=ExoPlayer.Builder(this)
-                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
-                    .setLoadControl(control).build()
-                racePlayers.add(probe)
-                var completed=false
-                val timeout=Runnable{
-                    if(!completed && token==raceToken){
-                        completed=true
-                        failed()
-                    }
-                }
-                handler.postDelayed(timeout,10000L)
-                probe.addListener(object:Player.Listener{
-                    override fun onPlaybackStateChanged(state:Int){
-                        if(completed || token!=raceToken || finished)return
-                        if(state==Player.STATE_READY){
-                            completed=true
-                            finished=true
-                            handler.removeCallbacks(timeout)
-                            cancelMedia3Race()
-                            fallbackEngineOverride="Media3"
-                            raceBypass=true
-                            playIndex(candidate)
-                        }
-                    }
-                    override fun onPlayerError(error:PlaybackException){
-                        if(completed || token!=raceToken)return
-                        completed=true
-                        handler.removeCallbacks(timeout)
-                        failed()
-                    }
-                })
-                probe.setMediaItem(MediaItem.fromUri(stream.url))
-                probe.prepare()
-                probe.playWhenReady=false
-            }catch(e:Exception){
-                android.util.Log.w("HomeTV","Media3 race failed for "+stream.name,e)
-                failed()
-            }
-        }
-        return true
     }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
@@ -2383,31 +2691,30 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
-        val bypassRace=raceBypass
-        raceBypass=false
-        if(!bypassRace && raceMedia3(index))return
         playbackGeneration++
         autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
-        if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
+        if(active in channels.indices && active!=index && !sameChannel(channels[active],c)){
+            previousChannelUrl=channels[active].url
+            previousChannelIdentity=id(channels[active])
+        }
         val sessionKey=channelKey(c)
-        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();if(!bypassRace)fallbackEngineOverride=null}
-        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;if(!bypassRace)fallbackEngineOverride=null}
-        // Preserve the successful engine when a playback retry rebuilds the view.
-        if(workingUrlThisSession[sessionKey]==c.url)
-            fallbackEngineOverride=workingEngineThisSession[sessionKey]
+        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();fallbackEngineOverride=null}
+        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).apply()
+        rememberRecentChannel(c)
         screenInfoOnStart(index)
         window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
         setContentView(screen)
+        if(alternateIndices(index).size>1)checkChannelAlternativesInParallel(index)
         val youtubeUri=try{
             val uri=Uri.parse(c.url)
             val host=uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.")
@@ -2428,8 +2735,55 @@ class MainActivity: Activity() {
             val u=Uri.parse(c.url)
             val h=u.host?.lowercase()?.removePrefix("www.") ?: ""
             (u.scheme=="http" || u.scheme=="https") &&
-                (c.webChannel.isNotBlank() || (h=="bhoomtv.org" && u.path?.startsWith("/live/")==true))
+                c.webChannel.isNotBlank()
         }catch(_:Exception){false}
+        if(youtubeUri!=null && !webPage && prefs.getString("youtube_smart_mode","hybrid")!="webview") {
+            val generation=playbackGeneration
+            val fallback=Runnable {
+                if(active==index && videoScreen===screen && playbackGeneration==generation) {
+                    prefs.edit().putString("youtube_smart_mode","webview").apply()
+                    playIndex(index)
+                    prefs.edit().putString("youtube_smart_mode","hybrid").apply()
+                }
+            }
+            val completed=java.util.concurrent.atomic.AtomicBoolean(false)
+            handler.postDelayed({
+                if(completed.compareAndSet(false,true)) fallback.run()
+            },8000L)
+            thread {
+                val stream=YouTubeStreamResolver.resolve(c.url)
+                handler.post {
+                    if(completed.compareAndSet(false,true) && active==index && videoScreen===screen && playbackGeneration==generation) {
+                        if(stream==null) fallback.run()
+                        else {
+                            try {
+                                val exo=ExoPlayer.Builder(this).build()
+                                player=exo
+                                val view=PlayerView(this).apply {
+                                    player=exo
+                                    useController=false
+                                    resizeMode=resizeMode()
+                                }
+                                currentPlayerView=view
+                                prepareVideoView(view)
+                                screen.addView(view,FrameLayout.LayoutParams(-1,-1))
+                                exo.addListener(object:Player.Listener {
+                                    override fun onPlayerError(error:PlaybackException) { fallback.run() }
+                                })
+                                applyVideoSize()
+                                exo.setMediaItem(MediaItem.fromUri(stream.url))
+                                exo.prepare()
+                                exo.play()
+                            } catch(_:Exception) { fallback.run() }
+                        }
+                    }
+                }
+            }
+            updateClock()
+            screen.requestFocus()
+            showChannelInfo(index)
+            return
+        }
         if(youtubeUri!=null || webPage){
             // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
             // YouTube controls whether its site permits autoplay or full-screen video.
@@ -2559,6 +2913,7 @@ class MainActivity: Activity() {
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
             currentPlayerView=view
+            prepareVideoView(view)
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             applyVideoSize()
             val startupTimeout=Runnable{
@@ -2569,14 +2924,31 @@ class MainActivity: Activity() {
                 }
             }
             startupWatchdog=startupTimeout
-            handler.postDelayed(startupTimeout,10000L)
+            handler.postDelayed(startupTimeout,6000L)
+            var wasReady=false
+            var bufferingRecoveryTask:Runnable?=null
             exo.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_BUFFERING){
                         autoBufferStableSince=0L
                         autoBufferStalled()
+                        if(wasReady){
+                            bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
+                            val recovery=Runnable{
+                                if(active==index && videoScreen===screen && player===exo &&
+                                    exo.playbackState==Player.STATE_BUFFERING){
+                                    handleEngineFailure(index,screen)
+                                }
+                            }
+                            bufferingRecoveryTask=recovery
+                            handler.postDelayed(recovery,10000L)
+                        }
+                    }else{
+                        bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
+                        bufferingRecoveryTask=null
                     }
                     if(state==Player.STATE_READY){
+                        wasReady=true
                         autoBufferHealthy()
                         retryCount=0
                         handler.postDelayed({
@@ -2610,7 +2982,7 @@ class MainActivity: Activity() {
     }
     private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
         if(active!=index || videoScreen!==screen)return
-        if(workingUrlThisSession[channelKey(c)]!=c.url && tryNextAlternative(index))return
+        if(tryNextAlternative(index))return
         if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
             retryCount++
             showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/2)")
@@ -2646,7 +3018,7 @@ class MainActivity: Activity() {
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
                     if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
-                        android.os.SystemClock.elapsedRealtime()-lastHealthy>18000L){
+                        android.os.SystemClock.elapsedRealtime()-lastHealthy>10000L){
                         failed=true
                         autoBufferStalled()
                         android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
@@ -2697,7 +3069,7 @@ class MainActivity: Activity() {
                     }
                 }
             }
-            handler.postDelayed(watchdog,9000)
+            handler.postDelayed(watchdog,6000L)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
@@ -2716,8 +3088,9 @@ class MainActivity: Activity() {
         surfingDirection=if(delta>=0)1 else -1
         val available=surfingIndices()
         if(available.isEmpty())return
-        val anchor=channels.getOrNull(active)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
-        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
+        val anchor=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        val next=if(delta>0)available[(anchor+1).mod(available.size)]
+            else available[(anchor-1).mod(available.size)]
         playIndex(preferredChannel(next))
     }
     private fun resumeLast(){
@@ -2731,103 +3104,139 @@ class MainActivity: Activity() {
     }
     private fun liveSettings(){
         if(active<0){settings();return}
-        // All settings are available from the remote Settings button without
-        // leaving playback. Reuse the same preference keys and controls.
         val items=arrayOf(
-            "Surrender License / Change TV",
-            "Manage playlists",
-            "Favorites",
-            "Hidden channels",
-            "EPG / XMLTV guide",
-            "Information transparency: "+prefs.getInt("information_opacity",65)+"%",
-            "Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF",
             "Playback engine: "+(prefs.getString("engine","Media3")?:"Media3"),
-            "Live video on Up / Down preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF",
             "Buffering: "+bufferProfile(),
-            "Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
-            "Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_unavailable",true))"ON" else "OFF",
-            "Manage locked channels / groups",
-            "Channels skipped by Up/Down and CH+/−",
-            "Set / change lock password",
-            "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
-            "Open on launch: "+(prefs.getString("launch_screen","Last channel")?:"Last channel"),
-            "Try launch at device boot: "+if(prefs.getBoolean("boot",false))"ON" else "OFF",
             "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
-            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"16:9"),
+            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"Fit"),
+            "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
+            "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
             "Date & time overlay",
+            "Manage playlists (leave playback)",
             "Home screen (stop playback)",
             "Back to TV"
         )
-        val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — All Settings")
+        val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
                 when(choice){
-                    0->AlertDialog.Builder(this).setTitle("Surrender license?")
-                        .setMessage("Changing the licensed TV will stop playback.")
-                        .setPositiveButton("Continue"){_,_->surrenderLicense()}
-                        .setNegativeButton("Cancel",null).show()
-                    1->AlertDialog.Builder(this).setTitle("Leave live TV?")
-                        .setMessage("Managing playlists will stop the current channel.")
-                        .setPositiveButton("Continue"){_,_->managePlaylists()}
-                        .setNegativeButton("Stay on TV",null).show()
-                    2->favorites()
-                    3->hiddenChannels()
-                    4->configureEpg()
-                    5->chooseInformationTransparency()
-                    6->{prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply();liveSettings()}
-                    7->{
+                    0->{
                         val choices=arrayOf("Auto","Media3","LibVLC")
                         AlertDialog.Builder(this).setTitle("Default playback engine")
                             .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3")).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putString("engine",choices[i]).apply()
-                                dialog.dismiss();liveSettings()
+                                dialog.dismiss()
+                                showBanner("Playback engine saved for next channel")
                             }.setNegativeButton("Cancel",null).show()
                     }
-                    8->{prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply();liveSettings()}
-                    9->chooseBufferProfile()
-                    10->{prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();liveSettings()}
-                    11->{prefs.edit().putBoolean("auto_skip_unavailable",!prefs.getBoolean("auto_skip_unavailable",true)).apply();liveSettings()}
-                    12->manageLockedChannels()
-                    13->manageSkippedChannels()
-                    14->changeLockPassword()
-                    15->{prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();liveSettings()}
-                    16->{
-                        val choices=arrayOf("Home","Last channel","Channels")
-                        AlertDialog.Builder(this).setTitle("When HomeTV opens")
-                            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel")).coerceAtLeast(0)){dialog,i->
-                                prefs.edit().putString("launch_screen",choices[i]).apply()
-                                dialog.dismiss();liveSettings()
-                            }.setNegativeButton("Cancel",null).show()
+                    1->chooseBufferProfile()
+                    2->selectQuality(null)
+                    3->selectScreenMode(null)
+                    4->{
+                        prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply()
+                        showBanner("Auto-reconnect setting saved")
                     }
-                    17->{prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();liveSettings()}
-                    18->selectQuality(null)
-                    19->selectScreenMode(null)
-                    20->clockSettings()
-                    21->showHome()
+                    5->{
+                        prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply()
+                        showBanner("Resume setting saved")
+                    }
+                    6->clockSettings()
+                    7->AlertDialog.Builder(this).setTitle("Leave live TV?")
+                        .setMessage("Managing playlists will stop the current channel.")
+                        .setPositiveButton("Continue"){_,_->managePlaylists()}
+                        .setNegativeButton("Stay on TV",null).show()
+                    8->showHome()
                 }
-            }.setNegativeButton("Back to TV",null).create()
+            }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
     }
-    private fun changeLockPassword(){
-        val field=EditText(this).apply{
-            hint="Any letters or digits (no minimum length)"
-            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+    private fun exportSettings(){
+        val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
+        val data=JSONObject()
+        prefs.all.forEach{(key,value)->
+            if(key in excluded || key.startsWith("license_") ||
+                key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
+                key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))return@forEach
+            when(value){
+                is String->data.put(key,JSONObject().put("type","string").put("value",value))
+                is Boolean->data.put(key,JSONObject().put("type","boolean").put("value",value))
+                is Int->data.put(key,JSONObject().put("type","int").put("value",value))
+                is Long->data.put(key,JSONObject().put("type","long").put("value",value))
+                is Float->data.put(key,JSONObject().put("type","float").put("value",value.toDouble()))
+                is Set<*>->data.put(key,JSONObject().put("type","strings").put("value",JSONArray(value.filterIsInstance<String>())))
+            }
         }
-        val prompt={
-            AlertDialog.Builder(this).setTitle("New lock password").setView(field)
-                .setPositiveButton("Save"){_,_->
-                    val value=field.text.toString()
-                    if(value.isNotEmpty()){
-                        prefs.edit().putString("pin",hash(value)).apply()
-                        Toast.makeText(this,"Lock password saved",Toast.LENGTH_SHORT).show()
-                    }else Toast.makeText(this,"Password cannot be empty",Toast.LENGTH_SHORT).show()
-                }.setNegativeButton("Cancel",null).show()
+        val payload=JSONObject().put("format","HomeTV-settings-v1").put("settings",data).toString(2)
+        val intent=Intent(Intent.ACTION_SEND).apply{
+            type="text/plain";putExtra(Intent.EXTRA_SUBJECT,"HomeTV settings backup")
+            putExtra(Intent.EXTRA_TEXT,payload)
         }
-        if(prefs.contains("pin"))requirePin{prompt()} else prompt()
+        startActivity(Intent.createChooser(intent,"Export HomeTV settings"))
+    }
+    private fun importSettings(){
+        val input=EditText(this).apply{
+            hint="Paste HomeTV-settings-v1 JSON backup"
+            minLines=6;maxLines=12;setSingleLine(false)
+        }
+        AlertDialog.Builder(this).setTitle("Restore settings (not license or PIN)")
+            .setView(input).setPositiveButton("Restore"){_,_->
+                try{
+                    val backup=JSONObject(input.text.toString())
+                    require(backup.optString("format")=="HomeTV-settings-v1")
+                    val values=backup.getJSONObject("settings")
+                    val edit=prefs.edit()
+                    val iterator=values.keys()
+                    var count=0
+                    while(iterator.hasNext()){
+                        val key=iterator.next()
+                        if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
+                            key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
+                            key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
+                        val item=values.getJSONObject(key)
+                        when(item.getString("type")){
+                            "string"->edit.putString(key,item.getString("value"))
+                            "boolean"->edit.putBoolean(key,item.getBoolean("value"))
+                            "int"->edit.putInt(key,item.getInt("value"))
+                            "long"->edit.putLong(key,item.getLong("value"))
+                            "float"->edit.putFloat(key,item.getDouble("value").toFloat())
+                            "strings"->{
+                                val arr=item.getJSONArray("value")
+                                edit.putStringSet(key,(0 until arr.length()).map{arr.getString(it)}.toSet())
+                            }
+                            else->continue
+                        }
+                        count++
+                    }
+                    edit.apply()
+                    Toast.makeText(this,"Restored "+count+" settings. Restart HomeTV to apply all changes.",Toast.LENGTH_LONG).show()
+                }catch(e:Exception){
+                    Toast.makeText(this,"Invalid backup: "+e.message,Toast.LENGTH_LONG).show()
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+    private fun showPlaybackDiagnostics(){
+        val current=channels.getOrNull(active)
+        val lines=listOf(
+            "Channel: "+(current?.name ?: "None"),
+            "Source: "+(current?.source ?: "None"),
+            "Playback engine: "+(current?.let{engineFor(it)} ?: "Not playing"),
+            "Buffering profile: "+bufferProfile(),
+            "Auto reconnect: "+prefs.getBoolean("auto_reconnect",true),
+            "Background checked URLs: "+probeReachable.size,
+            "Background unavailable URLs: "+probeReachable.values.count{!it},
+            "Retry attempts: "+retryCount,
+            "Channel alternatives attempted: "+alternativeAttempted.size
+        )
+        AlertDialog.Builder(this).setTitle("Playback diagnostics")
+            .setMessage(lines.joinToString("\\n"))
+            .setPositiveButton("Close",null).show()
     }
     private fun settings(){
         reset("HomeTV Settings")
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
+        root.addView(button("Export settings backup"){exportSettings()})
+        root.addView(button("Restore settings backup"){importSettings()})
+        root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
@@ -2849,17 +3258,38 @@ class MainActivity: Activity() {
         })
         root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
+        root.addView(button("Background URL checking: "+if(prefs.getBoolean("background_url_checks",false))"ON" else "OFF"){
+            val enabled=!prefs.getBoolean("background_url_checks",false)
+            prefs.edit().putBoolean("background_url_checks",enabled).apply()
+            startBackgroundChannelChecks()
+            settings()
+        })
+        root.addView(button("YouTube Smart Playback: "+if(prefs.getString("youtube_smart_mode","hybrid")=="webview")"OFF (WebView)" else "ON (Native first)"){
+            val enabled=prefs.getString("youtube_smart_mode","hybrid")=="webview"
+            prefs.edit().putString("youtube_smart_mode",if(enabled)"hybrid" else "webview").apply()
+            settings()
+        })
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
-        root.addView(button("Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_unavailable",true))"ON" else "OFF"){
-            prefs.edit().putBoolean("auto_skip_unavailable",!prefs.getBoolean("auto_skip_unavailable",true)).apply()
-            settings()
-        })
-        root.addView(label("ON: Up/Down and CH+/− skip a channel only after all its URLs fail with both Media3 and LibVLC. OFF: Keep failed channels in channel surfing. The current channel is never changed automatically."))
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
-        root.addView(button("Set / change lock password"){changeLockPassword()})
+        root.addView(button("Set / change lock password"){
+            val field=EditText(this).apply{
+                hint="Any letters or digits (no minimum length)"
+                inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            val save:()->Unit={
+                val value=field.text.toString()
+                if(value.isNotEmpty()){
+                    prefs.edit().putString("pin",hash(value)).apply()
+                    Toast.makeText(this,"Lock password saved",Toast.LENGTH_SHORT).show()
+                }else Toast.makeText(this,"Password cannot be empty",Toast.LENGTH_SHORT).show()
+            }
+            val prompt={AlertDialog.Builder(this).setTitle("New lock password").setView(field)
+                .setPositiveButton("Save"){_,_->save()}.setNegativeButton("Cancel",null).show()}
+            if(prefs.contains("pin"))requirePin{prompt()} else prompt()
+        })
         root.addView(button("Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF"){
             prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();settings()
         })
@@ -2923,10 +3353,9 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
-        // Dialog windows own their remote navigation and OK/Enter events.
-        // Never interpret a dialog selection as a channel command.
+        // Give a visible AlertDialog its own remote OK and directional navigation.
+        // Avoid processing dialog keys as channel commands in the Activity.
         if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
-        // Android TV remotes may repeat OK while held; execute a choice once.
         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount>0 &&
             (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
              event.keyCode==KeyEvent.KEYCODE_ENTER ||
@@ -2993,7 +3422,8 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
-        cancelMedia3Race()
+        networkRecoveryTask?.let{handler.removeCallbacks(it)}
+        networkRecoveryTask=null
         closeVideoPreview()
         playbackGeneration++
         startupWatchdog?.let{handler.removeCallbacks(it)}
