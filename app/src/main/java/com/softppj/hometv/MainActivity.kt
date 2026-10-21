@@ -1522,6 +1522,16 @@ class MainActivity: Activity() {
             player?.playbackState==Player.STATE_IDLE)
         val limit=if(busy)1 else 2
         while(probeInFlight<limit && probeQueue.isNotEmpty()){
+            // Re-rank outstanding checks whenever CH+/CH- changes direction.
+            val anchor=active.coerceAtLeast(0)
+            val count=channels.size.coerceAtLeast(1)
+            val pending=probeQueue.toList()
+            probeQueue.clear()
+            pending.sortedBy{candidate->
+                val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+                if(surfingDirection<0)(anchor-position+count)%count
+                else (position-anchor+count)%count
+            }.forEach{probeQueue.addLast(it)}
             val channel=probeQueue.removeFirst()
             val uri=channel.url.lowercase(java.util.Locale.ROOT)
             if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
