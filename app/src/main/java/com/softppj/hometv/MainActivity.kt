@@ -2245,7 +2245,12 @@ class MainActivity: Activity() {
                 close();true
             }else false
         }
-        list.setSelection(available.indexOf(active).coerceAtLeast(0))
+        val playingPosition=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        if(playingPosition>=0){
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(playingPosition,true)
+            list.setSelection(playingPosition)
+        }
         list.requestFocus()
     }
     private fun showLeftNavigation(){
