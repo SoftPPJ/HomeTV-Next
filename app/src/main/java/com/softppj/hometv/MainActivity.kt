@@ -1568,21 +1568,6 @@ class MainActivity: Activity() {
         }
     }
 
-    private fun prioritizeRequestedChannel(){
-        // Channel changes take priority over optional background checks.
-        // Invalidate outstanding scan results; existing HTTP probes finish independently.
-        backgroundProbeGeneration++
-        periodicProbeTask?.let{handler.removeCallbacks(it)}
-        periodicProbeTask=null
-        probeQueue.clear()
-        probeInFlight=0
-        vlcProbeQueue.clear()
-        // Resume optional checking only after the requested channel has had time to start.
-        if(prefs.getBoolean("background_url_checks",false)){
-            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
-            handler.postDelayed(periodicProbeTask!!,12000L)
-        }
-    }
     private fun startBackgroundChannelChecks(){
         if(!licenseReady)return
         backgroundProbeGeneration++
@@ -2731,7 +2716,7 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
-        prioritizeRequestedChannel()
+        // Keep channel changes independent of optional background probes.
         playbackGeneration++
         autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
