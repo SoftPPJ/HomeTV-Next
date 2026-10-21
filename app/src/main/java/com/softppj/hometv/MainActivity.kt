@@ -2240,6 +2240,102 @@ class MainActivity: Activity() {
         if(index>=0 && index!=active)playIndex(index)
         else showBanner("Previous channel is unavailable")
     }
+    // Media3 race is confined to the currently requested channel. Probes never
+    // attach a view, and are released before the winning URL starts normally.
+    private val racePlayers=mutableListOf<ExoPlayer>()
+    private var raceToken=0
+    private var raceBypass=false
+    private fun cancelMedia3Race(){
+        raceToken++
+        racePlayers.toList().forEach{try{it.release()}catch(_:Exception){}}
+        racePlayers.clear()
+    }
+    private fun isWebStream(c:Channel):Boolean{
+        val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
+        val h=u.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.") ?: ""
+        return h=="youtube.com" || h=="youtube-nocookie.com" || h=="youtu.be" ||
+            c.webChannel.isNotBlank() || (h=="bhoomtv.org" && u.path?.startsWith("/live/")==true)
+    }
+    private fun raceMedia3(index:Int):Boolean{
+        val c=channels.getOrNull(index) ?:return false
+        if(fallbackEngineOverride!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC")return false
+        val options=alternateIndices(index).filter{!isWebStream(channels[it])}
+        if(options.size<2 || isWebStream(c))return false
+        stopPlayback()
+        val token=++raceToken
+        val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
+        active=index
+        videoScreen=screen
+        setContentView(screen)
+        window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+        showBanner("Checking "+options.size+" streams simultaneously…")
+        var remaining=options.size
+        var finished=false
+        fun failed(){
+            if(token!=raceToken || finished)return
+            remaining--
+            if(remaining==0){
+                finished=true
+                cancelMedia3Race()
+                fallbackEngineOverride="LibVLC"
+                raceBypass=true
+                playIndex(index)
+            }
+        }
+        options.forEach{candidate->
+            if(token!=raceToken)return@forEach
+            val stream=channels[candidate]
+            try{
+                val factory=DefaultHttpDataSource.Factory()
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(6500).setReadTimeoutMs(8500)
+                    .setUserAgent(stream.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
+                    .setDefaultRequestProperties(stream.headers.filterKeys{!it.equals("User-Agent",true)})
+                val buffer=bufferValues()
+                val control=DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(buffer[0],buffer[1],buffer[2],buffer[3]).build()
+                val probe=ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
+                    .setLoadControl(control).build()
+                racePlayers.add(probe)
+                var completed=false
+                val timeout=Runnable{
+                    if(!completed && token==raceToken){
+                        completed=true
+                        failed()
+                    }
+                }
+                handler.postDelayed(timeout,10000L)
+                probe.addListener(object:Player.Listener{
+                    override fun onPlaybackStateChanged(state:Int){
+                        if(completed || token!=raceToken || finished)return
+                        if(state==Player.STATE_READY){
+                            completed=true
+                            finished=true
+                            handler.removeCallbacks(timeout)
+                            cancelMedia3Race()
+                            fallbackEngineOverride="Media3"
+                            raceBypass=true
+                            playIndex(candidate)
+                        }
+                    }
+                    override fun onPlayerError(error:PlaybackException){
+                        if(completed || token!=raceToken)return
+                        completed=true
+                        handler.removeCallbacks(timeout)
+                        failed()
+                    }
+                })
+                probe.setMediaItem(MediaItem.fromUri(stream.url))
+                probe.prepare()
+                probe.playWhenReady=false
+            }catch(e:Exception){
+                android.util.Log.w("HomeTV","Media3 race failed for "+stream.name,e)
+                failed()
+            }
+        }
+        return true
+    }
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -2247,6 +2343,9 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        val bypassRace=raceBypass
+        raceBypass=false
+        if(!bypassRace && raceMedia3(index))return
         playbackGeneration++
         autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
@@ -2805,6 +2904,7 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        cancelMedia3Race()
         closeVideoPreview()
         playbackGeneration++
         startupWatchdog?.let{handler.removeCallbacks(it)}
