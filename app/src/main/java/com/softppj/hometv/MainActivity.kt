@@ -575,7 +575,14 @@ class MainActivity: Activity() {
         prefs.edit().putString("epg_tune_schedules",keep.toString()).apply()
         if(target!=null){
             val index=channels.indexOfFirst{it.url==target}
-            if(index>=0)playIndex(preferredChannel(index))
+            if(index>=0){
+                val channelName=channels[index].name
+                showSideDialog(AlertDialog.Builder(this)
+                    .setTitle("Programme reminder")
+                    .setMessage("The scheduled programme on "+channelName+" is starting. Switch to this channel?")
+                    .setPositiveButton("OK"){_,_->playIndex(preferredChannel(index))}
+                    .setNegativeButton("Stay here",null).create())
+            }
         }
         armEpgTune()
     }
@@ -2012,11 +2019,11 @@ class MainActivity: Activity() {
                 programmeList(channel).filter{it.start>now}.minByOrNull{it.start} else null
             text=buildString{
                 append(numberFor(index)).append(". ").append(channel.name)
-                append("\\nPlayer: ").append(playing)
-                if(current!=null)append("\\nNow: ").append(current.title)
+                append("\nPlayer: ").append(playing)
+                if(current!=null)append("\nNow: ").append(current.title)
                     .append(" (").append(programmeTime(current.start)).append(" – ")
                     .append(programmeTime(current.end)).append(")")
-                if(next!=null)append("\\nNext: ").append(next.title)
+                if(next!=null)append("\nNext: ").append(next.title)
                     .append(" (").append(programmeTime(next.start)).append(" – ")
                     .append(programmeTime(next.end)).append(")")
             }
