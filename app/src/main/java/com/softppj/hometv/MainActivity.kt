@@ -399,7 +399,6 @@ class MainActivity: Activity() {
             fallbackEngineOverride=null
             return true
         }
-        val key=channelKey(c)
         val allUrls=alternateIndices(index).map{channels[it].url}.distinct()
         // Skip in automatic surfing only when EVERY URL has exhausted BOTH engines.
         // Never remove the channel from the guide, and never jump away from
