@@ -547,7 +547,8 @@ class MainActivity: Activity() {
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
-        return marks+numberFor(index)+". "+c.name
+        val hidden=if(isManuallyHidden(c) || isGroupHidden(c.group))"🙈 HIDDEN · " else ""
+        return hidden+marks+numberFor(index)+". "+c.name
     }
     private fun searchChannels(){
         val input=EditText(this).apply{hint="Channel name, group or current programme"}
@@ -958,18 +959,18 @@ class MainActivity: Activity() {
         }
         list.setOnItemClickListener{_,_,position,_->
             val selected=indices[position]
-            if(title=="Hidden channels" && (isManuallyHidden(channels[selected]) || isGroupHidden(channels[selected].group)))
+            if(isManuallyHidden(channels[selected]) || isGroupHidden(channels[selected].group))
                 channelOptions(selected)
             else playIndex(preferredChannel(selected))
         }
         list.setOnItemLongClickListener{_,_,position,_->
             val i=indices[position]
-            val options=arrayOf("Channel Settings","Move Up","Move Down")
+            val options=arrayOf(if(isManuallyHidden(channels[i]))"Unhide channel" else "Channel Settings","Move Up","Move Down")
             showSideDialog(AlertDialog.Builder(this)
                 .setTitle(numberFor(i).toString()+". "+channels[i].name+" Settings")
                 .setItems(options){_,selection->
                     when(selection){
-                        0->channelOptions(i)
+                        0->{if(isManuallyHidden(channels[i])){toggleManualHide(channels[i]);channelCollection(title,indices)} else channelOptions(i)}
                         1->moveChannelInList(title,indices,position,-1)
                         2->moveChannelInList(title,indices,position,1)
                     }
@@ -1000,7 +1001,7 @@ class MainActivity: Activity() {
                 }
             }
         }
-        root.addView(label("Long press: Channel Settings · Move Up · Move Down"))
+        root.addView(label("Hidden channels remain listed. Long press to unhide · Move Up · Move Down"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
@@ -2287,7 +2288,7 @@ class MainActivity: Activity() {
             setPadding(16,16,8,12)
         })
         val list=ListView(this)
-        val available=visibleIndices()
+        val available=channelNumbers().filter{!isGroupHidden(channels[it].group)}
         list.adapter=object:android.widget.BaseAdapter(){
             override fun getCount()=available.size
             override fun getItem(position:Int):Any=channels[available[position]]
@@ -2300,8 +2301,20 @@ class MainActivity: Activity() {
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
-        list.setOnItemClickListener{_,_,position,_->close();playIndex(preferredChannel(available[position]))}
-        list.setOnItemLongClickListener{_,_,position,_->close();channelOptions(available[position]);true}
+        list.setOnItemClickListener{_,_,position,_->
+            val selected=available[position]
+            close()
+            if(isManuallyHidden(channels[selected]))channelOptions(selected)
+            else playIndex(preferredChannel(selected))
+        }
+        list.setOnItemLongClickListener{_,_,position,_->
+            val selected=available[position]
+            if(isManuallyHidden(channels[selected])){
+                toggleManualHide(channels[selected])
+                (list.adapter as android.widget.BaseAdapter).notifyDataSetChanged()
+            }else{close();channelOptions(selected)}
+            true
+        }
         list.setOnKeyListener{_,code,event->
             if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){
                 close();showLeftNavigation();true
