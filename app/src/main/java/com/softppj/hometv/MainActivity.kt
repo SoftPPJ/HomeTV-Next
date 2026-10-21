@@ -2648,6 +2648,51 @@ class MainActivity: Activity() {
             (u.scheme=="http" || u.scheme=="https") &&
                 c.webChannel.isNotBlank()
         }catch(_:Exception){false}
+        if(youtubeUri!=null && !webPage && prefs.getString("youtube_smart_mode","hybrid")!="webview") {
+            val generation=playbackGeneration
+            val fallback=Runnable {
+                if(active==index && videoScreen===screen && playbackGeneration==generation) {
+                    prefs.edit().putString("youtube_smart_mode","webview").apply()
+                    playIndex(index)
+                    prefs.edit().putString("youtube_smart_mode","hybrid").apply()
+                }
+            }
+            val completed=java.util.concurrent.atomic.AtomicBoolean(false)
+            handler.postDelayed({
+                if(completed.compareAndSet(false,true)) fallback.run()
+            },8000L)
+            thread {
+                val stream=YouTubeStreamResolver.resolve(c.url)
+                handler.post {
+                    if(completed.compareAndSet(false,true) && active==index && videoScreen===screen && playbackGeneration==generation) {
+                        if(stream==null) fallback.run()
+                        else {
+                            try {
+                                val exo=ExoPlayer.Builder(this).build()
+                                player=exo
+                                val view=PlayerView(this).apply {
+                                    player=exo
+                                    useController=false
+                                    resizeMode=resizeMode()
+                                }
+                                currentPlayerView=view
+                                screen.addView(view,FrameLayout.LayoutParams(-1,-1))
+                                exo.addListener(object:Player.Listener {
+                                    override fun onPlayerError(error:PlaybackException) { fallback.run() }
+                                })
+                                exo.setMediaItem(MediaItem.fromUri(stream.url))
+                                exo.prepare()
+                                exo.play()
+                            } catch(_:Exception) { fallback.run() }
+                        }
+                    }
+                }
+            }
+            updateClock()
+            screen.requestFocus()
+            showChannelInfo(index)
+            return
+        }
         if(youtubeUri!=null || webPage){
             // Use the full-screen YouTube embed for video IDs instead of the watch webpage.
             // YouTube controls whether its site permits autoplay or full-screen video.
