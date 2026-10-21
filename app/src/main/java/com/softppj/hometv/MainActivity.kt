@@ -412,25 +412,27 @@ class MainActivity: Activity() {
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
         if(current=="LibVLC"){
-            // The saved fallback stopped working: re-evaluate with Media3.
             prefs.edit().remove("libvlc_only_"+hash(c.url)).apply()
         }
-        val other=if(current=="Media3")"LibVLC" else "Media3"
-        if(!tried.contains(other)){
-            fallbackEngineOverride=other
-            showBanner("Trying "+other+" for "+c.name)
-            handler.post{if(active==index && videoScreen===screen)playIndex(index)}
+        // Exhaust all Media3 alternatives before starting the LibVLC pass.
+        // A previously verified working engine is still used first by engineFor.
+        val options=alternateIndices(index)
+        val nextMedia3=options.firstOrNull{
+            !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
+        }
+        val nextVlc=if(nextMedia3==null)options.firstOrNull{
+            !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("LibVLC")
+        }else null
+        val next=nextMedia3 ?: nextVlc
+        if(next!=null){
+            val engine=if(nextMedia3!=null)"Media3" else "LibVLC"
+            fallbackEngineOverride=engine
+            showBanner("Trying "+engine+" alternative for "+c.name)
+            handler.post{if(active==index && videoScreen===screen)playIndex(next)}
             return true
         }
-        // Exhausted both engines: remember this failed URL before moving on.
-        failedUrlsThisSession.add(c.url)
-        if(tryNextAlternative(index)){
-            fallbackEngineOverride=null
-            return true
-        }
-        // Both engines have failed for this URL. Record it before evaluating
-        // other sources; previously this happened only after all alternatives.
-        failedUrlsThisSession.add(c.url)
+        // Every source has now failed with both players.
+        options.forEach{failedUrlsThisSession.add(channels[it].url)}
         val key=channelKey(c)
         val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
         if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
