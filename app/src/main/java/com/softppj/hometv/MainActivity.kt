@@ -256,7 +256,8 @@ class MainActivity: Activity() {
     private var channelRepresentatives=emptyList<Int>()
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
-    private fun channelKey(c:Channel)=c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
+    private fun channelKey(c:Channel)=c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
+        c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
     private fun ensureChannelIndex(){
         if(channelIndexOwner===channels && channelIndexSize==channels.size)return
         val groups=linkedMapOf<String,MutableList<Int>>()
@@ -1347,7 +1348,7 @@ class MainActivity: Activity() {
             }
             workers.forEach{it.join()}
             val updated=refreshed.count{it}
-            val found=results.flatMap{it}.distinctBy{it.name.lowercase()+"|"+it.url}
+            val found=results.flatMap{it}.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
             runOnUiThread{
                 if(forceRebuild && updated==0){
                     Toast.makeText(this,"Refresh failed: could not download any playlist. Saved channels unchanged.",Toast.LENGTH_LONG).show()
@@ -1361,7 +1362,7 @@ class MainActivity: Activity() {
                                 if(file.exists())combined.addAll(parseM3u(file.readText(),p.name))
                             }catch(_:Exception){}
                         }
-                        channels=combined.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
+                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
                     }else channels=found.toMutableList()
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
                 }
@@ -1613,6 +1614,7 @@ class MainActivity: Activity() {
         map[name]=java.net.URLDecoder.decode(value,"UTF-8")
     }
     private fun showChannels(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
         val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
@@ -1626,6 +1628,7 @@ class MainActivity: Activity() {
         root.addView(button("Home"){showHome()})
     }
     private fun showGroup(group:String){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset(group)
         root.addView(button("Lock group"){toggleLock(group,true)})
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
@@ -2156,6 +2159,7 @@ class MainActivity: Activity() {
         }
     }
     private fun showOverlayList(){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it);return}
@@ -2252,6 +2256,7 @@ class MainActivity: Activity() {
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
+        prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val indices=visibleIndices().filter{channels[it].group==group}
