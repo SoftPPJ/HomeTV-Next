@@ -229,6 +229,8 @@ class MainActivity: Activity() {
         val c=channels.getOrNull(index) ?:return index
         ensureChannelIndex()
         val group=channelByKey[channelKey(c)] ?:return index
+        val manual=prefs.getString("manual_url_"+channelKey(c),null)
+        if(manual!=null)group.firstOrNull{channels[it].url==manual}?.let{return it}
         val saved=prefs.getString("working_url_"+channelKey(c),null)
         return group.firstOrNull{channels[it].url==saved && probeReachable[channels[it].url]!=false}
             ?:group.firstOrNull{probeReachable[channels[it].url]==true}
@@ -243,7 +245,8 @@ class MainActivity: Activity() {
         if(engine=="Media3")probeReachable[c.url]=true
         // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
-        if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
+        if(prefs.getString("manual_url_"+channelKey(c),null)==null &&
+            prefs.getString("working_url_"+channelKey(c),null)!=c.url)
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
     }
     private var youtubeUnmuteTask:Runnable?=null
@@ -307,7 +310,10 @@ class MainActivity: Activity() {
         val current=options.indexOf(active)
         alternativeAttempted.clear()
         alternativeSessionKey=null
-        playIndex(options[(current+1)%options.size])
+        val target=options[(current+1)%options.size]
+        prefs.edit().putString("manual_url_"+channelKey(channels[target]),channels[target].url).commit()
+        raceBypass=true
+        playIndex(target)
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
     private fun selectAlternative(index:Int){
@@ -323,6 +329,8 @@ class MainActivity: Activity() {
                 val target=options[choice]
                 alternativeAttempted.clear()
                 alternativeSessionKey=null
+                prefs.edit().putString("manual_url_"+channelKey(channels[target]),channels[target].url).commit()
+                raceBypass=true
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
@@ -2258,7 +2266,8 @@ class MainActivity: Activity() {
     }
     private fun raceMedia3(index:Int):Boolean{
         val c=channels.getOrNull(index) ?:return false
-        if(fallbackEngineOverride!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC")return false
+        if(fallbackEngineOverride!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
+            prefs.getString("manual_url_"+channelKey(c),null)!=null)return false
         val options=alternateIndices(index).filter{!isWebStream(channels[it])}
         if(options.size<2 || isWebStream(c))return false
         stopPlayback()
@@ -2352,8 +2361,8 @@ class MainActivity: Activity() {
         startupWatchdog=null
         if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
         val sessionKey=channelKey(c)
-        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();fallbackEngineOverride=null}
-        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;fallbackEngineOverride=null}
+        if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();if(!bypassRace)fallbackEngineOverride=null}
+        if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url;if(!bypassRace)fallbackEngineOverride=null}
         if(retryUrl!=c.url)retryCount=0
         retryUrl=c.url
         stopPlayback()
