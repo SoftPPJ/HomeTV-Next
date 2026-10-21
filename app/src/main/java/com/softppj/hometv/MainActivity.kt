@@ -1072,9 +1072,28 @@ class MainActivity: Activity() {
         setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root)})
         beginLicensedSession()
     }
+    // One APK supports TV remotes and touch-screen phones.
+    // Auto follows Android's television UI mode; manual overrides are local to the device.
+    private fun deviceProfile():String{
+        val chosen=prefs.getString("device_profile","Auto") ?: "Auto"
+        if(chosen!="Auto")return chosen
+        val mode=(getSystemService(Context.UI_MODE_SERVICE) as android.app.UiModeManager).currentModeType
+        return if(mode==android.content.res.Configuration.UI_MODE_TYPE_TELEVISION)"TV" else "Mobile"
+    }
+    private fun chooseDeviceProfile(){
+        val options=arrayOf("Auto","TV","Mobile")
+        val current=prefs.getString("device_profile","Auto") ?: "Auto"
+        AlertDialog.Builder(this).setTitle("Device layout")
+            .setSingleChoiceItems(options,options.indexOf(current).coerceAtLeast(0)){dialog,which->
+                prefs.edit().putString("device_profile",options[which]).apply()
+                dialog.dismiss()
+                settings()
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
     private fun button(s:String, action:()->Unit)=Button(this).apply {
-        text=s;isAllCaps=false;textSize=17f
+        text=s;isAllCaps=false;textSize=if(deviceProfile()=="Mobile")16f else 17f
+        if(deviceProfile()=="Mobile")minHeight=(48*resources.displayMetrics.density).toInt()
         setTextColor(android.graphics.Color.WHITE)
         backgroundTintList=android.content.res.ColorStateList(
             arrayOf(
@@ -1735,7 +1754,10 @@ class MainActivity: Activity() {
         dialog.show()
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
-            window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
+            window.setLayout(
+                if(deviceProfile()=="Mobile")(resources.displayMetrics.widthPixels*0.94f).toInt()
+                else (resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),
+                WindowManager.LayoutParams.WRAP_CONTENT)
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
@@ -3063,6 +3085,8 @@ class MainActivity: Activity() {
     }
     private fun settings(){
         reset("HomeTV Settings")
+        root.addView(button("Device layout: "+(prefs.getString("device_profile","Auto") ?: "Auto")+
+            " ("+deviceProfile()+")"){chooseDeviceProfile()})
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Export settings backup"){exportSettings()})
