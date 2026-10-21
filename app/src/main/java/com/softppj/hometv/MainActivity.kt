@@ -1482,73 +1482,50 @@ class MainActivity: Activity() {
         // LibVLC is expensive; enqueue only URLs for which Media3 already
         // failed in this scan. No speculative VLC probe for every channel.
         launchNextProbe(generation)
-        launchNextVlcProbe(generation)
     }
+    // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
         if(generation!=backgroundProbeGeneration || !licenseReady)return
-        while(probeInFlight<2 && probeQueue.isNotEmpty()){
+        val busy=active>=0 && (player?.playbackState==Player.STATE_BUFFERING ||
+            player?.playbackState==Player.STATE_IDLE)
+        val limit=if(busy)1 else 2
+        while(probeInFlight<limit && probeQueue.isNotEmpty()){
             val channel=probeQueue.removeFirst()
             val uri=channel.url.lowercase(java.util.Locale.ROOT)
-            // YouTube pages and non-HTTP protocols cannot be validated by Media3 here.
             if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
                 "youtube.com" in uri || "youtu.be" in uri)continue
             probeInFlight++
-            val probe=try{ExoPlayer.Builder(this).build()}catch(e:Exception){
-                probeInFlight--;continue
-            }
-            probePlayers.add(probe)
-            // Never start playback or acquire audio output in background checks.
-            probe.volume=0f
-            probe.trackSelectionParameters=probe.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO,true).build()
-            var completed=false
-            var watchdog:Runnable?=null
-            fun finish(working:Boolean?){
-                if(completed)return
-                completed=true
-                watchdog?.let{handler.removeCallbacks(it)}
-                probePlayers.remove(probe)
-                probe.release()
-                probeInFlight--
-                if(generation!=backgroundProbeGeneration)return
-                if(working!=null){
-                    probeReachable[channel.url]=working
-                    if(working){
-                        // Readiness is positive evidence; timeouts/errors are not
-                        // grounds to erase a previously verified Media3 preference.
-                        prefs.edit().putBoolean("media3_verified_"+hash(channel.url),true).apply()
-                    }
-                    // A definite Media3 error may warrant one LibVLC fallback
-                    // probe. Timeout remains inconclusive, not an offline verdict.
-                    if(working==false && !prefs.getBoolean("libvlc_only_"+hash(channel.url),false)){
-                        vlcProbeQueue.addLast(channel)
-                        launchNextVlcProbe(generation)
-                    }
-                    // Background probing must never declare a channel offline.
-                    // Do not unhide a failed-start channel until the next login.
+            thread(name="HomeTV-stream-check"){
+                val reachable:Boolean?=try{
+                    val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
+                    try{
+                        connection.connectTimeout=3500
+                        connection.readTimeout=3500
+                        connection.instanceFollowRedirects=true
+                        connection.setRequestProperty("Range","bytes=0-1023")
+                        connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                        channel.headers.forEach{(key,value)->
+                            if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                        }
+                        val code=connection.responseCode
+                        val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
+                        when{
+                            code in 200..299 && !contentType.contains("text/html")->true
+                            code==404 || code==410->false
+                            else->null
+                        }
+                    }finally{connection.disconnect()}
+                }catch(_:Exception){null}
+                handler.post{
+                    if(generation!=backgroundProbeGeneration)return@post
+                    probeInFlight=(probeInFlight-1).coerceAtLeast(0)
+                    if(reachable!=null)probeReachable[channel.url]=reachable
+                    // A successful HTTP check can restore surfing eligibility,
+                    // but only actual playback can establish engine compatibility.
+                    if(reachable==true)unavailableChannels.remove(channelKey(channel))
+                    launchNextProbe(generation)
                 }
-                // Defer next probe to avoid recursive work on the UI event stack.
-                handler.post{launchNextProbe(generation)}
             }
-            probe.addListener(object:Player.Listener{
-                override fun onPlaybackStateChanged(state:Int){
-                    if(state==Player.STATE_READY)finish(true)
-                    else if(state==Player.STATE_ENDED)finish(null)
-                }
-                override fun onPlayerError(error:PlaybackException){finish(false)}
-            })
-            watchdog=Runnable{finish(null)} // Timeout is inconclusive, not a failed stream.
-            handler.postDelayed(watchdog!!,5000L)
-            try{
-                val http=DefaultHttpDataSource.Factory()
-                    .setConnectTimeoutMs(5000).setReadTimeoutMs(5000)
-                    .setUserAgent(channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                val headers=channel.headers.filterKeys{!it.equals("User-Agent",true)}
-                http.setDefaultRequestProperties(headers)
-                probe.setMediaSource(DefaultMediaSourceFactory(http).createMediaSource(MediaItem.fromUri(channel.url)))
-                probe.prepare()
-                probe.playWhenReady=false
-            }catch(_:Exception){finish(null)}
         }
         if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
