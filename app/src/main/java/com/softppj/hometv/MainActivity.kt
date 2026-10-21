@@ -997,8 +997,8 @@ class MainActivity: Activity() {
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
             if(it=="Media3" || it=="LibVLC")return it
         }
-        // Media3 is the universal default. Only a confirmed Media3 failure
-        // followed by successful LibVLC playback creates a persistent fallback.
+        val universal=prefs.getString("engine","Auto") ?: "Auto"
+        if(universal=="Media3" || universal=="LibVLC")return universal
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
         return "Media3"
     }
@@ -1528,11 +1528,11 @@ class MainActivity: Activity() {
         ordered.forEach{probeQueue.addLast(it)}
         // LibVLC is expensive; enqueue only URLs for which Media3 already
         // failed in this scan. No speculative VLC probe for every channel.
-        launchNextProbe(generation)
+        if(prefs.getBoolean("background_url_checks",false))launchNextProbe(generation)
     }
     // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
-        if(generation!=backgroundProbeGeneration || !licenseReady)return
+        if(generation!=backgroundProbeGeneration || !licenseReady || !prefs.getBoolean("background_url_checks",false))return
         if(!hasNetworkConnection()){
             periodicProbeTask?.let{handler.removeCallbacks(it)}
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
@@ -2298,6 +2298,12 @@ class MainActivity: Activity() {
                 close();showOverlayList();true
             }else false
         }
+        val currentGroup=channels.getOrNull(active)?.group
+        val selectedGroup=groups.indexOf(currentGroup)
+        if(selectedGroup>=0){
+            list.setSelection(selectedGroup+7)
+            list.setItemChecked(selectedGroup+7,true)
+        }
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
@@ -2328,6 +2334,12 @@ class MainActivity: Activity() {
             else if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){close();true}
             else false
         }
+        val playingPosition=indices.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
+        if(playingPosition>=0){
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(playingPosition,true)
+            list.setSelection(playingPosition)
+        }
         list.requestFocus()
     }
     private fun showPlaybackSettings(){
@@ -2335,7 +2347,7 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val options=arrayOf(
-            "Universal aspect ratio: "+(prefs.getString("screen_mode","16:9") ?: "Fit"),
+            "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Playback engine",
             "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
@@ -3166,6 +3178,17 @@ class MainActivity: Activity() {
         })
         root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
+        root.addView(button("Background URL checking: "+if(prefs.getBoolean("background_url_checks",false))"ON" else "OFF"){
+            val enabled=!prefs.getBoolean("background_url_checks",false)
+            prefs.edit().putBoolean("background_url_checks",enabled).apply()
+            startBackgroundChannelChecks()
+            settings()
+        })
+        root.addView(button("YouTube Smart Playback: "+if(prefs.getString("youtube_smart_mode","hybrid")=="webview")"OFF (WebView)" else "ON (Native first)"){
+            val enabled=prefs.getString("youtube_smart_mode","hybrid")=="webview"
+            prefs.edit().putString("youtube_smart_mode",if(enabled)"hybrid" else "webview").apply()
+            settings()
+        })
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
