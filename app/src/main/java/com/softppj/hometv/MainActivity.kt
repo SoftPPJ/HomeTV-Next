@@ -959,9 +959,9 @@ class MainActivity: Activity() {
         }
         list.setOnItemClickListener{_,_,position,_->
             val selected=indices[position]
-            if(isManuallyHidden(channels[selected]) || isGroupHidden(channels[selected].group))
-                channelOptions(selected)
-            else playIndex(preferredChannel(selected))
+            // Explicit selection may play a hidden or locked channel.
+            // Locked channels still require their PIN in playIndex().
+            playIndex(preferredChannel(selected))
         }
         list.setOnItemLongClickListener{_,_,position,_->
             val i=indices[position]
@@ -2304,8 +2304,8 @@ class MainActivity: Activity() {
         list.setOnItemClickListener{_,_,position,_->
             val selected=available[position]
             close()
-            if(isManuallyHidden(channels[selected]))channelOptions(selected)
-            else playIndex(preferredChannel(selected))
+            // Manual selection is permitted even for channels excluded from surfing.
+            playIndex(preferredChannel(selected))
         }
         list.setOnItemLongClickListener{_,_,position,_->
             val selected=available[position]
