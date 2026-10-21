@@ -2390,7 +2390,10 @@ class MainActivity: Activity() {
                 val editor=prefs.edit()
                 if(key!=null){
                     if(choice==0)editor.remove(key) else editor.putString(key,options[choice])
-                }else editor.putString("quality_global",options[choice])
+                }else{
+                    editor.putString("quality_global",options[choice])
+                    prefs.all.keys.filter{it.startsWith("quality_channel_")}.forEach{editor.remove(it)}
+                }
                 editor.apply()
                 applyQuality()
                 dialog.dismiss()
@@ -2486,6 +2489,10 @@ class MainActivity: Activity() {
             val editor=prefs.edit()
             if(target!=null && pending==0)editor.remove(key)
             else editor.putString(key,labels[pending])
+            if(target==null){
+                // Universal change wins for aspect ratio; unrelated per-channel settings stay intact.
+                prefs.all.keys.filter{it.startsWith("screen_channel_")}.forEach{editor.remove(it)}
+            }
             editor.apply()
         }
         val dialog=AlertDialog.Builder(this)
@@ -2935,7 +2942,9 @@ class MainActivity: Activity() {
         val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
         val data=JSONObject()
         prefs.all.forEach{(key,value)->
-            if(key in excluded || key.startsWith("license_"))return@forEach
+            if(key in excluded || key.startsWith("license_") ||
+                key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
+                key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))return@forEach
             when(value){
                 is String->data.put(key,JSONObject().put("type","string").put("value",value))
                 is Boolean->data.put(key,JSONObject().put("type","boolean").put("value",value))
@@ -2968,7 +2977,9 @@ class MainActivity: Activity() {
                     var count=0
                     while(iterator.hasNext()){
                         val key=iterator.next()
-                        if(key=="pin" || key=="last_url" || key.startsWith("license_"))continue
+                        if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
+                            key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
+                            key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
                         val item=values.getJSONObject(key)
                         when(item.getString("type")){
                             "string"->edit.putString(key,item.getString("value"))
