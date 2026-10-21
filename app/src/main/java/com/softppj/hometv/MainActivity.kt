@@ -199,6 +199,7 @@ class MainActivity: Activity() {
     private val recoveryAttempts=mutableMapOf<String,Int>()
     private val unavailableChannels=mutableSetOf<String>()
     private val playedThisSession=mutableSetOf<String>()
+    private val workingEngineThisSession=mutableMapOf<String,String>()
     private val failedUrlsThisSession=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
@@ -241,7 +242,8 @@ class MainActivity: Activity() {
         playedThisSession.add(channelKey(c))
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
-        val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
+        val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        workingEngineThisSession[channelKey(c)]=engine
         if(engine=="Media3")probeReachable[c.url]=true
         // Do not permanently pin automatic playback to an engine.
         engineAttempts.remove(c.url)
@@ -372,6 +374,14 @@ class MainActivity: Activity() {
             val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
             retryTask=task
             handler.postDelayed(task,1500L*(attempts+1))
+            return true
+        }
+        // After successful playback, do not change the source or engine on interruption.
+        val key=channelKey(c)
+        if(key in playedThisSession &&
+            prefs.getString("working_url_"+key,c.url)==c.url){
+            fallbackEngineOverride=workingEngineThisSession[key] ?: current
+            showBanner(c.name+" interrupted. Staying on saved source; press OK to retry.",true)
             return true
         }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
@@ -785,7 +795,7 @@ class MainActivity: Activity() {
         fallbackEngineOverride?.let{return it}
         val manual=prefs.getString("manual_engine_"+channelKey(c),null)
         if(manual=="Media3" || manual=="LibVLC")return manual
-        // A previous automatic LibVLC fallback must not block later Media3 verification.
+        workingEngineThisSession[channelKey(c)]?.let{return it}
         if(probeReachable[c.url]==true)return "Media3"
         return "LibVLC"
     }
@@ -799,7 +809,7 @@ class MainActivity: Activity() {
                     if(choices[which]=="Auto")remove("manual_engine_"+channelKey(c))
                     else putString("manual_engine_"+channelKey(c),choices[which])
                 }.apply()
-                engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
+                engineAttempts.clear();fallbackEngineOverride=null;workingEngineThisSession.remove(channelKey(c));unavailableChannels.remove(channelKey(c))
                 dialog.dismiss()
                 if(active==i)playIndex(i)
             }.setNegativeButton("Cancel",null).show()
@@ -2280,7 +2290,7 @@ class MainActivity: Activity() {
     }
     private fun raceMedia3(index:Int):Boolean{
         val c=channels.getOrNull(index) ?:return false
-        if(fallbackEngineOverride!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
+        if(fallbackEngineOverride!=null || channelKey(c) in playedThisSession || prefs.getString("working_url_"+channelKey(c),null)!=null || prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
             prefs.getString("manual_url_"+channelKey(c),null)!=null)return false
         val options=alternateIndices(index).filter{!isWebStream(channels[it])}
         if(options.size<2 || isWebStream(c))return false
