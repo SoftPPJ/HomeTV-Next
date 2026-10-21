@@ -2372,16 +2372,30 @@ class MainActivity: Activity() {
         val exo=player ?:return
         // Best Available must remain highest quality; never silently revert it to Auto.
         if(qualityMode()!="Auto")return
-        val task=Runnable{
-            if(player===exo && active>=0 && exo.playbackState==Player.STATE_READY){
-                exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
-                    .setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
-                    .setForceHighestSupportedBitrate(false)
-                    .build()
+        // Start Auto at a conservative adaptive cap; upgrade only after playback
+        // has actually remained ready, never after a fixed elapsed wall-clock delay.
+        exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE,480)
+            .setForceHighestSupportedBitrate(false).build()
+        val generation=playbackGeneration
+        var stableSamples=0
+        val task=object:Runnable{
+            override fun run(){
+                if(player!==exo || generation!=playbackGeneration || active<0 ||
+                    qualityMode()!="Auto")return
+                if(exo.playbackState==Player.STATE_READY && exo.isPlaying){
+                    stableSamples++
+                }else stableSamples=0
+                if(stableSamples>=3){
+                    exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                        .setMaxVideoSize(Int.MAX_VALUE,Int.MAX_VALUE)
+                        .setForceHighestSupportedBitrate(false).build()
+                    qualityUpgradeTask=null
+                }else handler.postDelayed(this,1000L)
             }
         }
         qualityUpgradeTask=task
-        handler.postDelayed(task,8000)
+        handler.postDelayed(task,1000L)
     }
     private fun applyQuality(){
         val exo=player ?:return
