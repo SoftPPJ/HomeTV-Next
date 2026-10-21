@@ -247,6 +247,7 @@ class MainActivity: Activity() {
     private var web:WebView?=null
     private var active=-1
     private var previousChannelUrl:String?=null
+    private var previousChannelIdentity:String?=null
     private var alternativeAttempted=mutableSetOf<String>()
     private var alternativeSessionKey:String?=null
     private var playbackGeneration=0
@@ -2571,7 +2572,7 @@ class MainActivity: Activity() {
     }
     private fun returnToPreviousChannel(){
         val url=previousChannelUrl ?:run{showBanner("No previous channel");return}
-        val index=channels.indexOfFirst{it.url==url}
+        val index=channels.indexOfFirst{it.url==url && (previousChannelIdentity==null || id(it)==previousChannelIdentity)}
         if(index>=0 && index!=active)playIndex(index)
         else showBanner("Previous channel is unavailable")
     }
@@ -2586,7 +2587,10 @@ class MainActivity: Activity() {
         autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
-        if(active in channels.indices && active!=index && !sameChannel(channels[active],c))previousChannelUrl=channels[active].url
+        if(active in channels.indices && active!=index && !sameChannel(channels[active],c)){
+            previousChannelUrl=channels[active].url
+            previousChannelIdentity=id(channels[active])
+        }
         val sessionKey=channelKey(c)
         if(alternativeSessionKey!=sessionKey){alternativeAttempted.clear();alternativeSessionKey=sessionKey;engineAttempts.clear();fallbackEngineOverride=null}
         if(engineChannelUrl!=c.url){vlcAttempted=false;engineChannelUrl=c.url}
