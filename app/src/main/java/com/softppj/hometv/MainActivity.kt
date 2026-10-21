@@ -1003,7 +1003,7 @@ class MainActivity: Activity() {
         )
         val dialog=AlertDialog.Builder(this)
             .setTitle(numberFor(i).toString()+". "+c.name+" Settings")
-            .setSingleChoiceItems(opts,-1){d,v->
+            .setItems(opts){d,v->
                 d.dismiss()
                 when(v){
                     0->playIndex(preferredChannel(i))
@@ -1727,6 +1727,8 @@ class MainActivity: Activity() {
                     addState(intArrayOf(),
                         android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
                 }
+                choiceMode=android.widget.ListView.CHOICE_MODE_NONE
+                clearChoices()
                 isFocusable=true
                 isFocusableInTouchMode=true
             }
@@ -2349,7 +2351,8 @@ class MainActivity: Activity() {
         qualityUpgradeTask?.let{handler.removeCallbacks(it)}
         qualityUpgradeTask=null
         val exo=player ?:return
-        if(qualityMode()!="Auto" && qualityMode()!="Best Available")return
+        // Best Available must remain highest quality; never silently revert it to Auto.
+        if(qualityMode()!="Auto")return
         val task=Runnable{
             if(player===exo && active>=0 && exo.playbackState==Player.STATE_READY){
                 exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
