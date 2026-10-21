@@ -458,7 +458,24 @@ class MainActivity: Activity() {
     }
     private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
-    private fun visibleIndices()=channelNumbers().filter{!isManuallyHidden(channels[it])}
+    private val manuallyHiddenGroups get()=prefs.getStringSet("manually_hidden_groups",emptySet()) ?: emptySet()
+    private fun isGroupHidden(group:String)=manuallyHiddenGroups.contains(group)
+    private fun toggleGroupHidden(group:String){
+        val updated=manuallyHiddenGroups.toMutableSet()
+        if(!updated.add(group))updated.remove(group)
+        prefs.edit().putStringSet("manually_hidden_groups",updated).apply()
+        Toast.makeText(this,if(isGroupHidden(group))"Group hidden until manually restored" else "Group restored",Toast.LENGTH_SHORT).show()
+    }
+    private fun groupOptions(group:String){
+        showSideDialog(AlertDialog.Builder(this).setTitle(group+" Settings")
+            .setItems(arrayOf("Lock / Unlock Group",if(isGroupHidden(group))"Unhide Group" else "Hide Group")){_,choice->
+                when(choice){
+                    0->toggleLock(group,true)
+                    1->{toggleGroupHidden(group);if(active<0)showChannels()}
+                }
+            }.setNegativeButton("Back",null).create())
+    }
+    private fun visibleIndices()=channelNumbers().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group)}
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
@@ -785,7 +802,18 @@ class MainActivity: Activity() {
         prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
         Toast.makeText(this,if(isManuallyHidden(c))"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
-    private fun hiddenChannels(){channelCollection("Hidden channels",channels.indices.filter{isManuallyHidden(channels[it])})}
+    private fun hiddenChannels(){
+        val hidden=channels.indices.filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
+        channelCollection("Hidden channels",hidden)
+        if(manuallyHiddenGroups.isNotEmpty()){
+            root.addView(button("Restore hidden group"){
+                val groups=manuallyHiddenGroups.toList().sorted()
+                showSideDialog(AlertDialog.Builder(this).setTitle("Unhide Group")
+                    .setItems(groups.toTypedArray()){_,position->toggleGroupHidden(groups[position]);hiddenChannels()}
+                    .setNegativeButton("Back",null).create())
+            })
+        }
+    }
     private fun favorites(){
         prefs.edit().putBoolean("favorites_surfing",true).apply()
         channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && favoriteIds.contains(id(channels[it]))})
@@ -1590,7 +1618,9 @@ class MainActivity: Activity() {
         val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         groups.forEach { group->
-            list.addView(button("▸ $group"){showGroup(group)})
+            list.addView(button("▸ $group"){showGroup(group)}.apply{
+                setOnLongClickListener{groupOptions(group);true}
+            })
         }
         scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Home"){showHome()})
@@ -2194,6 +2224,10 @@ class MainActivity: Activity() {
         val width=(resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260)
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemLongClickListener{_,_,choice,_->
+            val group=groups.getOrNull(choice-7)
+            if(group!=null){close();groupOptions(group);true}else false
+        }
         list.setOnItemClickListener{_,_,choice,_->
             close()
             when(choice){
