@@ -1489,10 +1489,8 @@ class MainActivity: Activity() {
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
                 selector=android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt())
-                setOnItemSelectedListener(object:android.widget.AdapterView.OnItemSelectedListener{
-                    override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){view?.setBackgroundColor(0xFF267CC1.toInt())}
-                    override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
-                })
+                // Use ListView's selector for focus. Painting each selected row's
+                // background permanently leaves several rows looking selected.
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
@@ -2925,6 +2923,14 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        // Dialog windows own their remote navigation and OK/Enter events.
+        // Never interpret a dialog selection as a channel command.
+        if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
+        // Android TV remotes may repeat OK while held; execute a choice once.
+        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount>0 &&
+            (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
+             event.keyCode==KeyEvent.KEYCODE_ENTER ||
+             event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER))return true
         if(event.action==KeyEvent.ACTION_DOWN && active>=0 &&
             (event.keyCode==KeyEvent.KEYCODE_VOLUME_UP || event.keyCode==KeyEvent.KEYCODE_VOLUME_DOWN)){
             val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
