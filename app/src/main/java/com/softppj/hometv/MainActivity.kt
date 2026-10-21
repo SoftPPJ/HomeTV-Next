@@ -936,6 +936,20 @@ class MainActivity: Activity() {
                 list.post{list.setSelection(position)}
             }
         }
+        if(title=="All channels" || title=="Favorites"){
+            val playingUrl=channels.getOrNull(active)?.url ?: prefs.getString("last_url",null)
+            val position=indices.indexOfFirst{channels[it].url==playingUrl}
+            if(position>=0){
+                list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+                list.setItemChecked(position,true)
+                list.setSelection(position)
+                list.post{
+                    list.setItemChecked(position,true)
+                    list.setSelection(position)
+                    list.requestFocus()
+                }
+            }
+        }
         root.addView(label("Long press: Channel Settings · Move Up · Move Down"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
