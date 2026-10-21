@@ -2144,7 +2144,8 @@ class MainActivity: Activity() {
         val available=surfingIndices()
         val current=if(previewIndex>=0)previewIndex else active
         val anchor=channels.getOrNull(current)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
-        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first() else available.lastOrNull{it<anchor} ?: available.last()
+        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first()
+            else available.lastOrNull{it<anchor} ?: available.last()
         previewIndex=next
         showChannelInfo(previewIndex)
         showVideoPreview(previewIndex)
@@ -2842,32 +2843,8 @@ class MainActivity: Activity() {
                 }
             }
             screen.addView(viewer,FrameLayout.LayoutParams(-1,-1))
-            val back=TextView(this).apply{
-                text="← HomeTV"
-                textSize=16f
-                setTextColor(android.graphics.Color.WHITE)
-                setBackgroundColor(0xCC10243A.toInt())
-                setPadding(22,14,22,14)
-                isFocusable=true
-                setOnClickListener{allChannels()}
-            }
-            screen.addView(back,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.LEFT).apply{
-                leftMargin=12;topMargin=12
-            })
-            val sound=TextView(this).apply{
-                text="Unmute / Play"
-                textSize=16f
-                setTextColor(android.graphics.Color.WHITE)
-                setBackgroundColor(0xCC10243A.toInt())
-                setPadding(22,14,22,14)
-                isFocusable=true
-                setOnClickListener{
-                    unmuteYoutube(viewer)
-                }
-            }
-            screen.addView(sound,FrameLayout.LayoutParams(-2,-2,android.view.Gravity.TOP or android.view.Gravity.RIGHT).apply{
-                rightMargin=12;topMargin=12
-            })
+            // Do not overlay HomeTV controls on YouTube's mute/play buttons.
+            // The remote BACK and channel keys remain handled by the Activity.
             if(webPage){
                 if(c.webChannel.isNotBlank()){
                     viewer.webViewClient=object:WebViewClient(){
@@ -3099,8 +3076,17 @@ class MainActivity: Activity() {
         val available=surfingIndices()
         if(available.isEmpty())return
         val anchor=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
-        val next=if(delta>0)available[(anchor+1).mod(available.size)]
+        // When the current channel is hidden, locked, or temporarily unavailable,
+        // it is not in the surfing list. Find the nearest eligible neighbor in
+        // playlist order instead of treating -1 as the first/last item.
+        val next=if(anchor>=0){
+            if(delta>0)available[(anchor+1).mod(available.size)]
             else available[(anchor-1).mod(available.size)]
+        }else if(delta>0){
+            available.firstOrNull{it>active} ?: available.first()
+        }else{
+            available.lastOrNull{it<active} ?: available.last()
+        }
         playIndex(preferredChannel(next))
     }
     private fun resumeLast(){
