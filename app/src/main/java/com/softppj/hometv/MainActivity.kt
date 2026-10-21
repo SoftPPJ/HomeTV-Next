@@ -375,7 +375,7 @@ class MainActivity: Activity() {
         }
         val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
             .setItems(options.mapIndexed{n,i->
-                "URL "+(n+1)+(if(i==active)"  •  Playing" else "")
+                "Stream option "+(n+1)+(if(i==active)"  •  Playing" else "")
             }.toTypedArray()){_,choice->
                 val target=options[choice]
                 alternativeAttempted.clear()
@@ -2772,14 +2772,31 @@ class MainActivity: Activity() {
                 }
             }
             startupWatchdog=startupTimeout
-            handler.postDelayed(startupTimeout,10000L)
+            handler.postDelayed(startupTimeout,6000L)
+            var wasReady=false
+            var bufferingRecoveryTask:Runnable?=null
             exo.addListener(object:Player.Listener{
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_BUFFERING){
                         autoBufferStableSince=0L
                         autoBufferStalled()
+                        if(wasReady){
+                            bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
+                            val recovery=Runnable{
+                                if(active==index && videoScreen===screen && player===exo &&
+                                    exo.playbackState==Player.STATE_BUFFERING){
+                                    handleEngineFailure(index,screen)
+                                }
+                            }
+                            bufferingRecoveryTask=recovery
+                            handler.postDelayed(recovery,10000L)
+                        }
+                    }else{
+                        bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
+                        bufferingRecoveryTask=null
                     }
                     if(state==Player.STATE_READY){
+                        wasReady=true
                         autoBufferHealthy()
                         retryCount=0
                         handler.postDelayed({
