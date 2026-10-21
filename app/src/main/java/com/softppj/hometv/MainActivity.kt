@@ -276,7 +276,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it])}
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
@@ -370,18 +370,25 @@ class MainActivity: Activity() {
             handler.post{if(active==index && videoScreen===screen)playIndex(index)}
             return true
         }
+        // This URL is exhausted only after both playback engines have failed.
+        failedUrlsThisSession.add(c.url)
         if(tryNextAlternative(index)){
             fallbackEngineOverride=null
             return true
         }
-        // A temporary stream failure must never hide a channel, especially one
-        // the viewer is already watching. Keep it in the guide and surfing list.
-        // Only an explicit user skip/hide action may remove it from surfing.
-        failedUrlsThisSession.add(c.url)
-        unavailableChannels.remove(channelKey(c))
+        val key=channelKey(c)
+        val allUrls=alternateIndices(index).map{channels[it].url}.distinct()
+        // Skip in automatic surfing only when EVERY URL has exhausted BOTH engines.
+        // Never remove the channel from the guide, and never jump away from
+        // the channel currently on screen.
+        if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
+            unavailableChannels.add(key)
+            showBanner(c.name+" unavailable on all sources. Press OK to retry.",true)
+        }else{
+            showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
+        }
         engineAttempts.clear()
         fallbackEngineOverride=null
-        showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
