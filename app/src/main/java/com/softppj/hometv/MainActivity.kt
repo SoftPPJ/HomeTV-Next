@@ -2143,9 +2143,7 @@ class MainActivity: Activity() {
         previewTask?.let{handler.removeCallbacks(it)}
         val available=surfingIndices()
         val current=if(previewIndex>=0)previewIndex else active
-        val anchor=channels.getOrNull(current)?.let{c->channelNumbers().firstOrNull{sameChannel(channels[it],c)}} ?: -1
-        val next=if(delta>0)available.firstOrNull{it>anchor} ?: available.first()
-            else available.lastOrNull{it<anchor} ?: available.last()
+        val next=nextSurfingIndex(current,delta,available)
         previewIndex=next
         showChannelInfo(previewIndex)
         showVideoPreview(previewIndex)
@@ -3071,22 +3069,27 @@ class MainActivity: Activity() {
             handleEngineFailure(index,screen)
         }
     }
+    // Choose the nearest eligible channel strictly in the requested direction.
+    // Compare playlist positions, not positions in the filtered surfing list.
+    private fun nextSurfingIndex(current:Int,delta:Int,available:List<Int>):Int{
+        val representatives=channelNumbers()
+        val currentKey=channels.getOrNull(current)?.let{channelKey(it)}
+        val currentPosition=representatives.indexOfFirst{channelKey(channels[it])==currentKey}
+        val ordered=available.sortedBy{candidate->
+            representatives.indexOfFirst{channelKey(channels[it])==channelKey(channels[candidate])}
+        }
+        if(ordered.isEmpty())return -1
+        val positions=ordered.map{candidate->
+            representatives.indexOfFirst{channelKey(channels[it])==channelKey(channels[candidate])}
+        }
+        return if(delta>=0)ordered[positions.indexOfFirst{it>currentPosition}.takeIf{it>=0} ?: 0]
+            else ordered[positions.indexOfLast{it<currentPosition}.takeIf{it>=0} ?: ordered.lastIndex]
+    }
     private fun switchChannel(delta:Int){
         surfingDirection=if(delta>=0)1 else -1
         val available=surfingIndices()
         if(available.isEmpty())return
-        val anchor=available.indexOfFirst{it==active || (active in channels.indices && sameChannel(channels[it],channels[active]))}
-        // When the current channel is hidden, locked, or temporarily unavailable,
-        // it is not in the surfing list. Find the nearest eligible neighbor in
-        // playlist order instead of treating -1 as the first/last item.
-        val next=if(anchor>=0){
-            if(delta>0)available[(anchor+1).mod(available.size)]
-            else available[(anchor-1).mod(available.size)]
-        }else if(delta>0){
-            available.firstOrNull{it>active} ?: available.first()
-        }else{
-            available.lastOrNull{it<active} ?: available.last()
-        }
+        val next=nextSurfingIndex(active,delta,available)
         playIndex(preferredChannel(next))
     }
     private fun resumeLast(){
