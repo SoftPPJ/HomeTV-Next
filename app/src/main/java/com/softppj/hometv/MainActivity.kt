@@ -276,7 +276,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
-    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+    private fun surfingIndices()=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it])}
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
         val skipped=!isSkipped(c)
@@ -374,20 +374,14 @@ class MainActivity: Activity() {
             fallbackEngineOverride=null
             return true
         }
-        // Only hide channels that have NEVER played in this app session and
-        // whose every URL has exhausted both playback engines.
+        // A temporary stream failure must never hide a channel, especially one
+        // the viewer is already watching. Keep it in the guide and surfing list.
+        // Only an explicit user skip/hide action may remove it from surfing.
         failedUrlsThisSession.add(c.url)
-        val key=channelKey(c)
-        val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
-        if(key !in playedThisSession && allUrls.isNotEmpty() &&
-            allUrls.all{it in failedUrlsThisSession}){
-            unavailableChannels.add(key)
-            showBanner(c.name+" could not start • Hidden until app restart",true)
-        }
+        unavailableChannels.remove(channelKey(c))
         engineAttempts.clear()
         fallbackEngineOverride=null
-        if(key !in unavailableChannels)
-            showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
+        showBanner(c.name+" temporarily interrupted. Channel retained; press OK to retry.",true)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
