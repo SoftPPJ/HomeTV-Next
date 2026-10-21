@@ -2733,56 +2733,98 @@ class MainActivity: Activity() {
     }
     private fun liveSettings(){
         if(active<0){settings();return}
+        // All settings are available from the remote Settings button without
+        // leaving playback. Reuse the same preference keys and controls.
         val items=arrayOf(
+            "Surrender License / Change TV",
+            "Manage playlists",
+            "Favorites",
+            "Hidden channels",
+            "EPG / XMLTV guide",
+            "Information transparency: "+prefs.getInt("information_opacity",65)+"%",
+            "Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF",
             "Playback engine: "+(prefs.getString("engine","Media3")?:"Media3"),
+            "Live video on Up / Down preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF",
             "Buffering: "+bufferProfile(),
-            "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
-            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"Fit"),
-            "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
+            "Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
             "Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_unavailable",true))"ON" else "OFF",
+            "Manage locked channels / groups",
+            "Channels skipped by Up/Down and CH+/−",
+            "Set / change lock password",
             "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
+            "Open on launch: "+(prefs.getString("launch_screen","Last channel")?:"Last channel"),
+            "Try launch at device boot: "+if(prefs.getBoolean("boot",false))"ON" else "OFF",
+            "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
+            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"16:9"),
             "Date & time overlay",
-            "Manage playlists (leave playback)",
             "Home screen (stop playback)",
             "Back to TV"
         )
-        val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
+        val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — All Settings")
             .setItems(items){_,choice->
                 when(choice){
-                    0->{
+                    0->AlertDialog.Builder(this).setTitle("Surrender license?")
+                        .setMessage("Changing the licensed TV will stop playback.")
+                        .setPositiveButton("Continue"){_,_->surrenderLicense()}
+                        .setNegativeButton("Cancel",null).show()
+                    1->AlertDialog.Builder(this).setTitle("Leave live TV?")
+                        .setMessage("Managing playlists will stop the current channel.")
+                        .setPositiveButton("Continue"){_,_->managePlaylists()}
+                        .setNegativeButton("Stay on TV",null).show()
+                    2->favorites()
+                    3->hiddenChannels()
+                    4->configureEpg()
+                    5->chooseInformationTransparency()
+                    6->{prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply();liveSettings()}
+                    7->{
                         val choices=arrayOf("Auto","Media3","LibVLC")
                         AlertDialog.Builder(this).setTitle("Default playback engine")
                             .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3")).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putString("engine",choices[i]).apply()
-                                dialog.dismiss()
-                                showBanner("Playback engine saved for next channel")
+                                dialog.dismiss();liveSettings()
                             }.setNegativeButton("Cancel",null).show()
                     }
-                    1->chooseBufferProfile()
-                    2->selectQuality(null)
-                    3->selectScreenMode(null)
-                    4->{
-                        prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply()
-                        showBanner("Auto-reconnect setting saved")
+                    8->{prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply();liveSettings()}
+                    9->chooseBufferProfile()
+                    10->{prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();liveSettings()}
+                    11->{prefs.edit().putBoolean("auto_skip_unavailable",!prefs.getBoolean("auto_skip_unavailable",true)).apply();liveSettings()}
+                    12->manageLockedChannels()
+                    13->manageSkippedChannels()
+                    14->changeLockPassword()
+                    15->{prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();liveSettings()}
+                    16->{
+                        val choices=arrayOf("Home","Last channel","Channels")
+                        AlertDialog.Builder(this).setTitle("When HomeTV opens")
+                            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel")).coerceAtLeast(0)){dialog,i->
+                                prefs.edit().putString("launch_screen",choices[i]).apply()
+                                dialog.dismiss();liveSettings()
+                            }.setNegativeButton("Cancel",null).show()
                     }
-                    5->{
-                        val enabled=!prefs.getBoolean("auto_skip_unavailable",true)
-                        prefs.edit().putBoolean("auto_skip_unavailable",enabled).apply()
-                        showBanner("Auto-skip non-working channels "+if(enabled)"ON" else "OFF")
-                    }
-                    6->{
-                        prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply()
-                        showBanner("Resume setting saved")
-                    }
-                    7->clockSettings()
-                    8->AlertDialog.Builder(this).setTitle("Leave live TV?")
-                        .setMessage("Managing playlists will stop the current channel.")
-                        .setPositiveButton("Continue"){_,_->managePlaylists()}
-                        .setNegativeButton("Stay on TV",null).show()
-                    9->showHome()
+                    17->{prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();liveSettings()}
+                    18->selectQuality(null)
+                    19->selectScreenMode(null)
+                    20->clockSettings()
+                    21->showHome()
                 }
-            }.setNegativeButton("Close",null).create()
+            }.setNegativeButton("Back to TV",null).create()
         showSideDialog(liveDialog)
+    }
+    private fun changeLockPassword(){
+        val field=EditText(this).apply{
+            hint="Any letters or digits (no minimum length)"
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        val prompt={
+            AlertDialog.Builder(this).setTitle("New lock password").setView(field)
+                .setPositiveButton("Save"){_,_->
+                    val value=field.text.toString()
+                    if(value.isNotEmpty()){
+                        prefs.edit().putString("pin",hash(value)).apply()
+                        Toast.makeText(this,"Lock password saved",Toast.LENGTH_SHORT).show()
+                    }else Toast.makeText(this,"Password cannot be empty",Toast.LENGTH_SHORT).show()
+                }.setNegativeButton("Cancel",null).show()
+        }
+        if(prefs.contains("pin"))requirePin{prompt()} else prompt()
     }
     private fun settings(){
         reset("HomeTV Settings")
@@ -2819,22 +2861,7 @@ class MainActivity: Activity() {
         root.addView(label("ON: Up/Down and CH+/− skip a channel only after all its URLs fail with both Media3 and LibVLC. OFF: Keep failed channels in channel surfing. The current channel is never changed automatically."))
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
-        root.addView(button("Set / change lock password"){
-            val field=EditText(this).apply{
-                hint="Any letters or digits (no minimum length)"
-                inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
-            val save:()->Unit={
-                val value=field.text.toString()
-                if(value.isNotEmpty()){
-                    prefs.edit().putString("pin",hash(value)).apply()
-                    Toast.makeText(this,"Lock password saved",Toast.LENGTH_SHORT).show()
-                }else Toast.makeText(this,"Password cannot be empty",Toast.LENGTH_SHORT).show()
-            }
-            val prompt={AlertDialog.Builder(this).setTitle("New lock password").setView(field)
-                .setPositiveButton("Save"){_,_->save()}.setNegativeButton("Cancel",null).show()}
-            if(prefs.contains("pin"))requirePin{prompt()} else prompt()
-        })
+        root.addView(button("Set / change lock password"){changeLockPassword()})
         root.addView(button("Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF"){
             prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();settings()
         })
