@@ -3245,11 +3245,7 @@ class MainActivity: Activity() {
             startBackgroundChannelChecks()
             settings()
         })
-        root.addView(button("YouTube Smart Playback: "+if(prefs.getString("youtube_smart_mode","hybrid")=="webview")"OFF (WebView)" else "ON (Native first)"){
-            val enabled=prefs.getString("youtube_smart_mode","hybrid")=="webview"
-            prefs.edit().putString("youtube_smart_mode",if(enabled)"hybrid" else "webview").apply()
-            settings()
-        })
+        root.addView(label("YouTube playback: WebView watch page (restored compatibility mode)"))
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
