@@ -1674,10 +1674,13 @@ class MainActivity: Activity() {
         }
     }
     private fun confirmExit(){
-        showSideDialog(AlertDialog.Builder(this).setTitle("Exit HomeTV?")
-            .setMessage("Stop playback and close the app?")
-            .setPositiveButton("Exit"){_,_->stopPlayback();finishAffinity()}
-            .setNegativeButton("Continue watching",null).create())
+        val dialog=AlertDialog.Builder(this).setTitle("Exit HomeTV?")
+            .setMessage("Do you want to exit the application?")
+            .setPositiveButton("Yes"){_,_->stopPlayback();finishAffinity()}
+            .setNegativeButton("No",null).create()
+        showSideDialog(dialog)
+        // Android TV: initial OK confirms Yes; Back dismisses and resumes playback.
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
     }
     private fun audioTracks(){
         val exo=player
@@ -1998,24 +2001,25 @@ class MainActivity: Activity() {
         panel.addView(TextView(this).apply{
             val now=System.currentTimeMillis()
             val epg=if(prefs.getBoolean("show_channel_epg",true))programmeList(channel).filter{it.end>now}.take(3).joinToString("\n"){programmeTime(it.start)+"  "+it.title} else ""
-            val expiry=prefs.getString("license_expiry","").orEmpty()
-            val licenseLine=when(expiry){
-                ""->""
-                "unlimited"->"License: Unlimited"
-                else->"License expires: "+expiry
-            }
-            val configured=engineFor(channel)
             val playing=if(index==active)when{
                 player!=null->"Media3"
                 vlcPlayer!=null->"LibVLC"
                 else->"Starting"
-            } else configured
-            val engineLine="Player: "+playing+(if(playing!=configured)" (preferred: "+configured+")" else "")+
-                if(prefs.getBoolean("libvlc_only_"+hash(channel.url),false))" • Media3 fallback saved" else ""
-            val qualityLine="Quality: "+qualityMode(index)+
-                if(playing=="LibVLC")" (stream-controlled on LibVLC)" else ""
-            text=numberFor(index).toString()+"  "+channel.name+"\n"+engineLine+"\n"+qualityLine+
-                (if(licenseLine.isNotBlank())"\n"+licenseLine else "")+(if(epg.isNotBlank())"\n"+epg else "")
+            } else engineFor(channel)
+            val current=if(prefs.getBoolean("show_channel_epg",true))
+                programmeList(channel).firstOrNull{it.start<=now && it.end>now} else null
+            val next=if(prefs.getBoolean("show_channel_epg",true))
+                programmeList(channel).filter{it.start>now}.minByOrNull{it.start} else null
+            text=buildString{
+                append(numberFor(index)).append(". ").append(channel.name)
+                append("\\nPlayer: ").append(playing)
+                if(current!=null)append("\\nNow: ").append(current.title)
+                    .append(" (").append(programmeTime(current.start)).append(" – ")
+                    .append(programmeTime(current.end)).append(")")
+                if(next!=null)append("\\nNext: ").append(next.title)
+                    .append(" (").append(programmeTime(next.start)).append(" – ")
+                    .append(programmeTime(next.end)).append(")")
+            }
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(18,4,8,4)
