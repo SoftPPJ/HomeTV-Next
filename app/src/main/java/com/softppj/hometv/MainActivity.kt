@@ -2501,6 +2501,21 @@ class MainActivity: Activity() {
         "Fill / Crop","Zoom 110%","Zoom 125%","Zoom 150%"->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         else->androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
+    private fun prepareVideoView(view:PlayerView){
+        val mode=screenMode()
+        view.resizeMode=resizeMode()
+        view.setBackgroundColor(android.graphics.Color.BLACK)
+        val ratio=when(mode){
+            "16:9"->16f/9f
+            "4:3"->4f/3f
+            "21:9"->21f/9f
+            "1:1"->1f
+            else->0f
+        }
+        if(ratio>0f){
+            view.findViewById<androidx.media3.ui.AspectRatioFrameLayout>(androidx.media3.ui.R.id.exo_content_frame)?.setAspectRatio(ratio)
+        }
+    }
     private fun applyVideoSize(){
         val mode=screenMode()
         val forcedRatio=when(mode){
@@ -2707,6 +2722,7 @@ class MainActivity: Activity() {
                                     resizeMode=resizeMode()
                                 }
                                 currentPlayerView=view
+                                prepareVideoView(view)
                                 screen.addView(view,FrameLayout.LayoutParams(-1,-1))
                                 exo.addListener(object:Player.Listener {
                                     override fun onPlayerError(error:PlaybackException) { fallback.run() }
@@ -2853,6 +2869,7 @@ class MainActivity: Activity() {
                 setBackgroundColor(android.graphics.Color.BLACK)
             }
             currentPlayerView=view
+            prepareVideoView(view)
             screen.addView(view,FrameLayout.LayoutParams(-1,-1))
             applyVideoSize()
             val startupTimeout=Runnable{
