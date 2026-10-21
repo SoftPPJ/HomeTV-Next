@@ -393,7 +393,33 @@ class MainActivity: Activity() {
         handler.post{if(active==index)playIndex(next)}
         return true
     }
+    private fun hasNetworkConnection():Boolean{
+        val manager=getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        return try{manager?.activeNetworkInfo?.isConnected==true}catch(_:Exception){true}
+    }
+    private var networkRecoveryTask:Runnable?=null
+    private fun awaitNetworkRecovery(index:Int,screen:FrameLayout){
+        networkRecoveryTask?.let{handler.removeCallbacks(it)}
+        if(index !in channels.indices || active!=index || videoScreen!==screen)return
+        showBanner("Internet disconnected • Waiting to reconnect",true)
+        val task=object:Runnable{
+            override fun run(){
+                if(active!=index || videoScreen!==screen)return
+                if(hasNetworkConnection()){
+                    networkRecoveryTask=null
+                    if(active==index && videoScreen===screen)playIndex(index)
+                }else handler.postDelayed(this,3000L)
+            }
+        }
+        networkRecoveryTask=task
+        handler.postDelayed(task,3000L)
+    }
     private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
+        // A device-wide outage is not evidence that an individual stream is broken.
+        if(!hasNetworkConnection()){
+            awaitNetworkRecovery(index,screen)
+            return true
+        }
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
@@ -1486,6 +1512,12 @@ class MainActivity: Activity() {
     // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
         if(generation!=backgroundProbeGeneration || !licenseReady)return
+        if(!hasNetworkConnection()){
+            periodicProbeTask?.let{handler.removeCallbacks(it)}
+            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+            handler.postDelayed(periodicProbeTask!!,15000L)
+            return
+        }
         val busy=active>=0 && (player?.playbackState==Player.STATE_BUFFERING ||
             player?.playbackState==Player.STATE_IDLE)
         val limit=if(busy)1 else 2
@@ -3170,6 +3202,8 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        networkRecoveryTask?.let{handler.removeCallbacks(it)}
+        networkRecoveryTask=null
         closeVideoPreview()
         playbackGeneration++
         startupWatchdog?.let{handler.removeCallbacks(it)}
