@@ -368,7 +368,7 @@ class MainActivity: Activity() {
         }
         val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
             .setItems(options.mapIndexed{n,i->
-                "Source "+(n+1)+(if(i==active)"  •  Playing" else "")+"  ·  "+(try{Uri.parse(channels[i].url).host?:"Stream"}catch(_:Exception){"Stream"})
+                "URL "+(n+1)+(if(i==active)"  •  Playing" else "")
             }.toTypedArray()){_,choice->
                 val target=options[choice]
                 alternativeAttempted.clear()
@@ -907,7 +907,7 @@ class MainActivity: Activity() {
             "Exit"
         )
         val dialog=AlertDialog.Builder(this)
-            .setTitle(c.name+" · Channel options")
+            .setTitle(numberFor(i).toString()+". "+c.name+" Settings")
             .setSingleChoiceItems(opts,-1){d,v->
                 d.dismiss()
                 when(v){
@@ -928,7 +928,8 @@ class MainActivity: Activity() {
             .setNegativeButton("Back",null).create()
         dialog.setOnShowListener{
             dialog.listView?.apply{
-                choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+                choiceMode=android.widget.ListView.CHOICE_MODE_NONE
+                clearChoices()
                 setSelection(0)
                 requestFocus()
             }
@@ -1671,14 +1672,14 @@ class MainActivity: Activity() {
             if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"Remove favorite" else "Add favorite",
             if(isSkipped(c))"Unhide channel" else "Hide channel",
             if(isLocked(c))"Unlock channel" else "Lock channel",
-            "Alternative URL / Source",
-            "Screen size for this channel",
-            "Picture quality for this channel",
+            "Alternative Source",
+            "Aspect Ratio",
+            "Picture Quality",
             "Audio tracks",
-            "Playback engine for this channel",
+            "Playback Engine",
             "Channel list"
         )
-        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Channel options")
+        val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
                 when(choice){
                     0->favorite(c)
@@ -2271,7 +2272,7 @@ class MainActivity: Activity() {
         val options=if(key!=null)arrayOf("Use universal default")+qualityModes else qualityModes
         val current=if(key!=null)prefs.getString(key,null) else prefs.getString("quality_global","Auto")
         val selected=if(key!=null && current==null)0 else options.indexOf(current).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(if(index!=null)"Picture quality · "+channels[index].name else "Universal picture quality")
+        AlertDialog.Builder(this).setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Universal picture quality")
             .setSingleChoiceItems(options,selected){dialog,choice->
                 val editor=prefs.edit()
                 if(key!=null){
@@ -2375,7 +2376,7 @@ class MainActivity: Activity() {
             editor.apply()
         }
         val dialog=AlertDialog.Builder(this)
-            .setTitle(if(target!=null)"Aspect Ratio · "+channels[target].name else "Universal aspect ratio")
+            .setTitle(if(target!=null)numberFor(target).toString()+". "+channels[target].name+" Settings — Aspect Ratio" else "Universal aspect ratio")
             .setSingleChoiceItems(labels,selected){d,position->
                 preview(position)
                 // Android TV remote OK on a list row is a completed selection.
