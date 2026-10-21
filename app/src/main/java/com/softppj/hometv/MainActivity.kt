@@ -285,7 +285,8 @@ class MainActivity: Activity() {
         playedThisSession.add(channelKey(c))
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
-        val engine=fallbackEngineOverride ?: if(vlcPlayer!=null)"LibVLC" else "Media3"
+        // Record the player that actually reached playback, not a pending fallback hint.
+        val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
         if(engine=="Media3"){
             probeReachable[c.url]=true
             prefs.edit().putBoolean("media3_verified_"+hash(c.url),true)
@@ -370,7 +371,7 @@ class MainActivity: Activity() {
     private fun selectAlternative(index:Int){
         val options=alternateIndices(index)
         if(options.size<=1){
-            Toast.makeText(this,"No alternative URL for this channel",Toast.LENGTH_SHORT).show()
+            Toast.makeText(this,"No alternative stream for this channel",Toast.LENGTH_SHORT).show()
             return
         }
         val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
@@ -1025,7 +1026,7 @@ class MainActivity: Activity() {
             "Picture quality",
             "Audio tracks",
             "Playback engine",
-            "Alternative stream / URL",
+            "Alternative stream",
             if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
             "Lock / Unlock",
             if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
