@@ -2866,7 +2866,7 @@ class MainActivity: Activity() {
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
                     if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
-                        android.os.SystemClock.elapsedRealtime()-lastHealthy>18000L){
+                        android.os.SystemClock.elapsedRealtime()-lastHealthy>10000L){
                         failed=true
                         autoBufferStalled()
                         android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
@@ -2917,7 +2917,7 @@ class MainActivity: Activity() {
                     }
                 }
             }
-            handler.postDelayed(watchdog,9000)
+            handler.postDelayed(watchdog,6000L)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
