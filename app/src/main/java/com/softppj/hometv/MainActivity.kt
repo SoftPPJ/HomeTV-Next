@@ -863,15 +863,28 @@ class MainActivity: Activity() {
         }
     }
     private val manuallyHiddenIds get()=prefs.getStringSet("manually_hidden_channels",emptySet()) ?: emptySet()
-    private fun isManuallyHidden(c:Channel)=manuallyHiddenIds.contains(id(c))
+    // Persist a channel identity rather than its stream URL. Playlist refreshes and
+    // fallback to alternative URLs must never restore a manually hidden channel.
+    private fun hiddenChannelId(c:Channel)="channel:"+channelKey(c)
+    private fun isManuallyHidden(c:Channel):Boolean{
+        val saved=manuallyHiddenIds
+        if(saved.contains(hiddenChannelId(c)))return true
+        // Honor existing installations which stored URL-based hidden entries.
+        ensureChannelIndex()
+        return (channelByKey[channelKey(c)] ?:emptyList()).any{saved.contains(id(channels[it]))}
+    }
     private fun toggleManualHide(c:Channel){
         val updated=manuallyHiddenIds.toMutableSet()
-        if(!updated.add(id(c)))updated.remove(id(c))
+        val shouldHide=!isManuallyHidden(c)
+        // Remove obsolete URL-based entries for all alternatives when restoring.
+        ensureChannelIndex()
+        (channelByKey[channelKey(c)] ?:emptyList()).forEach{updated.remove(id(channels[it]))}
+        if(shouldHide)updated.add(hiddenChannelId(c)) else updated.remove(hiddenChannelId(c))
         prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
-        Toast.makeText(this,if(isManuallyHidden(c))"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
+        Toast.makeText(this,if(shouldHide)"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
     private fun hiddenChannels(){
-        val hidden=channels.indices.filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
+        val hidden=channelNumbers().filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
         channelCollection("Hidden channels",hidden)
         if(manuallyHiddenGroups.isNotEmpty()){
             root.addView(button("Restore hidden group"){
@@ -1879,7 +1892,7 @@ class MainActivity: Activity() {
             .setItems(opts){_,choice->
                 when(choice){
                     0->favorite(c)
-                    1->toggleChannelSkip(c)
+                    1->{toggleManualHide(c);showBanner(if(isManuallyHidden(c))"Channel hidden until manually restored" else "Channel restored")}
                     2->toggleLock(id(c),false)
                     3->selectAlternative(active)
                     4->selectScreenMode(active)
