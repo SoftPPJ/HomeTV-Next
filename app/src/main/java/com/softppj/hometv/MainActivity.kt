@@ -1568,6 +1568,22 @@ class MainActivity: Activity() {
         }
     }
 
+    private fun prioritizeRequestedChannel(){
+        // Channel changes take priority over optional background checks.
+        // Invalidate outstanding scan results; existing HTTP probes finish independently.
+        backgroundProbeGeneration++
+        periodicProbeTask?.let{handler.removeCallbacks(it)}
+        periodicProbeTask=null
+        probeQueue.clear()
+        probeInFlight=0
+        stopVlcProbe()
+        vlcProbeQueue.clear()
+        // Resume optional checking only after the requested channel has had time to start.
+        if(prefs.getBoolean("background_url_checks",false)){
+            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+            handler.postDelayed(periodicProbeTask!!,12000L)
+        }
+    }
     private fun startBackgroundChannelChecks(){
         if(!licenseReady)return
         backgroundProbeGeneration++
@@ -2717,6 +2733,7 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        prioritizeRequestedChannel()
         playbackGeneration++
         autoBufferStableSince=0L
         startupWatchdog?.let{handler.removeCallbacks(it)}
@@ -2796,9 +2813,21 @@ class MainActivity: Activity() {
             viewer.webViewClient=object:WebViewClient(){
                 override fun onPageFinished(view:WebView,url:String){
                     super.onPageFinished(view,url)
-                    // Do not override YouTube video elements or repeatedly force unmute.
-                    // Leave the native player controls available for a real remote interaction.
-
+                    // Expand the YouTube video surface to fill the TV display.
+                    // CSS layout avoids browser Fullscreen API gesture restrictions.
+                    if(youtubeUri!=null && web===view && active==index && videoScreen===screen){
+                        val fullScreenCss = """(function(){
+                            if(document.getElementById('hometv-tv-fullscreen'))return;
+                            var style=document.createElement('style');
+                            style.id='hometv-tv-fullscreen';
+                            style.textContent='html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:#000!important;width:100%!important;height:100%!important}'+
+                              'ytd-app,ytd-watch-flexy,#page-manager,#player,#full-bleed-container,#player-container-outer,#player-container-inner,#movie_player,.html5-video-player,.html5-video-container,video{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;max-width:100vw!important;max-height:100vh!important;margin:0!important;padding:0!important;background:#000!important}'+
+                              'video{object-fit:contain!important}'+
+                              '#masthead-container,#secondary,#below,#comments,#related,#chat,#guide,#guide-button,ytd-mini-guide-renderer{display:none!important}';
+                            (document.head||document.documentElement).appendChild(style);
+                        })();"""
+                        view.evaluateJavascript(fullScreenCss,null)
+                    }
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
                     if(request.isForMainFrame && web===view){
