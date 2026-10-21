@@ -3353,6 +3353,13 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        // Give a visible AlertDialog its own remote OK and directional navigation.
+        // Avoid processing dialog keys as channel commands in the Activity.
+        if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
+        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount>0 &&
+            (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
+             event.keyCode==KeyEvent.KEYCODE_ENTER ||
+             event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER))return true
         if(event.action==KeyEvent.ACTION_DOWN && active>=0 &&
             (event.keyCode==KeyEvent.KEYCODE_VOLUME_UP || event.keyCode==KeyEvent.KEYCODE_VOLUME_DOWN)){
             val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
