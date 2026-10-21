@@ -846,7 +846,7 @@ class MainActivity: Activity() {
     }
     private fun favorites(){
         prefs.edit().putBoolean("favorites_surfing",true).apply()
-        channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && favoriteIds.contains(id(channels[it]))})
+        channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && favoriteIds.contains(id(channels[it]))})
     }
     // User-defined ordering is stored independently for Favorites and each channel list.
     // The stable source + channel + URL identifier avoids mixing different playlists.
@@ -905,7 +905,12 @@ class MainActivity: Activity() {
                 return view
             }
         }
-        list.setOnItemClickListener{_,_,position,_->playIndex(preferredChannel(indices[position]))}
+        list.setOnItemClickListener{_,_,position,_->
+            val selected=indices[position]
+            if(title=="Hidden channels" && (isManuallyHidden(channels[selected]) || isGroupHidden(channels[selected].group)))
+                channelOptions(selected)
+            else playIndex(preferredChannel(selected))
+        }
         list.setOnItemLongClickListener{_,_,position,_->
             val i=indices[position]
             val options=arrayOf("Channel Settings","Move Up","Move Down")
