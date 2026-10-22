@@ -501,18 +501,21 @@ class MainActivity: Activity() {
         val key=channelKey(c)
         val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
         if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
-            unavailableChannels.add(key)
-            showBanner(c.name+" unavailable • Skipping until next restart",true)
-            val available=surfingIndices()
-            if(available.isNotEmpty()){
-                handler.post{if(active==index && videoScreen===screen){
-                    val next=if(surfingDirection<0)
-                        available.lastOrNull{it<index} ?: available.last()
-                    else available.firstOrNull{it>index} ?: available.first()
-                    playIndex(preferredChannel(next))
-                }}
+            if(prefs.getBoolean("auto_skip_nonworking",true)){
+                unavailableChannels.add(key)
+                showBanner(c.name+" unavailable • Skipping until next restart",true)
+                val available=surfingIndices()
+                if(available.isNotEmpty()){
+                    handler.post{if(active==index && videoScreen===screen){
+                        val next=nextSurfingIndex(index,surfingDirection,available)
+                        if(next>=0)playIndex(preferredChannel(next))
+                    }}
+                }else{
+                    handler.post{if(active==index && videoScreen===screen)showHome()}
+                }
             }else{
-                handler.post{if(active==index && videoScreen===screen)showHome()}
+                // Leave the failed channel selected; user decides when to move.
+                showBanner(c.name+" unavailable • Auto-skip is OFF",true)
             }
         }else showBanner(c.name+" failed • Try another stream",true)
         engineAttempts.clear()
@@ -3307,6 +3310,11 @@ class MainActivity: Activity() {
             settings()
         })
         root.addView(label("YouTube playback: WebView watch page (restored compatibility mode)"))
+        root.addView(button("Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_nonworking",true))"ON" else "OFF"){
+            prefs.edit().putBoolean("auto_skip_nonworking",!prefs.getBoolean("auto_skip_nonworking",true)).apply()
+            settings()
+        })
+        root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
         root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
             prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
         })
