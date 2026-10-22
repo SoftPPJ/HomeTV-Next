@@ -3096,18 +3096,29 @@ class MainActivity: Activity() {
     // Choose the nearest eligible channel strictly in the requested direction.
     // Compare playlist positions, not positions in the filtered surfing list.
     private fun nextSurfingIndex(current:Int,delta:Int,available:List<Int>):Int{
-        val representatives=channelNumbers()
-        val currentKey=channels.getOrNull(current)?.let{channelKey(it)}
-        val currentPosition=representatives.indexOfFirst{channelKey(channels[it])==currentKey}
-        val ordered=available.sortedBy{candidate->
-            representatives.indexOfFirst{channelKey(channels[it])==channelKey(channels[candidate])}
+        if(available.isEmpty())return -1
+        // Use the cached playlist positions rather than repeatedly scanning every
+        // channel for every remote key press (which could freeze large playlists).
+        ensureChannelIndex()
+        val currentPosition=channels.getOrNull(current)?.let{channelPosition[channelKey(it)]} ?: 0
+        var forwardIndex=-1
+        var forwardPosition=Int.MAX_VALUE
+        var backwardIndex=-1
+        var backwardPosition=Int.MIN_VALUE
+        var firstIndex=-1
+        var firstPosition=Int.MAX_VALUE
+        var lastIndex=-1
+        var lastPosition=Int.MIN_VALUE
+        for(candidate in available){
+            val channel=channels.getOrNull(candidate) ?:continue
+            val position=channelPosition[channelKey(channel)] ?:continue
+            if(position<firstPosition){firstPosition=position;firstIndex=candidate}
+            if(position>lastPosition){lastPosition=position;lastIndex=candidate}
+            if(position>currentPosition && position<forwardPosition){forwardPosition=position;forwardIndex=candidate}
+            if(position<currentPosition && position>backwardPosition){backwardPosition=position;backwardIndex=candidate}
         }
-        if(ordered.isEmpty())return -1
-        val positions=ordered.map{candidate->
-            representatives.indexOfFirst{channelKey(channels[it])==channelKey(channels[candidate])}
-        }
-        return if(delta>=0)ordered[positions.indexOfFirst{it>currentPosition}.takeIf{it>=0} ?: 0]
-            else ordered[positions.indexOfLast{it<currentPosition}.takeIf{it>=0} ?: ordered.lastIndex]
+        return if(delta>=0)if(forwardIndex>=0)forwardIndex else firstIndex
+            else if(backwardIndex>=0)backwardIndex else lastIndex
     }
     private fun switchChannel(delta:Int){
         surfingDirection=if(delta>=0)1 else -1
