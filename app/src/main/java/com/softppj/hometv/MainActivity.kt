@@ -2060,8 +2060,10 @@ class MainActivity: Activity() {
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
         val typed=channelDigits.toIntOrNull()
-        if(typed!=null && typed in 1..channelNumbers().size && !isLocked(channels[channelNumbers()[typed-1]]))showChannelInfo(channelNumbers()[typed-1])
-        else showBanner("Channel "+channelDigits+" is not available")
+        // Never build channel information/EPG overlays for every digit press.
+        // Numeric entry must not disturb the playing video until tuning.
+        if(typed==null || typed !in 1..channelNumbers().size)
+            showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
         channelDigitTask=task
         handler.postDelayed(task,1800)
