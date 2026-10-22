@@ -3049,7 +3049,12 @@ class MainActivity: Activity() {
                 }
             }
             vlc.setEventListener{event->
-                when(event.type){
+                // LibVLC callbacks may arrive on native threads; process them
+                // on the Activity main handler and ignore obsolete players.
+                val eventType=event.type
+                handler.post{
+                    if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return@post
+                    when(eventType){
                     VlcPlayer.Event.Playing->{
                         started=true
                         handler.postDelayed({
@@ -3077,6 +3082,7 @@ class MainActivity: Activity() {
                             handler.removeCallbacks(watchdog)
                             handleEngineFailure(index,screen)
                         }
+                    }
                     }
                 }
             }
