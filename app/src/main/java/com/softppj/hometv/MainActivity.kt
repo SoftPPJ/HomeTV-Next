@@ -927,6 +927,37 @@ class MainActivity: Activity() {
         prefs.edit().putString(key,array.toString()).apply()
         channelCollection(title,reordered)
     }
+    // Long press in channel lists: quick actions only. Never open the right-key settings.
+    private fun showChannelListQuickActions(index:Int,refresh:()->Unit){
+        if(index !in channels.indices)return
+        val c=channels[index]
+        val favorite=channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))}
+        val options=arrayOf(
+            if(isManuallyHidden(c))"Unhide" else "Hide",
+            if(favorite)"Non Favourite" else "Favourite",
+            if(isLocked(c))"Unlock" else "Lock"
+        )
+        showSideDialog(AlertDialog.Builder(this)
+            .setTitle(numberFor(index).toString()+". "+c.name)
+            .setItems(options){_,selection->
+                when(selection){
+                    0->{toggleManualHide(c);refresh()}
+                    1->{favorite(c);refresh()}
+                    2->requirePin {
+                        val locked=(prefs.getStringSet("locked_channels",emptySet())?:emptySet()).toMutableSet()
+                        val related=channelByKey[channelKey(c)] ?: listOf(index)
+                        if(isLocked(c)){
+                            related.forEach{locked.remove(id(channels[it]))}
+                            if(lockGroups.contains(c.group)){
+                                Toast.makeText(this,"This group is locked; unlock the group separately",Toast.LENGTH_LONG).show()
+                            }
+                        }else locked.add(id(c))
+                        prefs.edit().putStringSet("locked_channels",locked).apply()
+                        refresh()
+                    }
+                }
+            }.setNegativeButton("Back",null).create())
+    }
     private fun channelCollection(title:String,indices:List<Int>){
         val indices=orderedChannelIndices(title,indices)
         reset(title+" ("+indices.size+")")
@@ -964,17 +995,13 @@ class MainActivity: Activity() {
             playIndex(preferredChannel(selected))
         }
         list.setOnItemLongClickListener{_,_,position,_->
-            val i=indices[position]
-            val options=arrayOf(if(isManuallyHidden(channels[i]))"Unhide channel" else "Channel Settings","Move Up","Move Down")
-            showSideDialog(AlertDialog.Builder(this)
-                .setTitle(numberFor(i).toString()+". "+channels[i].name+" Settings")
-                .setItems(options){_,selection->
-                    when(selection){
-                        0->{if(isManuallyHidden(channels[i])){toggleManualHide(channels[i]);channelCollection(title,indices)} else channelOptions(i)}
-                        1->moveChannelInList(title,indices,position,-1)
-                        2->moveChannelInList(title,indices,position,1)
-                    }
-                }.setNegativeButton("Back",null).create())
+            val selected=indices[position]
+            showChannelListQuickActions(selected){
+                (list.adapter as android.widget.BaseAdapter).notifyDataSetChanged()
+                // Preserve the selected channel and the open list.
+                list.setSelection(position)
+                list.requestFocus()
+            }
             true
         }
         if(title=="All channels"){
@@ -1001,7 +1028,7 @@ class MainActivity: Activity() {
                 }
             }
         }
-        root.addView(label("Hidden channels remain listed. Long press to unhide · Move Up · Move Down"))
+        root.addView(label("Long press a channel: Hide / Unhide · Favourite · Lock / Unlock"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Back"){showHome()})
     }
@@ -2307,11 +2334,11 @@ class MainActivity: Activity() {
             playIndex(preferredChannel(selected))
         }
         list.setOnItemLongClickListener{_,_,position,_->
-            val selected=available[position]
-            if(isManuallyHidden(channels[selected])){
-                toggleManualHide(channels[selected])
+            showChannelListQuickActions(available[position]){
                 (list.adapter as android.widget.BaseAdapter).notifyDataSetChanged()
-            }else{close();channelOptions(selected)}
+                list.setSelection(position)
+                list.requestFocus()
+            }
             true
         }
         list.setOnKeyListener{_,code,event->
@@ -2409,7 +2436,14 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,position,_->close();playIndex(preferredChannel(indices[position]))}
-        list.setOnItemLongClickListener{_,_,position,_->close();channelOptions(indices[position]);true}
+        list.setOnItemLongClickListener{_,_,position,_->
+            showChannelListQuickActions(indices[position]){
+                (list.adapter as android.widget.BaseAdapter).notifyDataSetChanged()
+                list.setSelection(position)
+                list.requestFocus()
+            }
+            true
+        }
         list.setOnKeyListener{_,code,event->
             if(event.action==KeyEvent.ACTION_DOWN && code==KeyEvent.KEYCODE_DPAD_LEFT){close();showLeftNavigation();true}
             else if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){close();true}
