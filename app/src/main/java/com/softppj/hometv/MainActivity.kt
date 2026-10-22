@@ -1097,11 +1097,17 @@ class MainActivity: Activity() {
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val choices=arrayOf("Auto","Media3","LibVLC")
+        val universal=prefs.getString("engine","Media3") ?: "Media3"
+        val choices=arrayOf("Auto (Universal: "+universal+")","Media3","LibVLC")
+        val selected=when(prefs.getString("manual_engine_"+channelKey(c),null)){
+            "Media3"->1
+            "LibVLC"->2
+            else->0
+        }
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
-            .setSingleChoiceItems(choices,choices.indexOf(prefs.getString("manual_engine_"+channelKey(c),"Auto")).coerceAtLeast(0)){dialog,which->
+            .setSingleChoiceItems(choices,selected){dialog,which->
                 prefs.edit().apply{
-                    if(choices[which]=="Auto")remove("manual_engine_"+channelKey(c))
+                    if(which==0)remove("manual_engine_"+channelKey(c))
                     else putString("manual_engine_"+channelKey(c),choices[which])
                 }.apply()
                 engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
