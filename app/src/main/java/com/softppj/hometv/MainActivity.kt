@@ -3317,6 +3317,22 @@ class MainActivity: Activity() {
             .setMessage(lines.joinToString("\\n"))
             .setPositiveButton("Close",null).show()
     }
+    private fun settingsToggle(title:String,key:String,defaultValue:Boolean,onChanged:(()->Unit)?=null):Button{
+        val enabled=prefs.getBoolean(key,defaultValue)
+        return button(title+"    ["+(if(enabled)"ON" else "OFF")+"]") {
+            val current=prefs.getBoolean(key,defaultValue)
+            AlertDialog.Builder(this).setTitle(title)
+                .setSingleChoiceItems(arrayOf("ON","OFF"),if(current)0 else 1){dialog,which->
+                    val chosen=which==0
+                    if(chosen!=current){
+                        prefs.edit().putBoolean(key,chosen).apply()
+                        onChanged?.invoke()
+                    }
+                    dialog.dismiss()
+                    settings()
+                }.setNegativeButton("Cancel",null).show()
+        }
+    }
     private var settingsFocusedIndex=-1
     private var settingsScrollY=0
     private var settingsScreenVisible=false
@@ -3342,10 +3358,7 @@ class MainActivity: Activity() {
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
         root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
-        root.addView(button("Show EPG in channel info: "+if(prefs.getBoolean("show_channel_epg",true))"ON" else "OFF"){
-            prefs.edit().putBoolean("show_channel_epg",!prefs.getBoolean("show_channel_epg",true)).apply()
-            settings()
-        })
+        root.addView(settingsToggle("Show EPG in channel info","show_channel_epg",true))
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
             val choices=arrayOf("Auto","Media3","LibVLC")
             AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3"))){dialog,i->
@@ -3353,27 +3366,14 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
-        root.addView(button("Live video on Up / Down preview: "+if(prefs.getBoolean("live_channel_preview",false))"ON" else "OFF"){
-            prefs.edit().putBoolean("live_channel_preview",!prefs.getBoolean("live_channel_preview",false)).apply()
-            settings()
-        })
+        root.addView(settingsToggle("Live video on Up / Down preview","live_channel_preview",false))
         root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
-        root.addView(button("Background URL checking: "+if(prefs.getBoolean("background_url_checks",false))"ON" else "OFF"){
-            val enabled=!prefs.getBoolean("background_url_checks",false)
-            prefs.edit().putBoolean("background_url_checks",enabled).apply()
-            startBackgroundChannelChecks()
-            settings()
-        })
+        root.addView(settingsToggle("Background URL checking","background_url_checks",false){startBackgroundChannelChecks()})
         root.addView(label("YouTube playback: WebView watch page (restored compatibility mode)"))
-        root.addView(button("Auto-skip non-working channels: "+if(prefs.getBoolean("auto_skip_nonworking",true))"ON" else "OFF"){
-            prefs.edit().putBoolean("auto_skip_nonworking",!prefs.getBoolean("auto_skip_nonworking",true)).apply()
-            settings()
-        })
+        root.addView(settingsToggle("Auto-skip non-working channels","auto_skip_nonworking",true))
         root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
-        root.addView(button("Auto-reconnect streams: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF"){
-            prefs.edit().putBoolean("auto_reconnect",!prefs.getBoolean("auto_reconnect",true)).apply();settings()
-        })
+        root.addView(settingsToggle("Auto-reconnect streams","auto_reconnect",true))
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
         root.addView(button("Set / change lock password"){
@@ -3392,18 +3392,14 @@ class MainActivity: Activity() {
                 .setPositiveButton("Save"){_,_->save()}.setNegativeButton("Cancel",null).show()}
             if(prefs.contains("pin"))requirePin{prompt()} else prompt()
         })
-        root.addView(button("Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF"){
-            prefs.edit().putBoolean("resume",!prefs.getBoolean("resume",true)).apply();settings()
-        })
+        root.addView(settingsToggle("Resume last channel","resume",true))
         root.addView(button("Open on launch: "+(prefs.getString("launch_screen","Last channel")?:"Last channel")){
             val choices=arrayOf("Home","Last channel","Channels")
             AlertDialog.Builder(this).setTitle("When HomeTV opens").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel"))){dialog,i->
                 prefs.edit().putString("launch_screen",choices[i]).apply();dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
-        root.addView(button("Try launch at device boot: "+if(prefs.getBoolean("boot",false))"ON" else "OFF"){
-            prefs.edit().putBoolean("boot",!prefs.getBoolean("boot",false)).apply();settings()
-        })
+        root.addView(settingsToggle("Try launch at device boot","boot",false))
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
