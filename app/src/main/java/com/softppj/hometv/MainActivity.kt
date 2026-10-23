@@ -380,7 +380,14 @@ class MainActivity: Activity() {
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
     private fun surfingIndices():List<Int>{
-        val base=visibleIndices().filter{!isSkipped(channels[it]) && !isLocked(channels[it]) && !unavailableChannels.contains(channelKey(channels[it]))}
+        val base=visibleIndices().filter{
+            !isSkipped(channels[it]) &&
+            !isLocked(channels[it]) &&
+            !isManuallyHidden(channels[it]) &&
+            !isGroupHidden(channels[it].group) &&
+            !temporaryFailureHidden.contains(channelKey(channels[it])) &&
+            !unavailableChannels.contains(channelKey(channels[it]))
+        }
         val favoritesOnly=prefs.getBoolean("favorites_surfing",false)
         val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
         return orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
