@@ -1010,15 +1010,12 @@ class MainActivity: Activity() {
                 .setPositiveButton("OK",null).create())
             return
         }
-        val statuses=MutableList(hidden.size){"⏳ Waiting"}
-        val rows=hidden.indices.map{position->
-            channels[hidden[position]].name+"    —    "+statuses[position]
-        }.toMutableList()
+        val reachableIndices=mutableListOf<Int>()
+        val rows=mutableListOf<String>()
         val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,rows)
         val progress=AlertDialog.Builder(this).setTitle("Check hidden channels")
             .setAdapter(adapter){_,position->
-                val index=hidden[position]
-                if(statuses[position]!="✓ Reachable")return@setAdapter
+                val index=reachableIndices.getOrNull(position) ?:return@setAdapter
                 val c=channels[index]
                 showSideDialog(AlertDialog.Builder(this).setTitle(c.name)
                     .setMessage("The stream URL responded successfully, but video playback is not verified.")
@@ -1027,8 +1024,8 @@ class MainActivity: Activity() {
                         temporaryFailureHidden.remove(channelKey(c))
                         unavailableChannels.remove(channelKey(c))
                         if(isGroupHidden(c.group))Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
-                        statuses[position]="✓ Unhidden"
-                        rows[position]=c.name+"    —    "+statuses[position]
+                        reachableIndices.removeAt(position)
+                        rows.removeAt(position)
                         adapter.notifyDataSetChanged()
                     }
                     .setNegativeButton("Keep hidden",null).create())
@@ -1068,9 +1065,11 @@ class MainActivity: Activity() {
                 }
                 handler.post{
                     if(!cancelled && progress.isShowing){
-                        statuses[position]=if(reachable)"✓ Reachable" else "✕ Not confirmed"
-                        rows[position]=c.name+"    —    "+statuses[position]+if(reachable)"  (select to Unhide)" else ""
-                        adapter.notifyDataSetChanged()
+                        if(reachable){
+                            reachableIndices.add(index)
+                            rows.add(c.name+"    —    Unhide")
+                            adapter.notifyDataSetChanged()
+                        }
                         progress.setMessage("Checked "+(position+1)+" of "+hidden.size+". Select a reachable channel to unhide.")
                     }
                 }
@@ -1078,7 +1077,7 @@ class MainActivity: Activity() {
             handler.post{
                 if(!cancelled && progress.isShowing){
                     progress.setTitle("Hidden channel check complete")
-                    progress.setMessage("Select any reachable channel to Unhide, or Close to keep the rest hidden.")
+                    progress.setMessage(if(rows.isEmpty())"No hidden channels passed the network check." else "Only reachable hidden channels are listed. Select one to Unhide.")
                     progress.getButton(AlertDialog.BUTTON_NEGATIVE)?.text="Close"
                 }
             }
