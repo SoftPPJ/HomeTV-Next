@@ -312,7 +312,8 @@ class MainActivity: Activity() {
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
         val usable=group.filter{channels[it].url !in failedUrlsThisSession}
-        return usable.firstOrNull{channels[it].url==saved}
+        return group.firstOrNull{channels[it].url==saved}
+            ?:usable.firstOrNull{channels[it].url==saved}
             ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
             ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
             ?:usable.firstOrNull()
@@ -324,6 +325,9 @@ class MainActivity: Activity() {
         unavailableChannels.remove(channelKey(c))
         // Record the player that actually reached playback, not a pending fallback hint.
         val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        if(!prefs.contains("confirmed_engine_"+channelKey(c))){
+            prefs.edit().putString("confirmed_engine_"+channelKey(c),engine).apply()
+        }
         if(engine=="Media3"){
             probeReachable[c.url]=true
             prefs.edit().putBoolean("media3_verified_"+hash(c.url),true)
@@ -333,8 +337,18 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
         }
         engineAttempts.remove(c.url)
-        if(prefs.getString("working_url_"+channelKey(c),null)!=c.url)
+        if(testingAlternativeKey==channelKey(c)){
+            val key=channelKey(c)
+            testingAlternativeKey=null
+            AlertDialog.Builder(this).setTitle("Save working source?")
+                .setMessage("This URL is playing with "+engine+". Make it the default for "+c.name+"?")
+                .setPositiveButton("Save"){_,_->
+                    prefs.edit().putString("working_url_"+key,c.url)
+                        .putString("confirmed_engine_"+key,engine).apply()
+                }.setNegativeButton("Not now",null).show()
+        }else if(prefs.getString("working_url_"+channelKey(c),null)==null){
             prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
+        }
     }
     private var youtubeUnmuteTask:Runnable?=null
     private lateinit var root:LinearLayout
@@ -453,8 +467,78 @@ class MainActivity: Activity() {
         networkRecoveryTask=task
         handler.postDelayed(task,3000L)
     }
+    private val temporaryFailureHidden=mutableSetOf<String>()
+    private var failurePromptKey:String?=null
+    private val failureSearches=mutableSetOf<String>()
+    private fun promptFailedChannel(index:Int,screen:FrameLayout){
+        if(index !in channels.indices || active!=index || videoScreen!==screen)return
+        val c=channels[index]
+        val key=channelKey(c)
+        if(failurePromptKey==key)return
+        failurePromptKey=key
+        AlertDialog.Builder(this).setTitle(c.name+" is not playing")
+            .setMessage("The saved stream is unavailable. Keep trying, hide until HomeTV restarts, or hide permanently?")
+            .setItems(arrayOf("Keep trying","Hide until restart","Hide permanently")){_,choice->
+                failurePromptKey=null
+                when(choice){
+                    0->{ if(active==index && videoScreen===screen)handleEngineFailure(index,screen) }
+                    1->{ temporaryFailureHidden.add(key);unavailableChannels.add(key);if(active==index)showHome() }
+                    2->{ if(!isManuallyHidden(c))toggleManualHide(c);if(active==index)showHome() }
+                }
+            }.setOnCancelListener{failurePromptKey=null}.show()
+    }
+    private fun checkFailedChannelAlternatives(index:Int,screen:FrameLayout){
+        if(index !in channels.indices || active!=index || videoScreen!==screen)return
+        val c=channels[index]
+        val key=channelKey(c)
+        if(!failureSearches.add(key))return
+        val candidates=alternateIndices(index).filter{it!=index}.take(12)
+        if(candidates.isEmpty()){
+            failureSearches.remove(key)
+            promptFailedChannel(index,screen)
+            return
+        }
+        thread(name="HomeTV-recovery-probe"){
+            var found:Int?=null
+            for(candidate in candidates){
+                val entry=channels[candidate]
+                try{
+                    val connection=URL(entry.url).openConnection() as java.net.HttpURLConnection
+                    try{
+                        connection.connectTimeout=3500
+                        connection.readTimeout=3500
+                        connection.instanceFollowRedirects=true
+                        entry.headers.forEach{(k,v)->connection.setRequestProperty(k,v)}
+                        if(connection.responseCode in 200..299 &&
+                            !(connection.contentType ?: "").contains("text/html",true)){
+                            found=candidate
+                            break
+                        }
+                    }finally{connection.disconnect()}
+                }catch(_:Exception){}
+            }
+            handler.post{
+                failureSearches.remove(key)
+                if(active!=index || videoScreen!==screen)return@post
+                val alternative=found
+                if(alternative!=null){
+                    AlertDialog.Builder(this).setTitle("Alternative source available")
+                        .setMessage("A different URL for "+c.name+" responded successfully. This does not guarantee playback. Test it and save it only if it plays?")
+                        .setPositiveButton("Test alternative"){_,_->
+                            if(active==index && videoScreen===screen){
+                                // Test without overwriting the confirmed source.
+                                testingAlternativeKey=key
+                                fallbackEngineOverride=null
+                                playIndex(alternative)
+                            }
+                        }
+                        .setNegativeButton("Keep current",null).show()
+                }else promptFailedChannel(index,screen)
+            }
+        }
+    }
+    private var testingAlternativeKey:String?=null
     private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
-        // A device-wide outage is not evidence that an individual stream is broken.
         if(!hasNetworkConnection()){
             awaitNetworkRecovery(index,screen)
             return true
@@ -462,32 +546,30 @@ class MainActivity: Activity() {
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
-        // Retry the current engine before switching after an intermittent black screen.
+        val key=channelKey(c)
         val attempts=recoveryAttempts[c.url] ?: 0
-        if(prefs.getBoolean("auto_reconnect",true) && attempts<1){
-            recoveryAttempts[c.url]=attempts+1
-            autoBufferStalled()
-            fallbackEngineOverride=current
-            showBanner("Reconnecting "+c.name+" ("+(attempts+1)+"/1)")
-            val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
-            retryTask=task
-            handler.postDelayed(task,1500L*(attempts+1))
-            return true
-        }
-        // After the initial reconnect, continuously retry the SAME URL on the
-        // SAME engine for both Media3 and LibVLC. Never automatically change
-        // the source, engine or channel during a stream interruption.
-        // A viewer can still manually select another channel/source/engine.
-        fallbackEngineOverride=current
-        showBanner("Reconnecting "+c.name+" with "+current)
-        val task=Runnable{
-            if(active==index && videoScreen===screen){
-                fallbackEngineOverride=current
-                playIndex(index)
+        if(!prefs.contains("confirmed_engine_"+key) && testingAlternativeKey!=key){
+            if(current=="Media3" && attempts>=1){
+                recoveryAttempts[c.url]=0
+                fallbackEngineOverride="LibVLC"
+                showBanner("Testing LibVLC for "+c.name)
+                handler.post{if(active==index && videoScreen===screen)playIndex(index)}
+                return true
             }
         }
-        retryTask=task
-        handler.postDelayed(task,3000L)
+        if(attempts<1){
+            recoveryAttempts[c.url]=attempts+1
+            fallbackEngineOverride=current
+            showBanner("Reconnecting "+c.name+" with "+current)
+            val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
+            retryTask=task
+            handler.postDelayed(task,3000L)
+            return true
+        }
+        // The confirmed URL and engine never change without the viewer's approval.
+        fallbackEngineOverride=current
+        showBanner("Stream interrupted • Checking alternatives")
+        checkFailedChannelAlternatives(index,screen)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
@@ -1058,6 +1140,9 @@ class MainActivity: Activity() {
     private fun engineFor(c:Channel):String{
         fallbackEngineOverride?.let{return it}
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
+            if(it=="Media3" || it=="LibVLC")return it
+        }
+        prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
             if(it=="Media3" || it=="LibVLC")return it
         }
         val universal=prefs.getString("engine","Auto") ?: "Auto"
@@ -2767,7 +2852,7 @@ class MainActivity: Activity() {
         val screen=FrameLayout(this).apply{setBackgroundColor(android.graphics.Color.BLACK);isFocusableInTouchMode=true}
         videoScreen=screen
         setContentView(screen)
-        if(alternateIndices(index).size>1)checkChannelAlternativesInParallel(index)
+        // Alternative probing is initiated only after a sustained playback failure.
         val youtubeUri=try{
             val uri=Uri.parse(c.url)
             val host=uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.")
@@ -2938,7 +3023,7 @@ class MainActivity: Activity() {
                                 }
                             }
                             bufferingRecoveryTask=recovery
-                            handler.postDelayed(recovery,10000L)
+                            handler.postDelayed(recovery,30000L)
                         }
                     }else{
                         bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
