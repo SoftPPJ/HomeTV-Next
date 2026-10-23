@@ -478,18 +478,38 @@ class MainActivity: Activity() {
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
         val c=channels[index]
         val key=channelKey(c)
+        if(prefs.contains("confirmed_engine_"+key) &&
+            !prefs.getString("working_url_"+key,null).isNullOrBlank())return
         if(failurePromptKey==key)return
         failurePromptKey=key
-        AlertDialog.Builder(this).setTitle(c.name+" is not playing")
-            .setMessage("The saved stream is unavailable. Keep trying, hide until HomeTV restarts, or hide permanently?")
-            .setItems(arrayOf("Keep trying","Hide until restart","Hide permanently")){_,choice->
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(c.name+" — no playable source found")
+            .setMessage("All URL and player combinations failed on this first attempt. What would you like to do?")
+            .setPositiveButton("Retry all"){_,_->
                 failurePromptKey=null
-                when(choice){
-                    0->{ if(active==index && videoScreen===screen)handleEngineFailure(index,screen) }
-                    1->{ temporaryFailureHidden.add(key);unavailableChannels.add(key);if(active==index)showHome() }
-                    2->{ if(!isManuallyHidden(c))toggleManualHide(c);if(active==index)showHome() }
-                }
-            }.setOnCancelListener{failurePromptKey=null}.show()
+                recoveryPrompted.remove(key)
+                initialTried.remove(key)
+                recoveryAttempts.remove(c.url)
+                fallbackEngineOverride=null
+                if(active==index && videoScreen===screen)playIndex(preferredChannel(index))
+            }
+            .setNeutralButton("Hide until restart"){_,_->
+                failurePromptKey=null
+                temporaryFailureHidden.add(key)
+                unavailableChannels.add(key)
+                if(active==index)showHome()
+            }
+            .setNegativeButton("Hide permanently"){_,_->
+                failurePromptKey=null
+                if(!isManuallyHidden(c))toggleManualHide(c)
+                if(active==index)showHome()
+            }
+            .setOnCancelListener{failurePromptKey=null}
+            .create()
+        dialog.setOnShowListener{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+        }
+        dialog.show()
     }
     private fun checkFailedChannelAlternatives(index:Int,screen:FrameLayout){
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
@@ -576,6 +596,7 @@ class MainActivity: Activity() {
                 recoveryPrompted.add(key)
                 promptFailedChannel(index,screen)
             }
+            return true
         }else if(saved){
             // A confirmed source must never display a hide prompt or switch automatically.
             if(recoveryPrompted.add(key))checkFailedChannelAlternatives(index,screen)
