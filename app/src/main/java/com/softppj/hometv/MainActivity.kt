@@ -1215,7 +1215,21 @@ class MainActivity: Activity() {
         }
         setOnClickListener{action()}
     }
-    private fun reset(title:String) { settingsScreenVisible=false; stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
+    private val navigationHistory=mutableListOf<()->Unit>()
+    private var navigatingBack=false
+    private var currentMenu:(()->Unit)?=null
+    private fun reset(title:String) {
+        val destination:(()->Unit)?=when{
+            title.startsWith("HomeTV  •")->({showHome()})
+            title=="HomeTV Settings"->({settings()})
+            else->null
+        }
+        if(!navigatingBack && destination!=null && currentMenu!=null &&
+            (title=="HomeTV Settings" && !settingsScreenVisible)){
+            navigationHistory.add(currentMenu!!)
+        }
+        if(destination!=null)currentMenu=destination
+        settingsScreenVisible=false; stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
         return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
@@ -3499,11 +3513,11 @@ class MainActivity: Activity() {
     }
     override fun onBackPressed(){
         if(!licenseReady){showHome();return}
-        // Exit confirmation is only available while a channel is playing.
-        // Settings and Home return to the last channel instead of exiting.
-        if(settingsScreenVisible){resumeLast();return}
-        if(active<0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV") == true){
-            resumeLast()
+        // Navigate back to the screen that opened Settings, never exit here.
+        if(settingsScreenVisible){
+            val previous=if(navigationHistory.isNotEmpty())navigationHistory.removeAt(navigationHistory.lastIndex) else ({showHome()})
+            navigatingBack=true
+            try{previous()}finally{navigatingBack=false}
             return
         }
         if(active>=0){
@@ -3517,10 +3531,9 @@ class MainActivity: Activity() {
                 return
             }
             confirmExit()
-        }else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV")!=true){
-            showHome()
         }else{
-            resumeLast()
+            // Non-playback menus return to Home. Exit is offered only in playback.
+            showHome()
         }
     }
     private fun stopPlayback(){
