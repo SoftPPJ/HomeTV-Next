@@ -2172,12 +2172,35 @@ class MainActivity: Activity() {
     }
     private var channelDigits=""
     private var channelDigitTask:Runnable?=null
+    private var numericOverlay:TextView?=null
+    private fun clearNumericOverlay(){
+        numericOverlay?.let{view->
+            (view.parent as? android.view.ViewGroup)?.removeView(view)
+        }
+        numericOverlay=null
+    }
+    private fun showNumericOverlay(){
+        val screen=videoScreen ?:return
+        val view=numericOverlay?.takeIf{it.parent===screen} ?:TextView(this).apply{
+            textSize=34f
+            setTextColor(android.graphics.Color.WHITE)
+            setBackgroundColor(informationColor(0x15283C))
+            setPadding(28,16,28,16)
+            gravity=Gravity.CENTER
+            screen.addView(this,FrameLayout.LayoutParams(-2,-2,Gravity.TOP or Gravity.RIGHT).apply{
+                setMargins(16,60,24,0)
+            })
+            numericOverlay=this
+        }
+        view.text="Channel "+channelDigits
+        view.bringToFront()
+    }
     private fun enterChannelDigit(digit:Int){
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
         val typed=channelDigits.toIntOrNull()
-        // Never build channel information/EPG overlays for every digit press.
-        // Numeric entry must not disturb the playing video until tuning.
+        // Lightweight number display; do not rebuild EPG or video while typing.
+        showNumericOverlay()
         if(typed==null || typed !in 1..channelNumbers().size)
             showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
@@ -2189,6 +2212,7 @@ class MainActivity: Activity() {
         channelDigitTask=null
         val number=channelDigits.toIntOrNull()
         channelDigits=""
+        clearNumericOverlay()
         if(number==null)return
         if(number in 1..channelNumbers().size)playIndex(preferredChannel(channelNumbers()[number-1]))
         else showBanner("Channel "+number+" is not available",true)
@@ -3620,6 +3644,7 @@ class MainActivity: Activity() {
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigitTask=null
         channelDigits=""
+        clearNumericOverlay()
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
         bannerTask?.let{handler.removeCallbacks(it)}
