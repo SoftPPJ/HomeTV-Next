@@ -474,76 +474,20 @@ class MainActivity: Activity() {
             handler.postDelayed(task,1500L*(attempts+1))
             return true
         }
-        // A proven or manually selected LibVLC stream is sticky: interruptions
-        // must never change its URL, player or channel automatically.
-        // Keep retrying this exact URL on LibVLC until the viewer intervenes.
-        val keepVlc=(current=="LibVLC") && (
-            prefs.getBoolean("libvlc_only_"+hash(c.url),false) ||
-            prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
-            prefs.getString("engine","Auto")=="LibVLC")
-        if(keepVlc){
-            fallbackEngineOverride="LibVLC"
-            showBanner("Reconnecting "+c.name+" with LibVLC")
-            val task=Runnable{
-                if(active==index && videoScreen===screen){
-                    fallbackEngineOverride="LibVLC"
-                    playIndex(index)
-                }
+        // After the initial reconnect, continuously retry the SAME URL on the
+        // SAME engine for both Media3 and LibVLC. Never automatically change
+        // the source, engine or channel during a stream interruption.
+        // A viewer can still manually select another channel/source/engine.
+        fallbackEngineOverride=current
+        showBanner("Reconnecting "+c.name+" with "+current)
+        val task=Runnable{
+            if(active==index && videoScreen===screen){
+                fallbackEngineOverride=current
+                playIndex(index)
             }
-            retryTask=task
-            handler.postDelayed(task,3000L)
-            return true
         }
-        val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
-        tried.add(current)
-        // A LibVLC playback failure does not prove that Media3 can play this URL.
-        // Preserve the remembered LibVLC preference until the user changes it.
-        // Exhaust all Media3 alternatives before starting the LibVLC pass.
-        // A previously verified working engine is still used first by engineFor.
-        val options=alternateIndices(index)
-        // A URL already proven on LibVLC must never be retried with Media3
-        // merely because its live stream buffered or disconnected.
-        val pinnedVlc=prefs.getBoolean("libvlc_only_"+hash(c.url),false) ||
-            prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC"
-        val nextMedia3=if(pinnedVlc)null else options.firstOrNull{
-            !prefs.getBoolean("libvlc_only_"+hash(channels[it].url),false) &&
-                !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
-        }
-        val nextVlc=if(nextMedia3==null)options.firstOrNull{
-            !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("LibVLC")
-        }else null
-        val next=nextMedia3 ?: nextVlc
-        if(next!=null){
-            val engine=if(nextMedia3!=null)"Media3" else "LibVLC"
-            fallbackEngineOverride=engine
-            showBanner("Trying "+engine+" alternative for "+c.name)
-            handler.post{if(active==index && videoScreen===screen)playIndex(next)}
-            return true
-        }
-        // Every source has now failed with both players.
-        options.forEach{failedUrlsThisSession.add(channels[it].url)}
-        val key=channelKey(c)
-        val allUrls=channels.filter{channelKey(it)==key}.map{it.url}.distinct()
-        if(allUrls.isNotEmpty() && allUrls.all{it in failedUrlsThisSession}){
-            if(prefs.getBoolean("auto_skip_nonworking",true)){
-                unavailableChannels.add(key)
-                showBanner(c.name+" unavailable • Skipping until next restart",true)
-                val available=surfingIndices()
-                if(available.isNotEmpty()){
-                    handler.post{if(active==index && videoScreen===screen){
-                        val next=nextSurfingIndex(index,surfingDirection,available)
-                        if(next>=0)playIndex(preferredChannel(next))
-                    }}
-                }else{
-                    handler.post{if(active==index && videoScreen===screen)showHome()}
-                }
-            }else{
-                // Leave the failed channel selected; user decides when to move.
-                showBanner(c.name+" unavailable • Auto-skip is OFF",true)
-            }
-        }else showBanner(c.name+" failed • Try another stream",true)
-        engineAttempts.clear()
-        fallbackEngineOverride=null
+        retryTask=task
+        handler.postDelayed(task,3000L)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
