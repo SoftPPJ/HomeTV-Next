@@ -1215,7 +1215,7 @@ class MainActivity: Activity() {
         }
         setOnClickListener{action()}
     }
-    private fun reset(title:String) { stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
+    private fun reset(title:String) { settingsScreenVisible=false; stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
         return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
@@ -1240,7 +1240,7 @@ class MainActivity: Activity() {
         root.addView(button("↻  Rebuild channel playlists"){refresh({showHome()},true)})
         root.addView(button("＋  Manage playlists"){managePlaylists()})
         root.addView(button("⚙  Player & TV settings"){settings()})
-        root.addView(button("⏻  Exit HomeTV"){confirmExit()})
+        root.addView(button("▶  Return to channel"){resumeLast()})
     }
     private val importPlaylistRequest=7291
     private fun importLocalPlaylist(){
@@ -3303,8 +3303,22 @@ class MainActivity: Activity() {
             .setMessage(lines.joinToString("\\n"))
             .setPositiveButton("Close",null).show()
     }
+    private var settingsFocusedIndex=-1
+    private var settingsScrollY=0
+    private var settingsScreenVisible=false
     private fun settings(){
+        // Capture the focused setting before rebuilding the menu after a toggle.
+        if(settingsScreenVisible){
+            val focused=root.findFocus()
+            val child=root.indexOfChild(focused)
+            if(child>=0)settingsFocusedIndex=child
+            settingsScrollY=(root.parent as? android.widget.ScrollView)?.scrollY ?: settingsScrollY
+        }else{
+            settingsFocusedIndex=-1
+            settingsScrollY=0
+        }
         reset("HomeTV Settings")
+        settingsScreenVisible=true
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Export settings backup"){exportSettings()})
@@ -3383,6 +3397,14 @@ class MainActivity: Activity() {
         root.addView(button("Date & time overlay"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
+        val focusIndex=settingsFocusedIndex
+        val savedScroll=settingsScrollY
+        root.post{
+            if(settingsScreenVisible && focusIndex in 1 until root.childCount){
+                root.getChildAt(focusIndex).requestFocus()
+                (root.parent as? android.widget.ScrollView)?.scrollTo(0,savedScroll)
+            }
+        }
     }
     private var volumeOverlay:View?=null
     private var volumeOverlayTask:Runnable?=null
@@ -3476,8 +3498,14 @@ class MainActivity: Activity() {
         return super.dispatchKeyEvent(event)
     }
     override fun onBackPressed(){
-        if(!licenseReady){confirmExit();return}
-        // Back navigates one level; Back from Home exits the application.
+        if(!licenseReady){showHome();return}
+        // Exit confirmation is only available while a channel is playing.
+        // Settings and Home return to the last channel instead of exiting.
+        if(settingsScreenVisible){resumeLast();return}
+        if(active<0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV") == true){
+            resumeLast()
+            return
+        }
         if(active>=0){
             val screen=videoScreen
             val drawer=screen?.findViewWithTag<View>("channel_drawer")
@@ -3492,7 +3520,7 @@ class MainActivity: Activity() {
         }else if(root.childCount>0 && (root.getChildAt(0) as? TextView)?.text?.toString()?.startsWith("HomeTV")!=true){
             showHome()
         }else{
-            confirmExit()
+            resumeLast()
         }
     }
     private fun stopPlayback(){
