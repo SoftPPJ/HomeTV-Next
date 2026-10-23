@@ -312,8 +312,7 @@ class MainActivity: Activity() {
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
         val usable=group.filter{channels[it].url !in failedUrlsThisSession}
-        return group.firstOrNull{channels[it].url==saved}
-            ?:usable.firstOrNull{channels[it].url==saved}
+        return usable.firstOrNull{channels[it].url==saved}
             ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
             ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
             ?:usable.firstOrNull()
@@ -339,18 +338,9 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
         }
         engineAttempts.remove(c.url)
-        if(testingAlternativeKey==channelKey(c)){
-            val key=channelKey(c)
-            testingAlternativeKey=null
-            AlertDialog.Builder(this).setTitle("Save working source?")
-                .setMessage("This URL is playing with "+engine+". Make it the default for "+c.name+"?")
-                .setPositiveButton("Save"){_,_->
-                    prefs.edit().putString("working_url_"+key,c.url)
-                        .putString("confirmed_engine_"+key,engine).apply()
-                }.setNegativeButton("Not now",null).show()
-        }else if(prefs.getString("working_url_"+channelKey(c),null)==null){
-            prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
-        }
+        // Persist every confirmed working URL, whether selected manually or by fallback.
+        prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
+        if(testingAlternativeKey==channelKey(c))testingAlternativeKey=null
     }
     private var youtubeUnmuteTask:Runnable?=null
     private lateinit var root:LinearLayout
@@ -425,6 +415,7 @@ class MainActivity: Activity() {
         val current=options.indexOf(active)
         alternativeAttempted.clear()
         alternativeSessionKey=null
+        prefs.edit().putString("working_url_"+channelKey(channels[options[(current+1)%options.size]]),channels[options[(current+1)%options.size]].url).apply()
         playIndex(options[(current+1)%options.size])
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
@@ -441,6 +432,7 @@ class MainActivity: Activity() {
                 val target=options[choice]
                 alternativeAttempted.clear()
                 alternativeSessionKey=null
+                prefs.edit().putString("working_url_"+channelKey(channels[target]),channels[target].url).apply()
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
@@ -1014,10 +1006,13 @@ class MainActivity: Activity() {
         val rows=mutableListOf<String>()
         val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,rows)
         val progress=AlertDialog.Builder(this).setTitle("Check hidden channels")
-            .setAdapter(adapter){_,position->
-                val index=reachableIndices.getOrNull(position) ?:return@setAdapter
+            .setAdapter(adapter){_,_-> /* Handled without dismissing the results dialog below. */ }
+            .setNegativeButton("Cancel",null).create()
+        progress.setOnShowListener{
+            progress.listView?.setOnItemClickListener{_,_,position,_->
+                val index=reachableIndices.getOrNull(position) ?:return@setOnItemClickListener
                 val c=channels[index]
-                showSideDialog(AlertDialog.Builder(this).setTitle(c.name)
+                AlertDialog.Builder(this).setTitle(c.name)
                     .setMessage("The stream URL responded successfully, but video playback is not verified.")
                     .setPositiveButton("Unhide"){_,_->
                         if(isManuallyHidden(c))toggleManualHide(c)
@@ -1028,10 +1023,9 @@ class MainActivity: Activity() {
                         rows.removeAt(position)
                         adapter.notifyDataSetChanged()
                     }
-                    .setNegativeButton("Keep hidden",null).create())
+                    .setNegativeButton("Keep hidden",null).show()
             }
-            
-            .setNegativeButton("Cancel",null).create()
+        }
         var cancelled=false
         progress.setOnCancelListener{cancelled=true}
         progress.setOnDismissListener{cancelled=true}
