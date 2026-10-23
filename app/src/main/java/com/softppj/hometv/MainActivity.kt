@@ -999,6 +999,87 @@ class MainActivity: Activity() {
         prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
         Toast.makeText(this,if(shouldHide)"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
+    private fun checkHiddenChannelsNow(){
+        val hidden=channelNumbers().filter{
+            isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group) ||
+                temporaryFailureHidden.contains(channelKey(channels[it]))
+        }.distinctBy{channelKey(channels[it])}
+        if(hidden.isEmpty()){
+            showSideDialog(AlertDialog.Builder(this).setTitle("Check hidden channels")
+                .setMessage("There are no hidden channels to check.")
+                .setPositiveButton("OK",null).create())
+            return
+        }
+        val progress=AlertDialog.Builder(this).setTitle("Checking hidden channels")
+            .setMessage("Checking 0 of "+hidden.size+" channels…")
+            .setNegativeButton("Cancel",null).create()
+        var cancelled=false
+        progress.setOnCancelListener{cancelled=true}
+        progress.setOnDismissListener{cancelled=true}
+        progress.show()
+        thread(name="HomeTV-hidden-channel-check"){
+            val candidates=mutableListOf<Int>()
+            hidden.forEachIndexed{position,index->
+                if(cancelled)return@thread
+                val c=channels[index]
+                val urls=alternateIndices(index).map{channels[it]}.ifEmpty{listOf(c)}
+                val reachable=urls.any{candidate->
+                    if(cancelled)return@any false
+                    val address=candidate.url.lowercase(java.util.Locale.ROOT)
+                    if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
+                    if("youtube.com" in address || "youtu.be" in address)return@any false
+                    try{
+                        val connection=URL(candidate.url).openConnection() as java.net.HttpURLConnection
+                        try{
+                            connection.connectTimeout=3500
+                            connection.readTimeout=3500
+                            connection.instanceFollowRedirects=true
+                            connection.setRequestProperty("Range","bytes=0-1023")
+                            connection.setRequestProperty("User-Agent",candidate.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                            candidate.headers.forEach{(key,value)->
+                                if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                            }
+                            val code=connection.responseCode
+                            val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
+                            code in 200..299 && !contentType.contains("text/html")
+                        }finally{connection.disconnect()}
+                    }catch(_:Exception){false}
+                }
+                if(reachable)candidates.add(index)
+                handler.post{
+                    if(!cancelled && progress.isShowing)
+                        progress.setMessage("Checking "+(position+1)+" of "+hidden.size+" channels…")
+                }
+            }
+            handler.post{
+                if(cancelled)return@post
+                progress.dismiss()
+                if(candidates.isEmpty()){
+                    showSideDialog(AlertDialog.Builder(this).setTitle("Hidden channel check")
+                        .setMessage("No hidden channels passed the network check. This check cannot verify decoder playback or DRM.")
+                        .setPositiveButton("OK",null).create())
+                }else{
+                    val names=candidates.map{channels[it].name}.toTypedArray()
+                    showSideDialog(AlertDialog.Builder(this).setTitle("Possible recovered channels ("+candidates.size+")")
+                        .setMessage("These URLs responded successfully. Playback is not yet verified. Select a channel to restore it.")
+                        .setItems(names){_,which->
+                            val c=channels[candidates[which]]
+                            AlertDialog.Builder(this).setTitle("Restore "+c.name+"?")
+                                .setMessage("Network response looks healthy, but actual playback has not been tested. Unhide this channel?")
+                                .setPositiveButton("Unhide"){_,_->
+                                    if(isManuallyHidden(c))toggleManualHide(c)
+                                    if(isGroupHidden(c.group)){
+                                        Toast.makeText(this,"Channel belongs to a hidden group. Restore the group separately.",Toast.LENGTH_LONG).show()
+                                    }
+                                    temporaryFailureHidden.remove(channelKey(c))
+                                    unavailableChannels.remove(channelKey(c))
+                                }
+                                .setNegativeButton("Keep hidden",null).show()
+                        }.setNegativeButton("Close",null).create())
+                }
+            }
+        }
+    }
     private fun hiddenChannels(){
         val hidden=channelNumbers().filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
         channelCollection("Hidden channels",hidden)
@@ -2537,7 +2618,7 @@ class MainActivity: Activity() {
             setPadding(20,18,12,16)
         })
         val groups=visibleIndices().map{channels[it].group}.distinct()
-        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels")+
+        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels")+
             groups.map{"▸  "+it}
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
@@ -2546,7 +2627,7 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemLongClickListener{_,_,choice,_->
-            val group=groups.getOrNull(choice-7)
+            val group=groups.getOrNull(choice-8)
             if(group!=null){close();groupOptions(group);true}else false
         }
         list.setOnItemClickListener{_,_,choice,_->
@@ -2556,11 +2637,12 @@ class MainActivity: Activity() {
                 1->showHome()
                 2->favorites()
                 3->hiddenChannels()
-                4->showEpg()
-                5->refresh({if(active>=0)showChannelInfo(active,"Playlist refresh finished") else showHome()},true)
-                6->showOverlayList()
+                4->checkHiddenChannelsNow()
+                5->showEpg()
+                6->refresh({if(active>=0)showChannelInfo(active,"Playlist refresh finished") else showHome()},true)
+                7->showOverlayList()
                 else->{
-                    val group=groups.getOrNull(choice-7)
+                    val group=groups.getOrNull(choice-8)
                     if(group!=null)showGroupDrawer(group)
                 }
             }
@@ -2573,8 +2655,8 @@ class MainActivity: Activity() {
         val currentGroup=channels.getOrNull(active)?.group
         val selectedGroup=groups.indexOf(currentGroup)
         if(selectedGroup>=0){
-            list.setSelection(selectedGroup+7)
-            list.setItemChecked(selectedGroup+7,true)
+            list.setSelection(selectedGroup+8)
+            list.setItemChecked(selectedGroup+8,true)
         }
         list.requestFocus()
     }
