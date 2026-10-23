@@ -1031,11 +1031,11 @@ class MainActivity: Activity() {
                     .setNegativeButton("Keep hidden",null).create())
             }
             
-            .setMessage("Checking 0 of "+hidden.size+" channels…")
             .setNegativeButton("Cancel",null).create()
         var cancelled=false
         progress.setOnCancelListener{cancelled=true}
-         progress.show()
+        progress.setOnDismissListener{cancelled=true}
+        progress.show()
         thread(name="HomeTV-hidden-channel-check"){
              hidden.forEachIndexed{position,index->
                 if(cancelled)return@thread
@@ -1070,14 +1070,14 @@ class MainActivity: Activity() {
                             rows.add(c.name+"    —    Unhide")
                             adapter.notifyDataSetChanged()
                         }
-                        progress.setMessage("Checked "+(position+1)+" of "+hidden.size+". Select a reachable channel to unhide.")
+                        progress.setTitle("Checking hidden channels: "+(position+1)+"/"+hidden.size)
                     }
                 }
             }
             handler.post{
                 if(!cancelled && progress.isShowing){
                     progress.setTitle("Hidden channel check complete")
-                    progress.setMessage(if(rows.isEmpty())"No hidden channels passed the network check." else "Only reachable hidden channels are listed. Select one to Unhide.")
+                    progress.setTitle(if(rows.isEmpty())"No hidden channels passed the check" else "Reachable channels — select to Unhide")
                     progress.getButton(AlertDialog.BUTTON_NEGATIVE)?.text="Close"
                 }
             }
