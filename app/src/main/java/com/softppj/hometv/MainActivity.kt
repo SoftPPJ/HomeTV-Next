@@ -474,6 +474,26 @@ class MainActivity: Activity() {
             handler.postDelayed(task,1500L*(attempts+1))
             return true
         }
+        // A proven or manually selected LibVLC stream is sticky: interruptions
+        // must never change its URL, player or channel automatically.
+        // Keep retrying this exact URL on LibVLC until the viewer intervenes.
+        val keepVlc=(current=="LibVLC") && (
+            prefs.getBoolean("libvlc_only_"+hash(c.url),false) ||
+            prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC" ||
+            prefs.getString("engine","Auto")=="LibVLC")
+        if(keepVlc){
+            fallbackEngineOverride="LibVLC"
+            showBanner("Reconnecting "+c.name+" with LibVLC")
+            val task=Runnable{
+                if(active==index && videoScreen===screen){
+                    fallbackEngineOverride="LibVLC"
+                    playIndex(index)
+                }
+            }
+            retryTask=task
+            handler.postDelayed(task,3000L)
+            return true
+        }
         val tried=engineAttempts.getOrPut(c.url){mutableSetOf()}
         tried.add(current)
         // A LibVLC playback failure does not prove that Media3 can play this URL.
