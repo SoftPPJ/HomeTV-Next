@@ -2182,17 +2182,17 @@ class MainActivity: Activity() {
     private fun showNumericOverlay(){
         val screen=videoScreen ?:return
         val view=numericOverlay?.takeIf{it.parent===screen} ?:TextView(this).apply{
-            textSize=34f
+            textSize=18f
             setTextColor(android.graphics.Color.WHITE)
             setBackgroundColor(informationColor(0x15283C))
-            setPadding(28,16,28,16)
-            gravity=Gravity.CENTER
-            screen.addView(this,FrameLayout.LayoutParams(-2,-2,Gravity.TOP or Gravity.RIGHT).apply{
-                setMargins(16,60,24,0)
-            })
+            setPadding(18,12,18,12)
+            gravity=Gravity.CENTER_VERTICAL or Gravity.LEFT
+            screen.addView(this,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.62f).toInt(),-2,Gravity.BOTTOM or Gravity.LEFT))
             numericOverlay=this
         }
-        view.text="Channel "+channelDigits
+        val typed=channelDigits.toIntOrNull()
+        val channel=typed?.let{number->channelNumbers().getOrNull(number-1)}?.let{channels.getOrNull(it)}
+        view.text=if(channel!=null) channelDigits+". "+channel.name else "Channel "+channelDigits
         view.bringToFront()
     }
     private fun enterChannelDigit(digit:Int){
