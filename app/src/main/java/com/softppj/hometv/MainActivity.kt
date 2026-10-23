@@ -480,8 +480,10 @@ class MainActivity: Activity() {
         val key=channelKey(c)
         if(prefs.contains("confirmed_engine_"+key) &&
             !prefs.getString("working_url_"+key,null).isNullOrBlank())return
-        if(failurePromptKey==key)return
+        if(failurePromptKey==key || prefs.getBoolean("first_failure_prompted_"+key,false))return
         failurePromptKey=key
+        // Prompt only once per channel identity, even after an app restart.
+        prefs.edit().putBoolean("first_failure_prompted_"+key,true).apply()
         val dialog=AlertDialog.Builder(this)
             .setTitle(c.name+" — no playable source found")
             .setMessage("All URL and player combinations failed on this first attempt. What would you like to do?")
@@ -591,16 +593,15 @@ class MainActivity: Activity() {
                 handler.postDelayed(task,900L)
                 return true
             }
-            // Only first-time discovery may offer hiding.
-            if(!recoveryPrompted.contains(key)){
-                recoveryPrompted.add(key)
+            // First unsuccessful discovery may offer hiding once. On later failures,
+            // keep retrying the current source without repeating the dialog.
+            if(!prefs.getBoolean("first_failure_prompted_"+key,false)){
                 promptFailedChannel(index,screen)
+                return true
             }
-            return true
-        }else if(saved){
-            // A confirmed source must never display a hide prompt or switch automatically.
-            if(recoveryPrompted.add(key))checkFailedChannelAlternatives(index,screen)
         }
+        // Confirmed sources never probe or switch to alternatives automatically.
+        // Alternative selection is available manually from channel settings.
         fallbackEngineOverride=current
         val count=(recoveryAttempts[c.url] ?: 0)+1
         recoveryAttempts[c.url]=count
