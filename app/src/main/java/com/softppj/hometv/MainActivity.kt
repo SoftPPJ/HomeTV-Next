@@ -596,7 +596,9 @@ class MainActivity: Activity() {
                 }
             }.setNegativeButton("Back",null).create())
     }
-    private fun visibleIndices()=channelNumbers().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group)}
+    // Keep hidden channels visible in lists for manual playback and long-press unhide.
+    // Normal CH+/CH- surfing still excludes hidden channels via surfingIndices().
+    private fun visibleIndices()=channelNumbers()
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
