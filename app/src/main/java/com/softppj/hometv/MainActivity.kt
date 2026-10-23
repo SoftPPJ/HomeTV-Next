@@ -474,6 +474,15 @@ class MainActivity: Activity() {
     private val recoveryPrompted=mutableSetOf<String>()
     private var failurePromptKey:String?=null
     private val failureSearches=mutableSetOf<String>()
+    private fun moveAfterFailedChannelHidden(index:Int,screen:FrameLayout){
+        if(active!=index || videoScreen!==screen)return
+        val available=surfingIndices().filter{candidate->
+            candidate in channels.indices && channelKey(channels[candidate])!=channelKey(channels[index])
+        }
+        val next=nextSurfingIndex(index,surfingDirection,available)
+        if(next>=0)playIndex(preferredChannel(next))
+        else showHome() // No other surfable channel remains.
+    }
     private fun promptFailedChannel(index:Int,screen:FrameLayout){
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
         val c=channels[index]
@@ -499,12 +508,12 @@ class MainActivity: Activity() {
                 failurePromptKey=null
                 temporaryFailureHidden.add(key)
                 unavailableChannels.add(key)
-                if(active==index)showHome()
+                moveAfterFailedChannelHidden(index,screen)
             }
             .setNegativeButton("Hide permanently"){_,_->
                 failurePromptKey=null
                 if(!isManuallyHidden(c))toggleManualHide(c)
-                if(active==index)showHome()
+                moveAfterFailedChannelHidden(index,screen)
             }
             .setOnCancelListener{failurePromptKey=null}
             .create()
