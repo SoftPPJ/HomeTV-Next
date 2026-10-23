@@ -481,7 +481,11 @@ class MainActivity: Activity() {
         // Exhaust all Media3 alternatives before starting the LibVLC pass.
         // A previously verified working engine is still used first by engineFor.
         val options=alternateIndices(index)
-        val nextMedia3=options.firstOrNull{
+        // A URL already proven on LibVLC must never be retried with Media3
+        // merely because its live stream buffered or disconnected.
+        val pinnedVlc=prefs.getBoolean("libvlc_only_"+hash(c.url),false) ||
+            prefs.getString("manual_engine_"+channelKey(c),null)=="LibVLC"
+        val nextMedia3=if(pinnedVlc)null else options.firstOrNull{
             !prefs.getBoolean("libvlc_only_"+hash(channels[it].url),false) &&
                 !engineAttempts.getOrPut(channels[it].url){mutableSetOf()}.contains("Media3")
         }
@@ -3033,7 +3037,7 @@ class MainActivity: Activity() {
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
                     if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
-                        android.os.SystemClock.elapsedRealtime()-lastHealthy>10000L){
+                        android.os.SystemClock.elapsedRealtime()-lastHealthy>30000L){
                         failed=true
                         autoBufferStalled()
                         android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
@@ -3071,7 +3075,10 @@ class MainActivity: Activity() {
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
                     }
-                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged->{
+                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged,
+                    VlcPlayer.Event.Buffering->{
+                        // Buffering is not a playback failure. Give LibVLC time
+                        // to recover without changing engines or tearing it down.
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
                     }
                     VlcPlayer.Event.Stopped, VlcPlayer.Event.EndReached->handler.post{
