@@ -395,11 +395,22 @@ class MainActivity: Activity() {
             Toast.makeText(this,"No channels are skipped",Toast.LENGTH_SHORT).show()
             return
         }
+        val rows=skipped.toMutableList()
+        val labels=rows.map{(it+1).toString()+". "+channels[it].name}.toMutableList()
+        val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
         val dialog=AlertDialog.Builder(this).setTitle("Restore skipped channels")
-            .setItems(skipped.map{(it+1).toString()+". "+channels[it].name}.toTypedArray()){_,position->
-                toggleChannelSkip(channels[skipped[position]])
-                if(active<0)settings()
-            }.setNegativeButton("Close",null).create()
+            .setAdapter(adapter){_,_->}
+            .setNegativeButton("Close",null).create()
+        dialog.setOnShowListener{
+            dialog.listView?.setOnItemClickListener{_,_,position,_->
+                val selected=rows.getOrNull(position) ?:return@setOnItemClickListener
+                toggleChannelSkip(channels[selected])
+                rows.removeAt(position)
+                labels.removeAt(position)
+                adapter.notifyDataSetChanged()
+                dialog.setTitle("Restore skipped channels ("+rows.size+" remaining)")
+            }
+        }
         showSideDialog(dialog)
     }
     private fun sameChannel(a:Channel,b:Channel)=channelKey(a)==channelKey(b)
