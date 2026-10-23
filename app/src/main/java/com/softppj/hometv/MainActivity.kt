@@ -1010,16 +1010,37 @@ class MainActivity: Activity() {
                 .setPositiveButton("OK",null).create())
             return
         }
-        val progress=AlertDialog.Builder(this).setTitle("Checking hidden channels")
+        val statuses=MutableList(hidden.size){"⏳ Waiting"}
+        val rows=hidden.indices.map{position->
+            channels[hidden[position]].name+"    —    "+statuses[position]
+        }.toMutableList()
+        val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,rows)
+        val progress=AlertDialog.Builder(this).setTitle("Check hidden channels")
+            .setAdapter(adapter){_,position->
+                val index=hidden[position]
+                if(statuses[position]!="✓ Reachable")return@setAdapter
+                val c=channels[index]
+                showSideDialog(AlertDialog.Builder(this).setTitle(c.name)
+                    .setMessage("The stream URL responded successfully, but video playback is not verified.")
+                    .setPositiveButton("Unhide"){_,_->
+                        if(isManuallyHidden(c))toggleManualHide(c)
+                        temporaryFailureHidden.remove(channelKey(c))
+                        unavailableChannels.remove(channelKey(c))
+                        if(isGroupHidden(c.group))Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
+                        statuses[position]="✓ Unhidden"
+                        rows[position]=c.name+"    —    "+statuses[position]
+                        adapter.notifyDataSetChanged()
+                    }
+                    .setNegativeButton("Keep hidden",null).create())
+            }
+            
             .setMessage("Checking 0 of "+hidden.size+" channels…")
             .setNegativeButton("Cancel",null).create()
         var cancelled=false
         progress.setOnCancelListener{cancelled=true}
-        progress.setOnDismissListener{cancelled=true}
-        progress.show()
+         progress.show()
         thread(name="HomeTV-hidden-channel-check"){
-            val candidates=mutableListOf<Int>()
-            hidden.forEachIndexed{position,index->
+             hidden.forEachIndexed{position,index->
                 if(cancelled)return@thread
                 val c=channels[index]
                 val urls=alternateIndices(index).map{channels[it]}.ifEmpty{listOf(c)}
@@ -1045,37 +1066,20 @@ class MainActivity: Activity() {
                         }finally{connection.disconnect()}
                     }catch(_:Exception){false}
                 }
-                if(reachable)candidates.add(index)
                 handler.post{
-                    if(!cancelled && progress.isShowing)
-                        progress.setMessage("Checking "+(position+1)+" of "+hidden.size+" channels…")
+                    if(!cancelled && progress.isShowing){
+                        statuses[position]=if(reachable)"✓ Reachable" else "✕ Not confirmed"
+                        rows[position]=c.name+"    —    "+statuses[position]+if(reachable)"  (select to Unhide)" else ""
+                        adapter.notifyDataSetChanged()
+                        progress.setMessage("Checked "+(position+1)+" of "+hidden.size+". Select a reachable channel to unhide.")
+                    }
                 }
             }
             handler.post{
-                if(cancelled)return@post
-                progress.dismiss()
-                if(candidates.isEmpty()){
-                    showSideDialog(AlertDialog.Builder(this).setTitle("Hidden channel check")
-                        .setMessage("No hidden channels passed the network check. This check cannot verify decoder playback or DRM.")
-                        .setPositiveButton("OK",null).create())
-                }else{
-                    val names=candidates.map{channels[it].name}.toTypedArray()
-                    showSideDialog(AlertDialog.Builder(this).setTitle("Possible recovered channels ("+candidates.size+")")
-                        .setMessage("These URLs responded successfully. Playback is not yet verified. Select a channel to restore it.")
-                        .setItems(names){_,which->
-                            val c=channels[candidates[which]]
-                            AlertDialog.Builder(this).setTitle("Restore "+c.name+"?")
-                                .setMessage("Network response looks healthy, but actual playback has not been tested. Unhide this channel?")
-                                .setPositiveButton("Unhide"){_,_->
-                                    if(isManuallyHidden(c))toggleManualHide(c)
-                                    if(isGroupHidden(c.group)){
-                                        Toast.makeText(this,"Channel belongs to a hidden group. Restore the group separately.",Toast.LENGTH_LONG).show()
-                                    }
-                                    temporaryFailureHidden.remove(channelKey(c))
-                                    unavailableChannels.remove(channelKey(c))
-                                }
-                                .setNegativeButton("Keep hidden",null).show()
-                        }.setNegativeButton("Close",null).create())
+                if(!cancelled && progress.isShowing){
+                    progress.setTitle("Hidden channel check complete")
+                    progress.setMessage("Select any reachable channel to Unhide, or Close to keep the rest hidden.")
+                    progress.getButton(AlertDialog.BUTTON_NEGATIVE)?.text="Close"
                 }
             }
         }
