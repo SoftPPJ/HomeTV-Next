@@ -798,7 +798,7 @@ class MainActivity: Activity() {
             }.setNegativeButton("Cancel",null).create())
     }
     private var epgTuneTask:Runnable?=null
-    private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme){
+    private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme,mode:String="auto"){
         val now=System.currentTimeMillis()
         if(programme.start<=now){
             val index=channels.indexOfFirst{sameChannel(it,channel)}
@@ -812,10 +812,11 @@ class MainActivity: Activity() {
             return
         }
         saved.put(JSONObject().put("key",key).put("url",channel.url)
-            .put("start",programme.start).put("title",programme.title))
+            .put("start",programme.start).put("title",programme.title)
+            .put("mode",mode).put("channel_key",channelKey(channel)))
         prefs.edit().putString("epg_tune_schedules",saved.toString()).apply()
         armEpgTune()
-        Toast.makeText(this,"Auto-switch scheduled for "+programmeTime(programme.start)+" • "+programme.title,Toast.LENGTH_LONG).show()
+        Toast.makeText(this,(if(mode=="auto")"Auto-switch" else "Reminder")+" scheduled for "+programmeTime(programme.start)+" • "+programme.title,Toast.LENGTH_LONG).show()
     }
     private fun armEpgTune(){
         epgTuneTask?.let{handler.removeCallbacks(it)}
@@ -834,23 +835,42 @@ class MainActivity: Activity() {
         val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
         val now=System.currentTimeMillis()
         val keep=JSONArray()
-        var target:String?=null
+        val due=mutableListOf<JSONObject>()
         for(i in 0 until saved.length()){
             val entry=saved.optJSONObject(i) ?:continue
             val start=entry.optLong("start")
-            if(start<=now && start>=now-120000L)target=entry.optString("url")
+            if(start<=now && start>=now-120000L)due.add(entry)
             else if(start>now)keep.put(entry)
         }
         prefs.edit().putString("epg_tune_schedules",keep.toString()).apply()
-        if(target!=null){
-            val index=channels.indexOfFirst{it.url==target}
+        // If several programmes begin together, use the most recently added
+        // one. Resolve by logical channel identity first, then original URL.
+        val entry=due.lastOrNull()
+        if(entry!=null){
+            val key=entry.optString("channel_key")
+            val url=entry.optString("url")
+            val index=channels.indexOfFirst{channelKey(it)==key}.takeIf{it>=0}
+                ?:channels.indexOfFirst{it.url==url}
             if(index>=0){
                 val channelName=channels[index].name
-                showSideDialog(AlertDialog.Builder(this)
-                    .setTitle("Programme reminder")
-                    .setMessage("The scheduled programme on "+channelName+" is starting. Switch to this channel?")
-                    .setPositiveButton("OK"){_,_->playIndex(preferredChannel(index))}
-                    .setNegativeButton("Stay here",null).create())
+                val target=preferredChannel(index)
+                if(entry.optString("mode","reminder")=="auto"){
+                    // Auto-switch only when HomeTV is active; do not start
+                    // playback in the background or bypass channel locks.
+                    if(!isFinishing && !isDestroyed){
+                        if(isLocked(channels[target]))requirePin{playIndex(target)}
+                        else playIndex(target)
+                    }
+                }else{
+                    showSideDialog(AlertDialog.Builder(this)
+                        .setTitle("Programme reminder")
+                        .setMessage("The scheduled programme on "+channelName+" is starting. Switch to this channel?")
+                        .setPositiveButton("Watch"){_,_->
+                            if(isLocked(channels[target]))requirePin{playIndex(target)}
+                            else playIndex(target)
+                        }
+                        .setNegativeButton("Stay here",null).create())
+                }
             }
         }
         armEpgTune()
@@ -864,7 +884,7 @@ class MainActivity: Activity() {
             return
         }
         showSideDialog(AlertDialog.Builder(this).setTitle("Scheduled programmes • Select to cancel")
-            .setItems(items.map{programmeTime(it.optLong("start"))+"  "+it.optString("title")}.toTypedArray()){_,position->
+            .setItems(items.map{programmeTime(it.optLong("start"))+"  "+it.optString("title")+"  ["+if(it.optString("mode","reminder")=="auto")"Auto-switch]" else "Reminder]"}.toTypedArray()){_,position->
                 val key=items[position].optString("key")
                 val remaining=JSONArray()
                 for(i in 0 until saved.length()){
@@ -954,9 +974,14 @@ class MainActivity: Activity() {
                                     "desc"->if(channel.isNotEmpty())description=parser.nextText()
                                 }
                             }else if(event==org.xmlpull.v1.XmlPullParser.END_TAG && parser.name=="programme"){
-                                if(channel.isNotEmpty() && start>0 && end>start && title.isNotBlank()){
-                                    // Keep the first source's programme for a matching channel and start time.
-                                    combined.getOrPut(channel){mutableMapOf()}.putIfAbsent(start,EpgProgramme(start,end,title,description))
+                                if(channel.isNotEmpty() && start>0 && end>start && title.isNotBlank() &&
+                                    end>System.currentTimeMillis()-2L*86400000L &&
+                                    start<System.currentTimeMillis()+8L*86400000L){
+                                    // Bound each channel to 1000 programmes and
+                                    // keep the first source's entries by priority.
+                                    val programmes=combined.getOrPut(channel){mutableMapOf()}
+                                    if(programmes.size<1000)programmes.putIfAbsent(
+                                        start,EpgProgramme(start,end,title,description.take(2000)))
                                 }
                                 channel=""
                             }
@@ -996,7 +1021,10 @@ class MainActivity: Activity() {
                 showSideDialog(AlertDialog.Builder(this)
                     .setTitle(programme.title)
                     .setMessage(programmeTime(programme.start)+"–"+programmeTime(programme.end)+"\n"+programme.description)
-                    .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch at start"){_,_->scheduleEpgTune(c,programme)}
+                    .setPositiveButton(if(programme.start<=System.currentTimeMillis())"Watch now" else "Auto-switch"){_,_->scheduleEpgTune(c,programme,"auto")}
+                    .setNeutralButton(if(programme.start<=System.currentTimeMillis())"Guide" else "Remind only"){_,_->
+                        if(programme.start>System.currentTimeMillis())scheduleEpgTune(c,programme,"reminder")
+                    }
                     .setNegativeButton("Cancel",null).create())
             }
             .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(i))}
@@ -1016,6 +1044,80 @@ class MainActivity: Activity() {
                 .setPositiveButton("EPG sources"){_,_->configureEpg()}
                 .setNegativeButton("Close",null).create())}
     }
+    // Half-hour programme grid: the same guide can be browsed while live TV
+    // continues playing. A virtualized ListView avoids creating thousands of rows.
+    private fun showEpgGrid(startTime:Long=System.currentTimeMillis()){
+        val now=System.currentTimeMillis()
+        val selectedTime=(startTime/1800000L)*1800000L
+        val indices=visibleIndices()
+        val dialog=AlertDialog.Builder(this).create()
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(12,12,12,12)
+            setBackgroundColor(0xFF101E31.toInt())
+        }
+        val header=TextView(this).apply{
+            text="TV GUIDE  •  "+java.text.SimpleDateFormat("EEE dd MMM, HH:mm",java.util.Locale.getDefault())
+                .format(java.util.Date(selectedTime))
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(10,8,10,12)
+        }
+        layout.addView(header)
+        val list=ListView(this).apply{
+            dividerHeight=1
+            isFocusable=true
+        }
+        val matching=indices.filter{programmeList(channels[it]).isNotEmpty()}
+        val adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=matching.size
+            override fun getItem(position:Int):Any=matching[position]
+            override fun getItemId(position:Int)=matching[position].toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val row=(convertView as? TextView) ?:TextView(this@MainActivity).apply{
+                    textSize=17f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(18,15,14,15)
+                    maxLines=3
+                    ellipsize=android.text.TextUtils.TruncateAt.END
+                }
+                val i=matching[position]
+                val c=channels[i]
+                val programme=programmeList(c).firstOrNull{it.start<=selectedTime && it.end>selectedTime}
+                val next=programmeList(c).firstOrNull{it.start>selectedTime}
+                row.text=numberFor(i).toString()+". "+c.name+"\n"+
+                    (programme?.let{programmeTime(it.start)+"–"+programmeTime(it.end)+"  "+it.title}
+                        ?:next?.let{"Next "+programmeTime(it.start)+"  "+it.title}
+                        ?:"No programme at this time")
+                return row
+            }
+        }
+        list.adapter=adapter
+        layout.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        list.setOnItemClickListener{_,_,position,_->
+            val i=matching[position]
+            dialog.dismiss()
+            showChannelEpg(i)
+        }
+        val nav=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        fun navButton(title:String,weight:Float=1f,action:()->Unit){
+            nav.addView(button(title){dialog.dismiss();action()},LinearLayout.LayoutParams(0,-2,weight))
+        }
+        navButton("◀ 30m"){showEpgGrid(selectedTime-1800000L)}
+        navButton("Now"){showEpgGrid(System.currentTimeMillis())}
+        navButton("30m ▶"){showEpgGrid(selectedTime+1800000L)}
+        layout.addView(nav)
+        val footer=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL}
+        footer.addView(button("Scheduled"){dialog.dismiss();showEpgSchedules()},LinearLayout.LayoutParams(0,-2,1f))
+        footer.addView(button("Sources"){dialog.dismiss();configureEpg()},LinearLayout.LayoutParams(0,-2,1f))
+        footer.addView(button("Close"){dialog.dismiss()},LinearLayout.LayoutParams(0,-2,1f))
+        layout.addView(footer)
+        if(matching.isEmpty()){
+            header.text="No matching EPG channels — check tvg-id and EPG sources"
+        }
+        dialog.setView(layout)
+        showSideDialog(dialog)
+    }
     private fun showEpg(){
         if(epgUrls().isEmpty()){configureEpg();return}
         Toast.makeText(this,"Loading TV guide…",Toast.LENGTH_SHORT).show()
@@ -1025,24 +1127,7 @@ class MainActivity: Activity() {
                     .setMessage("Unable to load XMLTV guide.")
                     .setPositiveButton("Change EPG URL"){_,_->configureEpg()}
                     .setNegativeButton("Close",null).create())
-            }else{
-                val now=System.currentTimeMillis()
-                val items=visibleIndices().mapNotNull{i->
-                    val c=channels[i]
-                    val entries=programmeList(c)
-                    if(entries.isEmpty())null else{
-                        val current=entries.firstOrNull{it.start<=now && it.end>now}
-                        i to (c.name+"  •  "+(current?.let{programmeTime(it.start)+" "+it.title} ?: "Schedule"))
-                    }
-                }
-                showSideDialog(AlertDialog.Builder(this).setTitle("TV Guide • Channels")
-                    .setItems(items.map{it.second}.toTypedArray()){_,position->
-                        showChannelEpg(items[position].first)
-                    }
-                    .setNeutralButton("Scheduled"){_,_->showEpgSchedules()}
-                    .setPositiveButton("EPG source"){_,_->configureEpg()}
-                    .setNegativeButton("Close",null).create())
-            }
+            }else showEpgGrid()
         }
     }
     private val manuallyHiddenIds get()=prefs.getStringSet("manually_hidden_channels",emptySet()) ?: emptySet()
