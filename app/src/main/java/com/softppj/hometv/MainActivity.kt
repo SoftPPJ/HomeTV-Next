@@ -1962,7 +1962,7 @@ class MainActivity: Activity() {
         var headers=mutableMapOf<String,String>()
         // Compile attribute patterns once per playlist, not once per channel field.
         val attributes=listOf("group-title","tvg-logo","tvg-id","web-channel","user-agent","referrer")
-            .associateWith{key->Regex(Regex.escape(key)+"""="([^"]*)""" + "\\\"")}
+            .associateWith{key->Regex(Regex.escape(key)+"""="([^"]*)" """.trim())}
         fun attr(line:String,key:String)=attributes[key]?.find(line)?.groupValues?.get(1)?:""
         fun applyHeader(key:String,value:String){
             val normalized=when(key.lowercase()){
