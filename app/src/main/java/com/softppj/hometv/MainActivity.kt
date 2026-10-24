@@ -1695,16 +1695,37 @@ class MainActivity: Activity() {
             .joinToString(""){"%02x".format(it)}
         return java.io.File(filesDir,"playlist_"+digest+".m3u")
     }
+    // Limit a malformed/oversized feed before it can exhaust the TV's heap.
+    // 32 MiB accommodates large IPTV lists without accepting unbounded input.
+    private fun readPlaylistText(stream:java.io.InputStream):String {
+        val limit=32*1024*1024
+        val text=StringBuilder()
+        stream.bufferedReader().use { reader->
+            val buffer=CharArray(8192)
+            while(true){
+                val read=reader.read(buffer)
+                if(read<0)break
+                if(text.length+read>limit)throw java.io.IOException("Playlist exceeds 32 MiB safety limit")
+                text.append(buffer,0,read)
+            }
+        }
+        return text.toString()
+    }
+    private fun readPlaylistCache(file:java.io.File):String {
+        if(file.length()>32L*1024*1024)throw java.io.IOException("Cached playlist exceeds safety limit")
+        return file.inputStream().use{readPlaylistText(it)}
+    }
+    @Volatile private var refreshGeneration=0
     private fun cachedChannels():MutableList<Channel>{
         if(!licenseReady)return mutableListOf()
         val found=mutableListOf<Channel>()
         playlists().filter{it.enabled}.forEach{p->
             try{
                 val file=cacheFile(p)
-                if(file.exists())found.addAll(parseM3u(file.readText(),p.name))
+                if(file.exists())found.addAll(parseM3u(readPlaylistCache(file),p.name))
             }catch(e:Exception){android.util.Log.w("HomeTV","Playlist cache read failed",e)}
         }
-        return found.distinctBy{it.name.lowercase()+"|"+it.url}.toMutableList()
+        return found.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
     }
     private fun refresh(done:()->Unit,forceRebuild:Boolean=false){
         if(!licenseReady){showLicenseScreen("Please activate your license");return}
@@ -1719,73 +1740,78 @@ class MainActivity: Activity() {
         val playingUrlBeforeRefresh=playingBeforeRefresh?.url
         // Preserve each existing source when a network rebuild and its cache both fail.
         val previousBySource=channels.groupBy{it.source}
-        thread {
+        val generation=++refreshGeneration
+        thread(name="HomeTV-playlist-refresh"){
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
-            val workers=sources.mapIndexed{index,p->
-                thread{
-                    try{
-                        val connection=if(p.url==licensedPlaylist)null else URL(p.url).openConnection().apply{
-                            connectTimeout=12000
-                            readTimeout=15000
-                            useCaches=false
-                            setRequestProperty("Cache-Control","no-cache, no-store, max-age=0")
-                            setRequestProperty("Pragma","no-cache")
-                            setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
-                        }
-                        val body=if(p.url==licensedPlaylist)licensedM3u() else connection!!.getInputStream().bufferedReader().use{it.readText()}
-                        val parsed=parseM3u(body,p.name)
-                        if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
-                        results[index]=parsed
-                        refreshed[index]=true
-                        val file=cacheFile(p)
-                        val temp=java.io.File(file.absolutePath+".tmp")
-                        temp.writeText(body)
-                        if(!temp.renameTo(file)){
-                            temp.copyTo(file,overwrite=true)
-                            temp.delete()
-                        }
-                    }catch(e:Exception){
-                        android.util.Log.w("HomeTV","Playlist rebuild failed: "+p.name,e)
-                        if(!forceRebuild){
-                            try{
-                                val file=cacheFile(p)
-                                if(file.exists())results[index]=parseM3u(file.readText(),p.name)
-                            }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
+            // A playlist may contain thousands of channels. Do not create a
+            // new thread for every configured source or parse caches on the UI.
+            val pool=java.util.concurrent.Executors.newFixedThreadPool(minOf(3,sources.size))
+            try{
+                val tasks=sources.mapIndexed{index,p->
+                    pool.submit {
+                        try{
+                            val body=if(p.url==licensedPlaylist)licensedM3u() else {
+                                val connection=URL(p.url).openConnection().apply{
+                                    connectTimeout=12000
+                                    readTimeout=15000
+                                    useCaches=false
+                                    setRequestProperty("Cache-Control","no-cache, no-store, max-age=0")
+                                    setRequestProperty("Pragma","no-cache")
+                                    setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
+                                }
+                                connection.getInputStream().use{readPlaylistText(it)}
+                            }
+                            val parsed=parseM3u(body,p.name)
+                            if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                            results[index]=parsed
+                            refreshed[index]=true
+                            val file=cacheFile(p)
+                            val temp=java.io.File(file.absolutePath+".tmp")
+                            temp.writeText(body)
+                            if(!temp.renameTo(file)){
+                                temp.copyTo(file,overwrite=true)
+                                temp.delete()
+                            }
+                        }catch(e:Exception){
+                            android.util.Log.w("HomeTV","Playlist rebuild failed: "+p.name,e)
+                            if(!forceRebuild){
+                                try{
+                                    val file=cacheFile(p)
+                                    if(file.exists())results[index]=parseM3u(readPlaylistCache(file),p.name)
+                                }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
+                            }
                         }
                     }
                 }
-            }
-            workers.forEach{it.join()}
+                tasks.forEach{it.get()}
+            }finally{pool.shutdownNow()}
             val updated=refreshed.count{it}
-            // Avoid duplicating the entire playlist into an unused list.
+            val combined=mutableListOf<Channel>()
+            sources.forEachIndexed{index,p->
+                val loaded=results[index]
+                if(loaded.isNotEmpty())combined.addAll(loaded)
+                else {
+                    if(forceRebuild){
+                        val cached=try{
+                            val file=cacheFile(p)
+                            if(file.exists())parseM3u(readPlaylistCache(file),p.name) else emptyList()
+                        }catch(_:Exception){emptyList()}
+                        if(cached.isNotEmpty()){combined.addAll(cached);return@forEachIndexed}
+                    }
+                    combined.addAll(previousBySource[p.name].orEmpty())
+                }
+            }
+            val nextChannels=combined.distinctBy{
+                it.source.lowercase(java.util.Locale.ROOT)+"|"+
+                    it.name.lowercase(java.util.Locale.ROOT)+"|"+it.url
+            }.toMutableList()
             runOnUiThread{
-                if(updated==0 && results.all{it.isEmpty()}){
+                if(generation!=refreshGeneration || !licenseReady || isFinishing || isDestroyed)return@runOnUiThread
+                if(updated==0 && nextChannels.isEmpty()){
                     Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
                 }else{
-                    if(forceRebuild && updated<sources.size){
-                        val combined=mutableListOf<Channel>()
-                        sources.forEachIndexed{index,p->
-                            if(refreshed[index])combined.addAll(results[index])
-                            else{
-                                val cached=try{
-                                    val file=cacheFile(p)
-                                    if(file.exists())parseM3u(file.readText(),p.name) else emptyList()
-                                }catch(_:Exception){emptyList()}
-                                if(cached.isNotEmpty())combined.addAll(cached)
-                                else combined.addAll(previousBySource[p.name].orEmpty())
-                            }
-                        }
-                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
-                    }else{
-                        val combined=mutableListOf<Channel>()
-                        sources.forEachIndexed{index,p->
-                            val loaded=results[index]
-                            if(loaded.isNotEmpty())combined.addAll(loaded)
-                            else combined.addAll(previousBySource[p.name].orEmpty())
-                        }
-                        channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
-                    }
+                    channels=nextChannels
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+actualChannelCount()+" channels",Toast.LENGTH_LONG).show()
                 }
                 // A background refresh can reorder or remove entries while a
