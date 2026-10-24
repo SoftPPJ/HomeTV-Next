@@ -1758,7 +1758,7 @@ class MainActivity: Activity() {
             }
             workers.forEach{it.join()}
             val updated=refreshed.count{it}
-            val found=results.flatMap{it}.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
+            // Avoid duplicating the entire playlist into an unused list.
             runOnUiThread{
                 if(updated==0 && results.all{it.isEmpty()}){
                     Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
@@ -1889,6 +1889,8 @@ class MainActivity: Activity() {
         probeQueue.clear()
         probeInFlight=0
         vlcProbeQueue.clear()
+        // An OFF toggle must not build and sort a huge probe queue.
+        if(!prefs.getBoolean("background_url_checks",false))return
         // Probe closest channels first in the last remote-control direction.
         // Never interrupt the on-screen channel or probe it a second time.
         val firstPositionByUrl=HashMap<String,Int>()
