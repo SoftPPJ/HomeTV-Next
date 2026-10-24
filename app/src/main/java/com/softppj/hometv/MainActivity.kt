@@ -125,7 +125,7 @@ class MainActivity: Activity() {
             channels=cachedChannels()
             if(channels.isNotEmpty()){
                 checkEpgTune()
-                resumeLast()
+                openStartupDestination()
             }else showLicenseCheckingScreen()
         }else{
             licenseReady=false
@@ -147,9 +147,9 @@ class MainActivity: Activity() {
                     // Retune only if nothing was playing already.
                     if(mayResume && channels.isNotEmpty()){
                         refresh({
-                            if(licenseReady && active !in channels.indices){
-                                if(channels.isNotEmpty())resumeLast() else showHome()
-                            }
+                            if(licenseReady && channels.isEmpty())showHome()
+                            // The startup destination was already opened; do not
+                            // force playback when Resume is OFF or Home is selected.
                         })
                     }else startLicensedApp()
                 }else{
@@ -172,8 +172,15 @@ class MainActivity: Activity() {
         checkEpgTune()
         refresh({
             if(!licenseReady)return@refresh
-            if(channels.isNotEmpty())resumeLast() else showHome()
+            if(channels.isNotEmpty())openStartupDestination() else showHome()
         })
+    }
+    private fun openStartupDestination(){
+        when(prefs.getString("launch_screen","Last channel") ?: "Last channel"){
+            "Home"->showHome()
+            "Channels"->allChannels()
+            else->if(prefs.getBoolean("resume",true))resumeLast() else showHome()
+        }
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
@@ -612,8 +619,16 @@ class MainActivity: Activity() {
                 handler.postDelayed(task,900L)
                 return true
             }
-            // First unsuccessful discovery may offer hiding once. On later failures,
-            // keep retrying the current source without repeating the dialog.
+            // All URL/player combinations have failed. Auto-skip must be
+            // controlled by its own ON/OFF setting, not by background checking.
+            if(prefs.getBoolean("auto_skip_nonworking",true)){
+                unavailableChannels.add(key)
+                showBanner("No playable source for "+c.name+" • Skipping")
+                moveAfterFailedChannelHidden(index,screen)
+                return true
+            }
+            // With auto-skip OFF, remain on this channel unless the user
+            // explicitly chooses to hide it in the one-time failure prompt.
             if(!prefs.getBoolean("first_failure_prompted_"+key,false)){
                 promptFailedChannel(index,screen)
                 return true
@@ -621,6 +636,10 @@ class MainActivity: Activity() {
         }
         // Confirmed sources never probe or switch to alternatives automatically.
         // Alternative selection is available manually from channel settings.
+        if(!prefs.getBoolean("auto_reconnect",true)){
+            showBanner("Stream unavailable • Auto-reconnect is OFF",true)
+            return true
+        }
         fallbackEngineOverride=current
         val count=(recoveryAttempts[c.url] ?: 0)+1
         recoveryAttempts[c.url]=count
@@ -641,6 +660,8 @@ class MainActivity: Activity() {
         return (channelByKey[channelKey(c)] ?:emptyList()).any{lockIds.contains(id(channels[it]))}
     }
     private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
+    // Count logical channels, not multiple stream URLs belonging to the same channel.
+    private fun actualChannelCount():Int=channelNumbers().size
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
     private val manuallyHiddenGroups get()=prefs.getStringSet("manually_hidden_groups",emptySet()) ?: emptySet()
     private fun isGroupHidden(group:String)=manuallyHiddenGroups.contains(group)
@@ -1415,7 +1436,7 @@ class MainActivity: Activity() {
     }
     private fun showHome() {
         reset("HomeTV  •  LIVE")
-        root.addView(label("YOUR TELEVISION  |  "+channels.size+" CHANNELS"))
+        root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" CHANNELS"))
         root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()})
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
@@ -1727,7 +1748,7 @@ class MainActivity: Activity() {
                         }
                         channels=combined.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
                     }
-                    if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+channels.size+" channels",Toast.LENGTH_LONG).show()
+                    if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+actualChannelCount()+" channels",Toast.LENGTH_LONG).show()
                 }
                 // A background refresh can reorder or remove entries while a
                 // channel is playing. Never leave active pointing to a different
@@ -1768,7 +1789,8 @@ class MainActivity: Activity() {
         vlcProbeCore=null
     }
     private fun launchNextVlcProbe(generation:Int){
-        if(generation!=backgroundProbeGeneration || !licenseReady || vlcProbePlayer!=null)return
+        if(generation!=backgroundProbeGeneration || !licenseReady ||
+            !prefs.getBoolean("background_url_checks",false) || vlcProbePlayer!=null)return
         while(vlcProbeQueue.isNotEmpty()){
             val channel=vlcProbeQueue.removeFirst()
             val url=channel.url.lowercase(java.util.Locale.ROOT)
@@ -1784,7 +1806,8 @@ class MainActivity: Activity() {
                 fun finish(working:Boolean){
                     if(completed)return
                     completed=true
-                    if(working && generation==backgroundProbeGeneration){
+                    if(working && generation==backgroundProbeGeneration &&
+                        prefs.getBoolean("background_url_checks",false)){
                         vlcProbeReachable[channel.url]=true
                         // This is a compatibility hint, not a proven LibVLC-only
                         // stream: only actual playback may persist that preference.
@@ -1894,7 +1917,8 @@ class MainActivity: Activity() {
                     }finally{connection.disconnect()}
                 }catch(_:Exception){null}
                 handler.post{
-                    if(generation!=backgroundProbeGeneration)return@post
+                    if(generation!=backgroundProbeGeneration ||
+                        !prefs.getBoolean("background_url_checks",false))return@post
                     probeInFlight=(probeInFlight-1).coerceAtLeast(0)
                     if(reachable!=null)probeReachable[channel.url]=reachable
                     // A successful HTTP check can restore surfing eligibility,
