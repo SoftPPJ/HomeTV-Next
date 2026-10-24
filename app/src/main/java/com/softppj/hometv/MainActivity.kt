@@ -798,6 +798,7 @@ class MainActivity: Activity() {
             }.setNegativeButton("Cancel",null).create())
     }
     private var epgTuneTask:Runnable?=null
+    private var appInForeground=false
     private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme,mode:String="auto"){
         val now=System.currentTimeMillis()
         if(programme.start<=now){
@@ -857,7 +858,7 @@ class MainActivity: Activity() {
                 if(entry.optString("mode","reminder")=="auto"){
                     // Auto-switch only when HomeTV is active; do not start
                     // playback in the background or bypass channel locks.
-                    if(!isFinishing && !isDestroyed){
+                    if(appInForeground && !isFinishing && !isDestroyed){
                         playIndex(target)
                     }
                 }else{
@@ -1488,7 +1489,7 @@ class MainActivity: Activity() {
                     1->selectScreenMode(i)
                     2->selectQuality(i)
                     3->audioTracks()
-                    4->subtitleTracks()
+                    4->subtitleTracks(i)
                     5->sleepTimer()
                     6->chooseChannelEngine(i)
                     7->selectAlternative(i)
@@ -1512,6 +1513,16 @@ class MainActivity: Activity() {
         showSideDialog(dialog)
     }
 
+    override fun onResume(){
+        super.onResume()
+        appInForeground=true
+        // Re-arm persisted programme selections after an Activity restart.
+        armEpgTune()
+    }
+    override fun onPause(){
+        appInForeground=false
+        super.onPause()
+    }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -2403,8 +2414,15 @@ class MainActivity: Activity() {
         exo.trackSelectionParameters=builder.build()
     }
 
-    private fun subtitleTracks(){
-        val c=channels.getOrNull(active) ?:return
+    private fun subtitleTracks(channelIndex:Int=active){
+        val c=channels.getOrNull(channelIndex) ?:return
+        if(active !in channels.indices || !sameChannel(c,channels[active])){
+            showSideDialog(AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
+                .setMessage("Subtitle tracks can be selected after this channel starts playing.")
+                .setPositiveButton("Watch channel"){_,_->playIndex(preferredChannel(channelIndex))}
+                .setNegativeButton("Cancel",null).create())
+            return
+        }
         val exo=player
         if(exo==null){
             AlertDialog.Builder(this).setTitle("Subtitles")
@@ -4247,5 +4265,5 @@ class MainActivity: Activity() {
         web?.onPause();web?.destroy();web=null
         active=-1
     }
-    override fun onDestroy(){sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null;stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
+    override fun onDestroy(){epgTuneTask?.let{handler.removeCallbacks(it)};epgTuneTask=null;sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null;stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
 }
