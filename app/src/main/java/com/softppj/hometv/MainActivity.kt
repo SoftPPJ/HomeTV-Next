@@ -1872,12 +1872,14 @@ class MainActivity: Activity() {
         vlcProbeQueue.clear()
         // Probe closest channels first in the last remote-control direction.
         // Never interrupt the on-screen channel or probe it a second time.
+        val firstPositionByUrl=HashMap<String,Int>()
+        channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
         val snapshot=channels.toList().distinctBy{it.url}
             .filter{it.url!=channels.getOrNull(active)?.url}
         val anchor=active.coerceAtLeast(0)
         val count=channels.size.coerceAtLeast(1)
         val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
-            val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+            val position=firstPositionByUrl[candidate.url] ?:0
             if(surfingDirection<0)(anchor-position+count)%count
             else (position-anchor+count)%count
         }.thenBy{it.name})
@@ -1904,8 +1906,10 @@ class MainActivity: Activity() {
             val count=channels.size.coerceAtLeast(1)
             val pending=probeQueue.toList()
             probeQueue.clear()
+            val firstPositionByUrl=HashMap<String,Int>()
+            channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
             pending.sortedBy{candidate->
-                val position=channels.indexOfFirst{it.url==candidate.url}.coerceAtLeast(0)
+                val position=firstPositionByUrl[candidate.url] ?:0
                 if(surfingDirection<0)(anchor-position+count)%count
                 else (position-anchor+count)%count
             }.forEach{probeQueue.addLast(it)}
@@ -1956,7 +1960,10 @@ class MainActivity: Activity() {
         val out=mutableListOf<Channel>()
         var name="";var group="Other";var logo="";var epgId="";var webChannel=""
         var headers=mutableMapOf<String,String>()
-        fun attr(line:String,key:String)=Regex(Regex.escape(key)+"""="([^"]*)" """.trim()).find(line)?.groupValues?.get(1)?:""
+        // Compile attribute patterns once per playlist, not once per channel field.
+        val attributes=listOf("group-title","tvg-logo","tvg-id","web-channel","user-agent","referrer")
+            .associateWith{key->Regex(Regex.escape(key)+"""="([^"]*)"""")}
+        fun attr(line:String,key:String)=attributes[key]?.find(line)?.groupValues?.get(1)?:""
         fun applyHeader(key:String,value:String){
             val normalized=when(key.lowercase()){
                 "http-user-agent","user-agent"->"User-Agent"
@@ -2031,13 +2038,42 @@ class MainActivity: Activity() {
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset(group)
         root.addView(button("Lock group"){toggleLock(group,true)})
-        val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        visibleIndices().forEach { i->val c=channels[i];if(c.group==group){
-            list.addView(button(channelLabel(i)){playIndex(preferredChannel(i))})
-            list.addView(button("⋮ Options"){channelOptions(i)})
-            list.addView(button("Lock channel"){toggleLock(id(c),false)})
-        }}
-        scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        // Virtualized rows: never create thousands of Buttons on the UI thread.
+        val indices=visibleIndices().filter{channels[it].group==group}
+        val list=ListView(this).apply{
+            dividerHeight=1
+            isFocusable=true
+            isFocusableInTouchMode=true
+            setBackgroundColor(0xFF101E31.toInt())
+        }
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=indices.size
+            override fun getItem(position:Int):Any=channels[indices[position]]
+            override fun getItemId(position:Int)=indices[position].toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val row=(convertView as? TextView) ?:TextView(this@MainActivity).apply{
+                    textSize=18f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(22,17,18,17)
+                    minHeight=62
+                    isSingleLine=true
+                    ellipsize=android.text.TextUtils.TruncateAt.END
+                }
+                row.text=channelLabel(indices[position])
+                return row
+            }
+        }
+        list.setOnItemClickListener{_,_,position,_->playIndex(preferredChannel(indices[position]))}
+        list.setOnItemLongClickListener{_,_,position,_->
+            showChannelListQuickActions(indices[position]){
+                (list.adapter as android.widget.BaseAdapter).notifyDataSetChanged()
+                list.setSelection(position)
+                list.requestFocus()
+            }
+            true
+        }
+        root.addView(label("Long press: Hide / Unhide · Favourite · Lock / Unlock"))
+        root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Groups"){showChannels()})
     }
     private fun manageLockedChannels(){
