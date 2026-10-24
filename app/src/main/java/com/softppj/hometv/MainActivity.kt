@@ -858,16 +858,14 @@ class MainActivity: Activity() {
                     // Auto-switch only when HomeTV is active; do not start
                     // playback in the background or bypass channel locks.
                     if(!isFinishing && !isDestroyed){
-                        if(isLocked(channels[target]))requirePin{playIndex(target)}
-                        else playIndex(target)
+                        playIndex(target)
                     }
                 }else{
                     showSideDialog(AlertDialog.Builder(this)
                         .setTitle("Programme reminder")
                         .setMessage("The scheduled programme on "+channelName+" is starting. Switch to this channel?")
                         .setPositiveButton("Watch"){_,_->
-                            if(isLocked(channels[target]))requirePin{playIndex(target)}
-                            else playIndex(target)
+                            playIndex(target)
                         }
                         .setNegativeButton("Stay here",null).create())
                 }
@@ -884,7 +882,8 @@ class MainActivity: Activity() {
             return
         }
         showSideDialog(AlertDialog.Builder(this).setTitle("Scheduled programmes • Select to cancel")
-            .setItems(items.map{programmeTime(it.optLong("start"))+"  "+it.optString("title")+"  ["+if(it.optString("mode","reminder")=="auto")"Auto-switch]" else "Reminder]"}.toTypedArray()){_,position->
+            .setItems(items.map{programmeTime(it.optLong("start"))+"  "+it.optString("title")+"  ["+
+                (if(it.optString("mode","reminder")=="auto")"Auto-switch]" else "Reminder]")}.toTypedArray()){_,position->
                 val key=items[position].optString("key")
                 val remaining=JSONArray()
                 for(i in 0 until saved.length()){
@@ -930,7 +929,7 @@ class MainActivity: Activity() {
                     .append(programmeTime(current.end)).append("  ").append(current.title)
                 if(current.description.isNotBlank())append("\n").append(current.description.take(130))
             }else append("EPG: No current programme")
-            if(next!=null)append("\\nNEXT  ").append(programmeTime(next.start)).append("  ").append(next.title)
+            if(next!=null)append("\nNEXT  ").append(programmeTime(next.start)).append("  ").append(next.title)
         }
     }
     private fun loadEpg(done:(Boolean)->Unit){
@@ -1047,7 +1046,6 @@ class MainActivity: Activity() {
     // Half-hour programme grid: the same guide can be browsed while live TV
     // continues playing. A virtualized ListView avoids creating thousands of rows.
     private fun showEpgGrid(startTime:Long=System.currentTimeMillis()){
-        val now=System.currentTimeMillis()
         val selectedTime=(startTime/1800000L)*1800000L
         val indices=visibleIndices()
         val dialog=AlertDialog.Builder(this).create()
@@ -1093,7 +1091,8 @@ class MainActivity: Activity() {
             }
         }
         list.adapter=adapter
-        layout.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        layout.addView(list,LinearLayout.LayoutParams(-1,
+            (resources.displayMetrics.heightPixels*0.55f).toInt().coerceAtLeast(260)))
         list.setOnItemClickListener{_,_,position,_->
             val i=matching[position]
             dialog.dismiss()
