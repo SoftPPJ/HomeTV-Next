@@ -1921,8 +1921,10 @@ class MainActivity: Activity() {
         // Never interrupt the on-screen channel or probe it a second time.
         val firstPositionByUrl=HashMap<String,Int>()
         channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
-        val snapshot=channels.toList().distinctBy{it.url}
+        // Bound periodic checks to avoid huge queues on low-memory TVs.
+        val snapshot=channels.asSequence().distinctBy{it.url}
             .filter{it.url!=channels.getOrNull(active)?.url}
+            .take(250).toList()
         val anchor=active.coerceAtLeast(0)
         val count=channels.size.coerceAtLeast(1)
         val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
@@ -2686,21 +2688,24 @@ class MainActivity: Activity() {
         }
         return view
     }
-    private fun logoRow(channel:Channel,title:String):LinearLayout{
-        return LinearLayout(this).apply{
+    private fun logoRow(channel:Channel,title:String,convertView:View?=null):LinearLayout{
+        // Recycle visible rows rather than allocating a layout on every scroll.
+        val row=(convertView as? LinearLayout) ?: LinearLayout(this).apply{
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER_VERTICAL
             setPadding(8,5,8,5)
-            addView(logoView(channel))
-            addView(TextView(this@MainActivity).apply{
-                text=title
-                textSize=17f
-                setTextColor(android.graphics.Color.WHITE)
-                setPadding(12,8,8,8)
-                isSingleLine=true
-                ellipsize=android.text.TextUtils.TruncateAt.END
-            },LinearLayout.LayoutParams(0,-2,1f))
         }
+        row.removeAllViews()
+        row.addView(logoView(channel))
+        row.addView(TextView(this).apply{
+            text=title
+            textSize=17f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(12,8,8,8)
+            isSingleLine=true
+            ellipsize=android.text.TextUtils.TruncateAt.END
+        },LinearLayout.LayoutParams(0,-2,1f))
+        return row
     }
     private fun showOverlayList(){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
@@ -2728,7 +2733,7 @@ class MainActivity: Activity() {
             override fun getItem(position:Int):Any=channels[available[position]]
             override fun getItemId(position:Int)=available[position].toLong()
             override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View=
-                logoRow(channels[available[position]],channelLabel(available[position]))
+                logoRow(channels[available[position]],channelLabel(available[position]),convertView)
         }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
 
@@ -3303,7 +3308,11 @@ class MainActivity: Activity() {
                               '.mobile-topbar-header,.mobile-topbar,.ytm-mobile-topbar-renderer,'+
                               '.mobile-topbar-header-content,.mobile-topbar-logo,.open-app-button,'+
                               '.ytp-youtube-button,.ytp-impression-link,.ytp-watermark,.ytp-title-link,.ytp-title-channel,'+
-                              '.ytp-chrome-top .ytp-title,.ytp-pause-overlay,.ytp-app-promo{display:none!important;pointer-events:none!important}'+
+                              '.ytp-chrome-top .ytp-title,.ytp-pause-overlay,.ytp-app-promo,'+
+                              '.ytp-remote-button,.ytp-cards-button,.ytp-ce-element,.ytp-paid-content-overlay,'+
+                              'ytm-topbar-menu-button-renderer,ytm-topbar-logo-renderer,'+
+                              'ytm-companion-slot-renderer,.ytm-open-app-button,.ytp-open-app-button,'+
+                              '.ytp-watch-later-button,.ytp-share-button{display:none!important;pointer-events:none!important}'+
                               '.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}';
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
