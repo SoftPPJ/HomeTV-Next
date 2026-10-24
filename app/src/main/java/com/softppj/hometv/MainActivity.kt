@@ -318,8 +318,10 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
+        val manual=prefs.getString("manual_url_"+channelKey(c),null)
         val usable=group.filter{channels[it].url !in failedUrlsThisSession}
-        return usable.firstOrNull{channels[it].url==saved}
+        return usable.firstOrNull{channels[it].url==manual}
+            ?:usable.firstOrNull{channels[it].url==saved}
             ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
             ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
             ?:usable.firstOrNull()
@@ -345,8 +347,12 @@ class MainActivity: Activity() {
             prefs.edit().putBoolean("libvlc_only_"+hash(c.url),true).apply()
         }
         engineAttempts.remove(c.url)
-        // Persist every confirmed working URL, whether selected manually or by fallback.
-        prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
+        // Preserve a user's explicit stream choice until they change it.
+        // Automatically confirmed alternatives remain usable as fallbacks,
+        // but must not silently replace the manual preference.
+        val manual=prefs.getString("manual_url_"+channelKey(c),null)
+        if(manual==null || manual==c.url)
+            prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
         if(testingAlternativeKey==channelKey(c))testingAlternativeKey=null
     }
     private var youtubeUnmuteTask:Runnable?=null
@@ -433,7 +439,9 @@ class MainActivity: Activity() {
         val current=options.indexOf(active)
         alternativeAttempted.clear()
         alternativeSessionKey=null
-        prefs.edit().putString("working_url_"+channelKey(channels[options[(current+1)%options.size]]),channels[options[(current+1)%options.size]].url).apply()
+        val selected=channels[options[(current+1)%options.size]]
+        prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
+            .putString("working_url_"+channelKey(selected),selected.url).apply()
         playIndex(options[(current+1)%options.size])
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
@@ -450,7 +458,9 @@ class MainActivity: Activity() {
                 val target=options[choice]
                 alternativeAttempted.clear()
                 alternativeSessionKey=null
-                prefs.edit().putString("working_url_"+channelKey(channels[target]),channels[target].url).apply()
+                val selected=channels[target]
+                prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
+                    .putString("working_url_"+channelKey(selected),selected.url).apply()
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
