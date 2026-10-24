@@ -382,8 +382,17 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
+    private fun selectedPlaylistSource():String?{
+        val selected=prefs.getString("selected_playlist_source",null) ?:return null
+        return selected.takeIf{source->playlists().any{it.enabled && it.name==source} &&
+            channels.any{it.source==source}}
+    }
+    private fun playlistIndices():List<Int>{
+        val selected=selectedPlaylistSource()
+        return visibleIndices().filter{selected==null || channels[it].source==selected}
+    }
     private fun surfingIndices():List<Int>{
-        val base=visibleIndices().filter{
+        val base=playlistIndices().filter{
             !isSkipped(channels[it]) &&
             !isLocked(channels[it]) &&
             !isManuallyHidden(channels[it]) &&
@@ -2590,13 +2599,13 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="CHANNELS  •  LEFT for Groups / Home"
+            text=(selectedPlaylistSource() ?: "ALL PLAYLISTS")+"  •  LEFT for Groups / Home"
             textSize=19f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(16,16,8,12)
         })
         val list=ListView(this)
-        val available=channelNumbers().filter{!isGroupHidden(channels[it].group)}
+        val available=playlistIndices().filter{!isGroupHidden(channels[it].group)}
         list.adapter=object:android.widget.BaseAdapter(){
             override fun getCount()=available.size
             override fun getItem(position:Int):Any=channels[available[position]]
@@ -2649,13 +2658,13 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="HOMETV  •  CHANNEL GROUPS"
+            text="HOMETV  •  "+(selectedPlaylistSource() ?: "ALL PLAYLISTS")+" GROUPS"
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(20,18,12,16)
         })
-        val groups=visibleIndices().map{channels[it].group}.distinct()
-        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels")+
+        val groups=playlistIndices().map{channels[it].group}.distinct()
+        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels","▦  Playlists")+
             groups.map{"▸  "+it}
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
@@ -2664,7 +2673,7 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemLongClickListener{_,_,choice,_->
-            val group=groups.getOrNull(choice-8)
+            val group=groups.getOrNull(choice-9)
             if(group!=null){close();groupOptions(group);true}else false
         }
         list.setOnItemClickListener{_,_,choice,_->
@@ -2678,6 +2687,7 @@ class MainActivity: Activity() {
                 5->showEpg()
                 6->refresh({if(active>=0)showChannelInfo(active,"Playlist refresh finished") else showHome()},true)
                 7->showOverlayList()
+                8->showPlaylistDrawer()
                 else->{
                     val group=groups.getOrNull(choice-8)
                     if(group!=null)showGroupDrawer(group)
@@ -2692,16 +2702,60 @@ class MainActivity: Activity() {
         val currentGroup=channels.getOrNull(active)?.group
         val selectedGroup=groups.indexOf(currentGroup)
         if(selectedGroup>=0){
-            list.setSelection(selectedGroup+8)
-            list.setItemChecked(selectedGroup+8,true)
+            list.setSelection(selectedGroup+9)
+            list.setItemChecked(selectedGroup+9,true)
         }
+        list.requestFocus()
+    }
+    private fun showPlaylistDrawer(){
+        val screen=videoScreen ?:return
+        screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
+        screen.findViewWithTag<View>("left_navigation")?.let{screen.removeView(it)}
+        val sources=playlists().filter{it.enabled && channels.any{c->c.source==it.name}}
+            .map{it.name}.distinct()
+        val names=listOf("☰  All Playlists")+sources.map{"▸  "+it}
+        val drawer=LinearLayout(this).apply{
+            tag="left_navigation"
+            orientation=LinearLayout.VERTICAL
+            setBackgroundColor(0xF015283C.toInt())
+            isFocusableInTouchMode=true
+        }
+        drawer.addView(TextView(this).apply{
+            text="HOMETV  •  PLAYLISTS"
+            textSize=20f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(20,18,12,16)
+        })
+        val list=ListView(this)
+        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,names)
+        drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        screen.addView(drawer,FrameLayout.LayoutParams(
+            (resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
+        fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
+        list.setOnItemClickListener{_,_,position,_->
+            val selected=if(position==0)null else sources.getOrNull(position-1)
+            prefs.edit().apply{
+                if(selected==null)remove("selected_playlist_source")
+                else putString("selected_playlist_source",selected)
+            }.apply()
+            close()
+            showOverlayList()
+        }
+        list.setOnKeyListener{_,code,event->
+            if(event.action==KeyEvent.ACTION_DOWN &&
+                (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
+                close();showLeftNavigation();true
+            }else false
+        }
+        val selected=selectedPlaylistSource()
+        list.setSelection(if(selected==null)0 else (sources.indexOf(selected)+1).coerceAtLeast(0))
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
-        val indices=visibleIndices().filter{channels[it].group==group}
+        val indices=playlistIndices().filter{channels[it].group==group}
         val drawer=LinearLayout(this).apply{
             tag="channel_drawer"
             orientation=LinearLayout.VERTICAL
