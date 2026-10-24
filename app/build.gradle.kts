@@ -9,8 +9,8 @@ android {
         applicationId = "com.softppj.hometv"
         minSdk = 23
         targetSdk = 32
-        versionCode = 11
-        versionName = "3.0.0"
+        versionCode = 12
+        versionName = "4.0.0"
     }
     applicationVariants.all {
         outputs.all {
@@ -25,5 +25,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    // FFmpeg software audio decoder. Media3 hardware/platform decoders remain preferred.
+    // Jellyfin 1.5.0+1 matches the existing Media3 1.5.x API; GPLv3 applies.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("org.videolan.android:libvlc-all:3.5.1")
 }
