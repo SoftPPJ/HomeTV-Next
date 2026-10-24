@@ -16,6 +16,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.AudioAttributes
@@ -2758,7 +2759,8 @@ class MainActivity: Activity() {
                     .setDefaultRequestProperties(c.headers)
                 val previewBuffer=DefaultLoadControl.Builder()
                     .setBufferDurationsMs(500,2500,250,500).build()
-                val exo=ExoPlayer.Builder(this)
+                val exo=ExoPlayer.Builder(this, DefaultRenderersFactory(this)
+                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON))
                     .setMediaSourceFactory(DefaultMediaSourceFactory(factory))
                     .setLoadControl(previewBuffer)
                     .build()
@@ -3652,7 +3654,8 @@ class MainActivity: Activity() {
             val buffer=bufferValues()
             val loadControl=DefaultLoadControl.Builder()
                 .setBufferDurationsMs(buffer[0],buffer[1],buffer[2],buffer[3]).build()
-            val exo=ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
+            val exo=ExoPlayer.Builder(this, DefaultRenderersFactory(this)
+                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
             exo.volume=1f
             player=exo
