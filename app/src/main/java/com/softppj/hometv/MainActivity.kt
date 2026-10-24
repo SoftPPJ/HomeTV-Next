@@ -704,7 +704,7 @@ class MainActivity: Activity() {
     private fun visibleIndices()=channelNumbers()
     private fun channelLabel(index:Int):String{
         val c=channels[index]
-        val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"★ " else "")
+        val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if((channelByKey[channelKey(c)] ?:emptyList()).any{favoriteIds.contains(id(channels[it]))})"★ " else "")
         val hidden=if(isManuallyHidden(c) || isGroupHidden(c.group))"🙈 HIDDEN · " else ""
         return hidden+marks+numberFor(index)+". "+c.name
     }
