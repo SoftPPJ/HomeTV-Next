@@ -3179,10 +3179,15 @@ class MainActivity: Activity() {
                               '#movie_player,.html5-video-player,.html5-video-container{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;background:#000!important}'+
                               'video{object-fit:contain!important}'+
                               '#masthead-container,#secondary,#below,#comments,#related,#chat,#guide,#guide-button,ytd-mini-guide-renderer{display:none!important}'+
-                              // Hide only YouTube's watch/open-in-app links that can cover the mute button.
-                              // Leave the player control bar and .ytp-mute-button intact.
-                              '.ytp-youtube-button,.ytp-impression-link,.ytp-watermark,.ytp-title-link,.ytp-title-channel,.ytp-chrome-top .ytp-title,.ytp-pause-overlay,.ytp-app-promo{display:none!important;pointer-events:none!important}'+
-                              '.ytp-mute-button{visibility:visible!important;pointer-events:auto!important}';
+                              // YouTube's mobile watch page can add its own top navigation
+                              // (logo, Open App, search) above the video, covering mute.
+                              // Hide the page chrome only; preserve player playback controls.
+                              'ytm-mobile-topbar-renderer,ytm-header-bar,ytm-pivot-bar-renderer,ytm-open-app-button,'+
+                              '.mobile-topbar-header,.mobile-topbar,.ytm-mobile-topbar-renderer,'+
+                              '.mobile-topbar-header-content,.mobile-topbar-logo,.open-app-button,'+
+                              '.ytp-youtube-button,.ytp-impression-link,.ytp-watermark,.ytp-title-link,.ytp-title-channel,'+
+                              '.ytp-chrome-top .ytp-title,.ytp-pause-overlay,.ytp-app-promo{display:none!important;pointer-events:none!important}'+
+                              '.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}';
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
