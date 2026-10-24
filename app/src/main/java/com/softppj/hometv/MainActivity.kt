@@ -2025,13 +2025,33 @@ class MainActivity: Activity() {
         reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
         val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
-        val scroll=ScrollView(this);val list=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
-        groups.forEach { group->
-            list.addView(button("▸ $group"){showGroup(group)}.apply{
-                setOnLongClickListener{groupOptions(group);true}
-            })
+        // Virtualize groups too: do not create a Button for every playlist group.
+        val list=ListView(this).apply{
+            dividerHeight=1
+            isFocusable=true
+            isFocusableInTouchMode=true
+            setBackgroundColor(0xFF101E31.toInt())
         }
-        scroll.addView(list);root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=groups.size
+            override fun getItem(position:Int):Any=groups[position]
+            override fun getItemId(position:Int)=position.toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val row=(convertView as? TextView) ?:TextView(this@MainActivity).apply{
+                    textSize=18f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(22,17,18,17)
+                    minHeight=62
+                    isSingleLine=true
+                    ellipsize=android.text.TextUtils.TruncateAt.END
+                }
+                row.text="▸ "+groups[position]
+                return row
+            }
+        }
+        list.setOnItemClickListener{_,_,position,_->showGroup(groups[position])}
+        list.setOnItemLongClickListener{_,_,position,_->groupOptions(groups[position]);true}
+        root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(button("Home"){showHome()})
     }
     private fun showGroup(group:String){
@@ -2561,6 +2581,9 @@ class MainActivity: Activity() {
     private val logoCache=object:android.util.LruCache<String,android.graphics.Bitmap>(6*1024*1024){
         override fun sizeOf(key:String,value:android.graphics.Bitmap)=value.byteCount
     }
+    // Bound concurrent logo downloads so large playlists cannot create
+    // hundreds of network threads at once.
+    private val logoExecutor=java.util.concurrent.Executors.newFixedThreadPool(3)
     private val logoLoading=mutableSetOf<String>()
     private val logoWaiting=mutableMapOf<String,MutableList<ImageView>>()
     private fun logoView(channel:Channel,size:Int=52):ImageView{
@@ -2583,14 +2606,25 @@ class MainActivity: Activity() {
         }
         logoWaiting.getOrPut(url){mutableListOf()}.add(view)
         if(!logoLoading.add(url))return view
-        thread{
+        logoExecutor.execute{
             val bmp=try{
                 val conn=URL(url).openConnection().apply{
                     connectTimeout=5000
                     readTimeout=5000
                     setRequestProperty("User-Agent","Mozilla/5.0 (Android TV; HomeTV)")
                 }
-                conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
+                conn.getInputStream().use{stream->
+                    // Decode a small logo rather than a full-size remote image.
+                    val raw=android.graphics.BitmapFactory.decodeStream(stream)
+                    if(raw!=null && (raw.width>256 || raw.height>256)){
+                        val scale=minOf(256f/raw.width,256f/raw.height)
+                        val small=android.graphics.Bitmap.createScaledBitmap(
+                            raw,(raw.width*scale).toInt().coerceAtLeast(1),
+                            (raw.height*scale).toInt().coerceAtLeast(1),true)
+                        if(small!==raw)raw.recycle()
+                        small
+                    }else raw
+                }
             }catch(_:Exception){null}
             runOnUiThread{
                 logoLoading.remove(url)
