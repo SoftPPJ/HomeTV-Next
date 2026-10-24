@@ -944,6 +944,11 @@ class MainActivity: Activity() {
             .setNegativeButton("Close",null).create())
     }
     private fun openCurrentChannelEpg(){
+        // The channel-info EPG toggle also disables the automatic OK-key EPG popup.
+        if(!prefs.getBoolean("show_channel_epg",true)){
+            if(active in channels.indices)showChannelInfo(active)
+            return
+        }
         val i=active
         if(i !in channels.indices)return
         loadEpg{success->if(success)showChannelEpg(i) else
@@ -3696,7 +3701,7 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
                     KeyEvent.KEYCODE_BUTTON_R1->{switchChannel(1);return true}
                     KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_NUMPAD_ENTER->{if(previewIndex>=0)confirmPreview() else if(active in channels.indices){if(banner!=null)openCurrentChannelEpg() else showChannelInfo(active)};return true}
+                    KeyEvent.KEYCODE_NUMPAD_ENTER->{if(previewIndex>=0)confirmPreview() else if(active in channels.indices){if(banner!=null && prefs.getBoolean("show_channel_epg",true))openCurrentChannelEpg() else showChannelInfo(active)};return true}
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
                     KeyEvent.KEYCODE_DPAD_RIGHT->{showChannelOptions();return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
