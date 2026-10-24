@@ -120,18 +120,27 @@ class MainActivity: Activity() {
         val mayResume=prefs.getBoolean("license_last_verified",false) &&
             !prefs.getBoolean("license_validation_blocked",false)
         licenseChecking=true
-        if(mayResume){
-            licenseReady=true
-            channels=cachedChannels()
-            if(channels.isNotEmpty()){
-                checkEpgTune()
-                openStartupDestination()
-            }else showLicenseCheckingScreen()
-        }else{
-            licenseReady=false
-            showLicenseCheckingScreen()
-        }
+        if(mayResume)licenseReady=true
+        else licenseReady=false
+        showLicenseCheckingScreen()
         thread{
+            // Parsing large cached playlists on the main thread freezes Android TV.
+            // Load the cache on a worker, then publish the result on the UI thread.
+            if(mayResume){
+                val cached=try{cachedChannels()}catch(e:Exception){
+                    android.util.Log.w("HomeTV","Cached playlist parse failed",e)
+                    mutableListOf<Channel>()
+                }
+                runOnUiThread{
+                    if(licenseReady && licenseChecking && !isFinishing && !isDestroyed){
+                        channels=cached
+                        if(channels.isNotEmpty()){
+                            checkEpgTune()
+                            openStartupDestination()
+                        }
+                    }
+                }
+            }
             val result=try{
                 saveLicenseExpiry(licenseRequest("/validate",licensePayload()))
                 null
@@ -168,12 +177,22 @@ class MainActivity: Activity() {
     }
     private fun startLicensedApp(){
         if(!licenseReady)return
-        channels=cachedChannels()
-        checkEpgTune()
-        refresh({
-            if(!licenseReady)return@refresh
-            if(channels.isNotEmpty())openStartupDestination() else showHome()
-        })
+        showLicenseCheckingScreen()
+        thread{
+            val cached=try{cachedChannels()}catch(e:Exception){
+                android.util.Log.w("HomeTV","Cached playlist parse failed",e)
+                mutableListOf<Channel>()
+            }
+            runOnUiThread{
+                if(!licenseReady || isFinishing || isDestroyed)return@runOnUiThread
+                channels=cached
+                checkEpgTune()
+                refresh({
+                    if(!licenseReady)return@refresh
+                    if(channels.isNotEmpty())openStartupDestination() else showHome()
+                })
+            }
+        }
     }
     private fun openStartupDestination(){
         when(prefs.getString("launch_screen","Last channel") ?: "Last channel"){
