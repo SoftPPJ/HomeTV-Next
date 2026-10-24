@@ -1384,6 +1384,8 @@ class MainActivity: Activity() {
             "Aspect ratio",
             "Picture quality",
             "Audio tracks",
+            "Subtitles",
+            "Sleep timer",
             "Playback engine",
             "Alternative stream",
             if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
@@ -1402,14 +1404,16 @@ class MainActivity: Activity() {
                     1->selectScreenMode(i)
                     2->selectQuality(i)
                     3->audioTracks()
-                    4->chooseChannelEngine(i)
-                    5->selectAlternative(i)
-                    6->{favorite(c);if(active<0)allChannels()}
-                    7->toggleLock(id(c),false)
-                    8->{toggleManualHide(c);if(active<0)allChannels()}
-                    9->allChannels()
-                    10->liveSettings()
-                    11->confirmExit()
+                    4->subtitleTracks()
+                    5->sleepTimer()
+                    6->chooseChannelEngine(i)
+                    7->selectAlternative(i)
+                    8->{favorite(c);if(active<0)allChannels()}
+                    9->toggleLock(id(c),false)
+                    10->{toggleManualHide(c);if(active<0)allChannels()}
+                    11->allChannels()
+                    12->liveSettings()
+                    13->confirmExit()
                 }
             }
             .setNegativeButton("Back",null).create()
@@ -2293,6 +2297,118 @@ class MainActivity: Activity() {
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
         }.setNegativeButton("Cancel",null).show()
     }
+
+    // Media3 subtitle choices are saved per logical channel. This does not alter
+    // the selected playback engine or the stream URL.
+    private fun subtitlePreference(c:Channel):String =
+        prefs.getString("subtitle_"+hash(channelKey(c)),"auto") ?: "auto"
+
+    private fun applySubtitlePreference(c:Channel){
+        val exo=player ?:return
+        val pref=subtitlePreference(c)
+        val builder=exo.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT,pref=="off")
+        if(pref!="off" && pref!="auto"){
+            builder.setPreferredTextLanguage(pref)
+                .setSelectUndeterminedTextLanguage(false)
+        }else{
+            builder.setPreferredTextLanguage(null)
+                .setSelectUndeterminedTextLanguage(false)
+        }
+        exo.trackSelectionParameters=builder.build()
+    }
+
+    private fun subtitleTracks(){
+        val c=channels.getOrNull(active) ?:return
+        val exo=player
+        if(exo==null){
+            AlertDialog.Builder(this).setTitle("Subtitles")
+                .setMessage("Subtitle selection is available for streams playing through Media3. This channel is using another playback engine.")
+                .setPositiveButton("OK",null).show()
+            return
+        }
+        val choices=mutableListOf("Off","Automatic")
+        val entries=mutableListOf<Pair<androidx.media3.common.TrackGroup,Int>>()
+        val languages=mutableListOf<String>()
+        for(group in exo.currentTracks.groups){
+            if(group.type!=C.TRACK_TYPE_TEXT)continue
+            for(i in 0 until group.length){
+                if(!group.isTrackSupported(i))continue
+                val format=group.getTrackFormat(i)
+                val language=format.language ?: "und"
+                val label=if(language=="und")"Undetermined" else
+                    try{java.util.Locale.forLanguageTag(language).displayLanguage.ifBlank{language}}
+                    catch(_:Exception){language}
+                choices.add(label+" · "+(format.label ?: format.sampleMimeType ?: "Subtitles")+
+                    (if(group.isTrackSelected(i))" ✓" else ""))
+                entries.add(group.mediaTrackGroup to i)
+                languages.add(language)
+            }
+        }
+        AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
+            .setItems(choices.toTypedArray()){_,choice->
+                val editor=prefs.edit()
+                if(choice==0){
+                    editor.putString("subtitle_"+hash(channelKey(c)),"off").apply()
+                    applySubtitlePreference(c)
+                    showBanner("Subtitles off")
+                }else if(choice==1){
+                    editor.putString("subtitle_"+hash(channelKey(c)),"auto").apply()
+                    applySubtitlePreference(c)
+                    showBanner("Subtitles automatic")
+                }else{
+                    val position=choice-2
+                    val (group,track)=entries[position]
+                    val language=languages[position]
+                    editor.putString("subtitle_"+hash(channelKey(c)),
+                        if(language=="und")"auto" else language).apply()
+                    applySubtitlePreference(c)
+                    exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT,false)
+                        .setOverrideForType(TrackSelectionOverride(group,listOf(track))).build()
+                    showBanner("Subtitles: "+choices[choice])
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
+    private var sleepTimerTask:Runnable?=null
+    private var sleepTimerDeadline:Long=0L
+
+    private fun sleepTimer(){
+        val remaining=if(sleepTimerDeadline>0L)
+            ((sleepTimerDeadline-android.os.SystemClock.elapsedRealtime()+59999L)/60000L).coerceAtLeast(0L)
+            else 0L
+        val options=arrayOf(
+            "Off"+(if(remaining>0L)" (cancel — "+remaining+" min left)" else ""),
+            "15 minutes","30 minutes","45 minutes","60 minutes","90 minutes","120 minutes"
+        )
+        val minutes=intArrayOf(0,15,30,45,60,90,120)
+        AlertDialog.Builder(this).setTitle("Sleep timer — stop TV playback")
+            .setItems(options){_,which->
+                sleepTimerTask?.let{handler.removeCallbacks(it)}
+                sleepTimerTask=null
+                val delay=minutes[which]
+                if(delay==0){
+                    sleepTimerDeadline=0L
+                    if(active>=0)showBanner("Sleep timer off")
+                    else Toast.makeText(this,"Sleep timer off",Toast.LENGTH_SHORT).show()
+                }else{
+                    sleepTimerDeadline=android.os.SystemClock.elapsedRealtime()+delay*60000L
+                    val task=Runnable{
+                        sleepTimerTask=null
+                        sleepTimerDeadline=0L
+                        stopPlayback()
+                        showHome()
+                        Toast.makeText(this,"Sleep timer finished — playback stopped",Toast.LENGTH_LONG).show()
+                    }
+                    sleepTimerTask=task
+                    handler.postDelayed(task,delay*60000L)
+                    if(active>=0)showBanner("Sleep timer: "+delay+" minutes")
+                    else Toast.makeText(this,"Sleep timer: "+delay+" minutes",Toast.LENGTH_SHORT).show()
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val c=channels[active]
@@ -2304,6 +2420,8 @@ class MainActivity: Activity() {
             "Aspect Ratio",
             "Picture Quality",
             "Audio tracks",
+            "Subtitles",
+            "Sleep timer",
             "Playback Engine",
             "Channel list"
         )
@@ -2317,8 +2435,10 @@ class MainActivity: Activity() {
                     4->selectScreenMode(active)
                     5->selectQuality(active)
                     6->audioTracks()
-                    7->chooseChannelEngine(active)
-                    8->showOverlayList()
+                    7->subtitleTracks()
+                    8->sleepTimer()
+                    9->chooseChannelEngine(active)
+                    10->showOverlayList()
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -2974,7 +3094,7 @@ class MainActivity: Activity() {
         val options=arrayOf(
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
-            "Picture quality","Buffering","Audio tracks","Playback engine",
+            "Picture quality","Buffering","Audio tracks","Subtitles","Sleep timer","Playback engine",
             "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
         )
         val drawer=LinearLayout(this).apply{
@@ -3003,11 +3123,13 @@ class MainActivity: Activity() {
                 2->selectQuality(active.takeIf{it>=0})
                 3->chooseBufferProfile()
                 4->audioTracks()
-                5->if(active>=0)chooseChannelEngine(active)
-                6->clockSettings()
-                7->selectAlternative(active)
-                8->showHome()
-                9->liveSettings()
+                5->subtitleTracks()
+                6->sleepTimer()
+                7->if(active>=0)chooseChannelEngine(active)
+                8->clockSettings()
+                9->selectAlternative(active)
+                10->showHome()
+                11->liveSettings()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -3433,6 +3555,7 @@ class MainActivity: Activity() {
             exo.volume=1f
             player=exo
             applyQuality()
+            applySubtitlePreference(c)
             val view=PlayerView(this).apply{
                 player=exo
                 useController=false
@@ -3828,6 +3951,7 @@ class MainActivity: Activity() {
         root.addView(button("Export settings backup"){exportSettings()})
         root.addView(button("Restore settings backup"){importSettings()})
         root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
+        root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
@@ -4039,5 +4163,5 @@ class MainActivity: Activity() {
         web?.onPause();web?.destroy();web=null
         active=-1
     }
-    override fun onDestroy(){stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
+    override fun onDestroy(){sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null;stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
 }
