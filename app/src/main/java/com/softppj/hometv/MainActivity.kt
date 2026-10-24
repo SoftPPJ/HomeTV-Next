@@ -3085,7 +3085,11 @@ class MainActivity: Activity() {
                               'ytd-app,ytd-watch-flexy,#page-manager,#player,#full-bleed-container,#player-container-outer,#player-container-inner{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;max-width:100vw!important;max-height:100vh!important;margin:0!important;padding:0!important;background:#000!important}'+
                               '#movie_player,.html5-video-player,.html5-video-container{width:100%!important;height:100%!important;max-width:100%!important;max-height:100%!important;background:#000!important}'+
                               'video{object-fit:contain!important}'+
-                              '#masthead-container,#secondary,#below,#comments,#related,#chat,#guide,#guide-button,ytd-mini-guide-renderer{display:none!important}';
+                              '#masthead-container,#secondary,#below,#comments,#related,#chat,#guide,#guide-button,ytd-mini-guide-renderer{display:none!important}'+
+                              // Hide only YouTube's watch/open-in-app links that can cover the mute button.
+                              // Leave the player control bar and .ytp-mute-button intact.
+                              '.ytp-youtube-button,.ytp-impression-link,.ytp-watermark,.ytp-title-link,.ytp-title-channel,.ytp-chrome-top .ytp-title,.ytp-pause-overlay,.ytp-app-promo{display:none!important;pointer-events:none!important}'+
+                              '.ytp-mute-button{visibility:visible!important;pointer-events:auto!important}';
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
