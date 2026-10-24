@@ -1008,46 +1008,18 @@ class MainActivity: Activity() {
                 temporaryFailureHidden.contains(channelKey(channels[it]))
         }.distinctBy{channelKey(channels[it])}
         if(hidden.isEmpty()){
-            showSideDialog(AlertDialog.Builder(this).setTitle("Check hidden channels")
-                .setMessage("There are no hidden channels to check.")
-                .setPositiveButton("OK",null).create())
+            Toast.makeText(this,"No hidden channels to check",Toast.LENGTH_SHORT).show()
             return
         }
-        val reachableIndices=mutableListOf<Int>()
-        val rows=mutableListOf<String>()
-        val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,rows)
-        val progress=AlertDialog.Builder(this).setTitle("Check hidden channels")
-            .setAdapter(adapter){_,_-> /* Handled without dismissing the results dialog below. */ }
-            .setNegativeButton("Cancel",null).create()
-        progress.setOnShowListener{
-            progress.listView?.setOnItemClickListener{_,_,position,_->
-                val index=reachableIndices.getOrNull(position) ?:return@setOnItemClickListener
-                val c=channels[index]
-                AlertDialog.Builder(this).setTitle(c.name)
-                    .setMessage("The stream URL responded successfully, but video playback is not verified.")
-                    .setPositiveButton("Unhide"){_,_->
-                        if(isManuallyHidden(c))toggleManualHide(c)
-                        temporaryFailureHidden.remove(channelKey(c))
-                        unavailableChannels.remove(channelKey(c))
-                        if(isGroupHidden(c.group))Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
-                        reachableIndices.removeAt(position)
-                        rows.removeAt(position)
-                        adapter.notifyDataSetChanged()
-                    }
-                    .setNegativeButton("Keep hidden",null).show()
-            }
-        }
-        var cancelled=false
-        progress.setOnCancelListener{cancelled=true}
-        progress.setOnDismissListener{cancelled=true}
-        progress.show()
+        // Run quietly; only display a full-screen results menu after checking finishes.
+        // Do not put a modal progress window over the currently playing channel.
+        Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
         thread(name="HomeTV-hidden-channel-check"){
-             hidden.forEachIndexed{position,index->
-                if(cancelled)return@thread
+            val reachableIndices=mutableListOf<Int>()
+            hidden.forEach{index->
                 val c=channels[index]
                 val urls=alternateIndices(index).map{channels[it]}.ifEmpty{listOf(c)}
                 val reachable=urls.any{candidate->
-                    if(cancelled)return@any false
                     val address=candidate.url.lowercase(java.util.Locale.ROOT)
                     if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
                     if("youtube.com" in address || "youtu.be" in address)return@any false
@@ -1068,23 +1040,41 @@ class MainActivity: Activity() {
                         }finally{connection.disconnect()}
                     }catch(_:Exception){false}
                 }
-                handler.post{
-                    if(!cancelled && progress.isShowing){
-                        if(reachable){
-                            reachableIndices.add(index)
-                            rows.add(c.name+"    —    Unhide")
-                            adapter.notifyDataSetChanged()
-                        }
-                        progress.setTitle("Checking hidden channels: "+(position+1)+"/"+hidden.size)
-                    }
-                }
+                if(reachable)reachableIndices.add(index)
             }
             handler.post{
-                if(!cancelled && progress.isShowing){
-                    progress.setTitle("Hidden channel check complete")
-                    progress.setTitle(if(rows.isEmpty())"No hidden channels passed the check" else "Reachable channels — select to Unhide")
-                    progress.getButton(AlertDialog.BUTTON_NEGATIVE)?.text="Close"
+                if(reachableIndices.isEmpty()){
+                    Toast.makeText(this,"Hidden channel check complete • No reachable channels found",Toast.LENGTH_LONG).show()
+                    return@post
                 }
+                val results=reachableIndices.toMutableList()
+                val labels=results.map{channels[it].name+"  —  Unhide"}.toMutableList()
+                val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
+                val dialog=AlertDialog.Builder(this)
+                    .setTitle("Hidden channel check complete • "+results.size+" found")
+                    .setAdapter(adapter){_,_->}
+                    .setNegativeButton("Close",null).create()
+                dialog.setOnShowListener{
+                    dialog.listView?.setOnItemClickListener{_,_,position,_->
+                        val index=results.getOrNull(position) ?:return@setOnItemClickListener
+                        val c=channels[index]
+                        AlertDialog.Builder(this).setTitle(c.name)
+                            .setMessage("The stream URL responded successfully, but video playback is not verified.")
+                            .setPositiveButton("Unhide"){_,_->
+                                if(isManuallyHidden(c))toggleManualHide(c)
+                                temporaryFailureHidden.remove(channelKey(c))
+                                unavailableChannels.remove(channelKey(c))
+                                if(isGroupHidden(c.group))
+                                    Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
+                                results.removeAt(position)
+                                labels.removeAt(position)
+                                adapter.notifyDataSetChanged()
+                                dialog.setTitle("Reachable hidden channels • "+results.size+" remaining")
+                            }
+                            .setNegativeButton("Keep hidden",null).show()
+                    }
+                }
+                showSideDialog(dialog)
             }
         }
     }
