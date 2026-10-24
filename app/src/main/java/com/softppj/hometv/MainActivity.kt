@@ -1837,6 +1837,8 @@ class MainActivity: Activity() {
     private val probeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
     private var periodicProbeTask:Runnable?=null
     private var probeQueue=java.util.ArrayDeque<Channel>()
+    private var backgroundProbeOffset=0
+    private var probePositionByUrl:Map<String,Int> = emptyMap()
     private val probePlayers=mutableSetOf<ExoPlayer>()
     private var probeInFlight=0
     private val vlcProbeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
@@ -1921,10 +1923,22 @@ class MainActivity: Activity() {
         // Never interrupt the on-screen channel or probe it a second time.
         val firstPositionByUrl=HashMap<String,Int>()
         channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
-        // Bound periodic checks to avoid huge queues on low-memory TVs.
-        val snapshot=channels.asSequence().distinctBy{it.url}
-            .filter{it.url!=channels.getOrNull(active)?.url}
-            .take(250).toList()
+        probePositionByUrl=firstPositionByUrl
+        // Scan a rotating window, not always the first 250 streams. Even a
+        // very large playlist is eventually covered without a giant queue.
+        val snapshot=ArrayList<Channel>(250)
+        val seenUrls=HashSet<String>()
+        val total=channels.size
+        val start=if(total>0)backgroundProbeOffset%total else 0
+        var scanned=0
+        while(scanned<total && snapshot.size<250){
+            val candidate=channels[(start+scanned)%total]
+            scanned++
+            if(candidate.url!=channels.getOrNull(active)?.url && seenUrls.add(candidate.url)){
+                snapshot.add(candidate)
+            }
+        }
+        if(total>0)backgroundProbeOffset=(start+scanned)%total
         val anchor=active.coerceAtLeast(0)
         val count=channels.size.coerceAtLeast(1)
         val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
@@ -1955,8 +1969,7 @@ class MainActivity: Activity() {
             val count=channels.size.coerceAtLeast(1)
             val pending=probeQueue.toList()
             probeQueue.clear()
-            val firstPositionByUrl=HashMap<String,Int>()
-            channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
+            val firstPositionByUrl=probePositionByUrl
             pending.sortedBy{candidate->
                 val position=firstPositionByUrl[candidate.url] ?:0
                 if(surfingDirection<0)(anchor-position+count)%count
@@ -2054,7 +2067,15 @@ class MainActivity: Activity() {
                         val pair=kv.split("=",limit=2)
                         if(pair.size==2)applyHeaderTo(localHeaders,pair[0],pair[1])
                     }
-                    out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel))
+                    // Some IPTV files contain comments or junk between stream
+                    // URLs. Only recognized live-stream protocols are channels.
+                    // Keep the EXTINF metadata active for multiple URLs under
+                    // the same logical channel.
+                    val scheme=url.substringBefore("://","").lowercase(java.util.Locale.ROOT)
+                    if("://" in url && scheme in setOf(
+                            "http","https","rtmp","rtmps","rtsp","rtp","udp","mmsh","mms")){
+                        out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel))
+                    }
                 }
             }
         }
@@ -2632,18 +2653,22 @@ class MainActivity: Activity() {
     }
     // Bound concurrent logo downloads so large playlists cannot create
     // hundreds of network threads at once.
-    private val logoExecutor=java.util.concurrent.Executors.newFixedThreadPool(3)
+    // Bound both active logo downloads and pending requests. Scrolling a
+    // 10,000-channel list must never queue 10,000 bitmap downloads.
+    private val logoExecutor=java.util.concurrent.ThreadPoolExecutor(
+        3,3,0L,java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.ArrayBlockingQueue<Runnable>(96))
     private val logoLoading=mutableSetOf<String>()
     private val logoWaiting=mutableMapOf<String,MutableList<ImageView>>()
-    private fun logoView(channel:Channel,size:Int=52):ImageView{
+    private fun logoView(channel:Channel,size:Int=52,reuse:ImageView?=null):ImageView{
         val pixels=(size*resources.displayMetrics.density).toInt()
-        val view=ImageView(this).apply{
-            layoutParams=LinearLayout.LayoutParams(pixels,pixels)
-            scaleType=ImageView.ScaleType.FIT_CENTER
-            setPadding(4,4,4,4)
-            setImageResource(android.R.drawable.ic_menu_gallery)
-            imageTintList=android.content.res.ColorStateList.valueOf(0xFFB6C9DD.toInt())
-        }
+        val view=reuse ?: ImageView(this)
+        view.layoutParams=LinearLayout.LayoutParams(pixels,pixels)
+        view.scaleType=ImageView.ScaleType.FIT_CENTER
+        view.setPadding(4,4,4,4)
+        view.tag=null
+        view.setImageResource(android.R.drawable.ic_menu_gallery)
+        view.imageTintList=android.content.res.ColorStateList.valueOf(0xFFB6C9DD.toInt())
         val url=channel.logo.trim()
         if(!url.startsWith("http://") && !url.startsWith("https://"))return view
         view.tag=url
@@ -2653,9 +2678,10 @@ class MainActivity: Activity() {
             view.setImageBitmap(cached)
             return view
         }
-        logoWaiting.getOrPut(url){mutableListOf()}.add(view)
+        val waiting=logoWaiting.getOrPut(url){mutableListOf()}
+        if(waiting.size<24)waiting.add(view)
         if(!logoLoading.add(url))return view
-        logoExecutor.execute{
+        try{logoExecutor.execute{
             val bmp=try{
                 val conn=URL(url).openConnection().apply{
                     connectTimeout=5000
@@ -2685,29 +2711,32 @@ class MainActivity: Activity() {
                     }
                 }
             }
+        }}catch(_:java.util.concurrent.RejectedExecutionException){
+            logoLoading.remove(url)
+            logoWaiting.remove(url)
         }
         return view
     }
     private fun logoRow(channel:Channel,title:String,convertView:View?=null):LinearLayout{
-        // Recycle visible rows rather than allocating a layout on every scroll.
+        // Reuse the same ImageView and TextView while scrolling.
         val row=(convertView as? LinearLayout) ?: LinearLayout(this).apply{
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER_VERTICAL
             setPadding(8,5,8,5)
+            addView(ImageView(this@MainActivity))
+            addView(TextView(this@MainActivity).apply{
+                textSize=17f
+                setTextColor(android.graphics.Color.WHITE)
+                setPadding(12,8,8,8)
+                isSingleLine=true
+                ellipsize=android.text.TextUtils.TruncateAt.END
+            },LinearLayout.LayoutParams(0,-2,1f))
         }
-        row.removeAllViews()
-        row.addView(logoView(channel))
-        row.addView(TextView(this).apply{
-            text=title
-            textSize=17f
-            setTextColor(android.graphics.Color.WHITE)
-            setPadding(12,8,8,8)
-            isSingleLine=true
-            ellipsize=android.text.TextUtils.TruncateAt.END
-        },LinearLayout.LayoutParams(0,-2,1f))
+        logoView(channel,52,row.getChildAt(0) as ImageView)
+        (row.getChildAt(1) as TextView).text=title
         return row
     }
-    private fun showOverlayList(){
+    private fun showOverlayList(searchQuery:String?=null){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         if(channels.isEmpty())return
@@ -2726,8 +2755,30 @@ class MainActivity: Activity() {
             setTextColor(android.graphics.Color.WHITE)
             setPadding(16,16,8,12)
         })
+        drawer.addView(button(if(searchQuery==null)"⌕ Search channels" else "⌕ "+searchQuery+"  •  Clear / Change"){ 
+            val input=EditText(this).apply{
+                hint="Channel name or group"
+                setSingleLine(true)
+                setText(searchQuery ?: "")
+                selectAll()
+            }
+            AlertDialog.Builder(this).setTitle("Search channels")
+                .setView(input)
+                .setPositiveButton("Search"){_,_->
+                    val query=input.text.toString().trim().takeIf{it.isNotEmpty()}
+                    if(drawer.parent===screen)screen.removeView(drawer)
+                    showOverlayList(query)
+                }.setNeutralButton("Clear"){_,_->
+                    if(drawer.parent===screen)screen.removeView(drawer)
+                    showOverlayList()
+                }.setNegativeButton("Cancel",null).show()
+        })
         val list=ListView(this)
-        val available=playlistIndices().filter{!isGroupHidden(channels[it].group)}
+        val available=playlistIndices().filter{
+            !isGroupHidden(channels[it].group) &&
+                (searchQuery==null || channels[it].name.contains(searchQuery,true) ||
+                    channels[it].group.contains(searchQuery,true))
+        }
         list.adapter=object:android.widget.BaseAdapter(){
             override fun getCount()=available.size
             override fun getItem(position:Int):Any=channels[available[position]]
