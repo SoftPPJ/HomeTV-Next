@@ -2689,7 +2689,7 @@ class MainActivity: Activity() {
                 7->showOverlayList()
                 8->showPlaylistDrawer()
                 else->{
-                    val group=groups.getOrNull(choice-8)
+                    val group=groups.getOrNull(choice-9)
                     if(group!=null)showGroupDrawer(group)
                 }
             }
