@@ -3335,37 +3335,34 @@ class MainActivity: Activity() {
     private fun requestYoutubeEnhancedQuality(viewer:WebView,index:Int,screen:FrameLayout){
         val preference=youtubeQualityPreference(index)
         if(preference=="Auto")return
-        // YouTube's internal player API is undocumented and can reject quality requests.
-        // Never reload, pause or replace the working WebView stream.
+        // One quality request per page, after playback begins. Do not pin a
+        // quality range: adaptive bitrate must remain free to prevent stalls.
         val wanted=when(preference){
-            "1080p"->"hd1080"
             "720p"->"hd720"
+            "1080p"->"hd1080"
             else->"hd1080"
         }
-        longArrayOf(1800L,4500L,8500L).forEach{delay->
-            handler.postDelayed({
-                if(web===viewer && active==index && videoScreen===screen){
-                    viewer.evaluateJavascript("""(function(){
-                        try{
-                            var p=document.getElementById('movie_player');
-                            if(!p)return 'player-not-ready';
-                            var levels=typeof p.getAvailableQualityLevels==='function'
-                                ? p.getAvailableQualityLevels():[];
-                            var preferred=${JSONObject.quote(wanted)};
-                            var fallback=['hd1080','hd720','large','medium'];
-                            var chosen=levels.indexOf(preferred)>=0?preferred:
-                                fallback.find(function(q){return levels.indexOf(q)>=0;});
-                            if(!chosen)return 'no-supported-quality';
-                            if(typeof p.setPlaybackQualityRange==='function')
-                                p.setPlaybackQualityRange(chosen,chosen);
-                            if(typeof p.setPlaybackQuality==='function')
-                                p.setPlaybackQuality(chosen);
-                            return 'requested-'+chosen;
-                        }catch(e){return 'quality-api-unavailable';}
-                    })();""",null)
-                }
-            },delay)
-        }
+        handler.postDelayed({
+            if(web===viewer && active==index && videoScreen===screen){
+                viewer.evaluateJavascript("""(function(){
+                    try{
+                        var p=document.getElementById('movie_player');
+                        var v=document.querySelector('video');
+                        if(!p || !v || v.paused)return 'player-not-ready';
+                        var levels=typeof p.getAvailableQualityLevels==='function'
+                            ? p.getAvailableQualityLevels():[];
+                        var preferred=${JSONObject.quote(wanted)};
+                        var fallback=['hd1080','hd720','large','medium'];
+                        var chosen=levels.indexOf(preferred)>=0?preferred:
+                            fallback.find(function(q){return levels.indexOf(q)>=0;});
+                        if(!chosen)return 'no-supported-quality';
+                        if(typeof p.setPlaybackQuality==='function')
+                            p.setPlaybackQuality(chosen);
+                        return 'requested-once-'+chosen;
+                    }catch(e){return 'quality-api-unavailable';}
+                })();""",null)
+            }
+        },3000L)
     }
     private fun showYoutubeQualityDiagnostics(){
         val viewer=web
