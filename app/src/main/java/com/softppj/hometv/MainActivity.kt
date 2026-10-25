@@ -3328,6 +3328,45 @@ class MainActivity: Activity() {
         return host=="youtu.be" || host=="youtube.com" ||
             host?.endsWith(".youtube.com")==true || host=="youtube-nocookie.com"
     }
+    private fun youtubeQualityPreference(index:Int):String{
+        val url=channels.getOrNull(index)?.url ?:return "Best available"
+        return prefs.getString("youtube_quality_"+hash(url),"Best available") ?: "Best available"
+    }
+    private fun requestYoutubeEnhancedQuality(viewer:WebView,index:Int,screen:FrameLayout){
+        val preference=youtubeQualityPreference(index)
+        if(preference=="Auto")return
+        // YouTube's internal player API is undocumented and can reject quality requests.
+        // Never reload, pause or replace the working WebView stream.
+        val wanted=when(preference){
+            "1080p"->"hd1080"
+            "720p"->"hd720"
+            else->"hd1080"
+        }
+        longArrayOf(1800L,4500L,8500L).forEach{delay->
+            handler.postDelayed({
+                if(web===viewer && active==index && videoScreen===screen){
+                    viewer.evaluateJavascript("""(function(){
+                        try{
+                            var p=document.getElementById('movie_player');
+                            if(!p)return 'player-not-ready';
+                            var levels=typeof p.getAvailableQualityLevels==='function'
+                                ? p.getAvailableQualityLevels():[];
+                            var preferred=${JSONObject.quote(wanted)};
+                            var fallback=['hd1080','hd720','large','medium'];
+                            var chosen=levels.indexOf(preferred)>=0?preferred:
+                                fallback.find(function(q){return levels.indexOf(q)>=0;});
+                            if(!chosen)return 'no-supported-quality';
+                            if(typeof p.setPlaybackQualityRange==='function')
+                                p.setPlaybackQualityRange(chosen,chosen);
+                            if(typeof p.setPlaybackQuality==='function')
+                                p.setPlaybackQuality(chosen);
+                            return 'requested-'+chosen;
+                        }catch(e){return 'quality-api-unavailable';}
+                    })();""",null)
+                }
+            },delay)
+        }
+    }
     private fun showYoutubeQualityDiagnostics(){
         val viewer=web
         if(viewer==null || !isYoutubeChannel(active)){
@@ -3369,8 +3408,15 @@ class MainActivity: Activity() {
     private fun selectQuality(index:Int?=null){
         if(index!=null && isYoutubeChannel(index)){
             AlertDialog.Builder(this).setTitle("YouTube picture quality")
-                .setItems(arrayOf("Auto (YouTube controls resolution)","Show actual resolution / quality")){
-                    _,choice->if(choice==1)showYoutubeQualityDiagnostics()
+                .setItems(arrayOf("Best available (experimental)","Prefer 1080p","Prefer 720p","Auto (YouTube controls resolution)","Show actual resolution / quality")){
+                    _,choice->
+                    if(choice==4)showYoutubeQualityDiagnostics()
+                    else{
+                        val mode=arrayOf("Best available","1080p","720p","Auto")[choice]
+                        val url=channels[index].url
+                        prefs.edit().putString("youtube_quality_"+hash(url),mode).apply()
+                        showBanner("YouTube quality: "+mode+" — reopening channel applies the preference")
+                    }
                 }.setNegativeButton("Cancel",null).show()
             return
         }
@@ -3672,6 +3718,7 @@ class MainActivity: Activity() {
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
                         requestYoutubeStartupAudio(view,index,screen)
+                        requestYoutubeEnhancedQuality(view,index,screen)
                     }
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
