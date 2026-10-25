@@ -6,16 +6,16 @@ android {
     namespace = "com.softppj.hometv"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.softppj.hometv"
+        applicationId = "com.softppj.myhometv"
         minSdk = 23
         targetSdk = 32
-        versionCode = 17
-        versionName = "9.0.0"
+        versionCode = 1
+        versionName = "1.0.0"
     }
     applicationVariants.all {
         outputs.all {
             val apkOutput = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            apkOutput.outputFileName = "HomeTV.apk"
+            apkOutput.outputFileName = "My-Home-TV.apk"
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
