@@ -3323,7 +3323,57 @@ class MainActivity: Activity() {
             .setForceHighestSupportedBitrate(mode=="Best Available")
         exo.trackSelectionParameters=builder.build()
     }
+    private fun isYoutubeChannel(index:Int):Boolean{
+        val host=try{channels.getOrNull(index)?.url?.let{Uri.parse(it).host?.lowercase(java.util.Locale.ROOT)}}catch(_:Exception){null}
+        return host=="youtu.be" || host=="youtube.com" ||
+            host?.endsWith(".youtube.com")==true || host=="youtube-nocookie.com"
+    }
+    private fun showYoutubeQualityDiagnostics(){
+        val viewer=web
+        if(viewer==null || !isYoutubeChannel(active)){
+            showBanner("Open a YouTube channel first",true)
+            return
+        }
+        viewer.evaluateJavascript("""(function(){
+            var v=document.querySelector('video');
+            if(!v)return JSON.stringify({error:'YouTube video is still loading'});
+            var p=document.getElementById('movie_player');
+            var q='Unavailable',levels=[];
+            try{
+                if(p && typeof p.getPlaybackQuality==='function')q=p.getPlaybackQuality();
+                if(p && typeof p.getAvailableQualityLevels==='function')levels=p.getAvailableQualityLevels();
+            }catch(e){}
+            return JSON.stringify({width:v.videoWidth,height:v.videoHeight,
+                displayWidth:Math.round(v.getBoundingClientRect().width),
+                displayHeight:Math.round(v.getBoundingClientRect().height),
+                quality:q,available:levels});
+        })();"""){raw->
+            try{
+                val decoded=org.json.JSONTokener(raw).nextValue() as? String ?:raw
+                val info=JSONObject(decoded)
+                val message=if(info.has("error"))info.optString("error") else
+                    "Decoded video: "+info.optInt("width")+" × "+info.optInt("height")+
+                    "\\nPlayer size: "+info.optInt("displayWidth")+" × "+info.optInt("displayHeight")+
+                    "\\nYouTube quality: "+info.optString("quality","Unavailable")+
+                    "\\nAvailable: "+info.optJSONArray("available")?.toString()
+                AlertDialog.Builder(this).setTitle("YouTube picture diagnostics")
+                    .setMessage(message)
+                    .setPositiveButton("OK",null).show()
+            }catch(e:Exception){
+                AlertDialog.Builder(this).setTitle("YouTube picture diagnostics")
+                    .setMessage("YouTube has not exposed playback resolution yet. Try again after the video starts.")
+                    .setPositiveButton("OK",null).show()
+            }
+        }
+    }
     private fun selectQuality(index:Int?=null){
+        if(index!=null && isYoutubeChannel(index)){
+            AlertDialog.Builder(this).setTitle("YouTube picture quality")
+                .setItems(arrayOf("Auto (YouTube controls resolution)","Show actual resolution / quality")){
+                    _,choice->if(choice==1)showYoutubeQualityDiagnostics()
+                }.setNegativeButton("Cancel",null).show()
+            return
+        }
         val url=index?.let{channels.getOrNull(it)?.url}
         val key=url?.let{"quality_channel_"+hash(it)}
         val options=if(key!=null)arrayOf("Use universal default")+qualityModes else qualityModes
