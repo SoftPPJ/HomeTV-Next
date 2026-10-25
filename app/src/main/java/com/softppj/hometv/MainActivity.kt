@@ -2179,6 +2179,7 @@ class MainActivity: Activity() {
                 }
             }
         }
+        addSavedWebTv(out)
         return out
     }
     private fun applyHeaderTo(map:MutableMap<String,String>,key:String,value:String){
@@ -3622,6 +3623,143 @@ class MainActivity: Activity() {
         if(index>=0 && index!=active)playIndex(index)
         else showBanner("Previous channel is unavailable")
     }
+
+    // My Home TV: dedicated website-video controls. No changes to YouTube or native players.
+    private fun isWebTv(c:Channel):Boolean{
+        val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
+        return (u.scheme=="http" || u.scheme=="https") &&
+            (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true))
+    }
+    private fun webTvJavascript():String = """(function(){
+        try {
+          if(!document.getElementById('myhometv-web-style')){
+            var style=document.createElement('style');style.id='myhometv-web-style';
+            style.textContent='html,body{background:#000!important;margin:0!important}video{object-fit:contain!important;max-width:100vw!important;max-height:100vh!important}';
+            document.head.appendChild(style);
+          }
+          var videos=[].slice.call(document.querySelectorAll('video'));
+          var frames=[].slice.call(document.querySelectorAll('iframe')).filter(function(f){
+             var r=f.getBoundingClientRect();return r.width>180&&r.height>100;
+          });
+          var player=videos.find(function(v){return v.videoWidth>0||v.readyState>0;})||videos[0];
+          if(player){
+            player.controls=true;player.muted=false;player.volume=1;
+            player.setAttribute('playsinline','true');
+            var play=player.play();if(play&&play.catch)play.catch(function(){});
+          }
+          var primary=player||frames.sort(function(a,b){
+            var x=a.getBoundingClientRect(),y=b.getBoundingClientRect();
+            return y.width*y.height-x.width*x.height;
+          })[0];
+          if(primary){
+            var container=primary;
+            if(primary.tagName==='VIDEO' && primary.parentElement &&
+                primary.parentElement.getBoundingClientRect().width>primary.getBoundingClientRect().width)
+                container=primary.parentElement;
+            if(!container.dataset.myhometvExpanded){
+              container.dataset.myhometvExpanded='1';
+              container.style.setProperty('position','fixed','important');
+              container.style.setProperty('inset','0','important');
+              container.style.setProperty('width','100vw','important');
+              container.style.setProperty('height','100vh','important');
+              container.style.setProperty('max-width','100vw','important');
+              container.style.setProperty('max-height','100vh','important');
+              container.style.setProperty('z-index','2147483000','important');
+              container.style.setProperty('background','#000','important');
+              primary.style.setProperty('width','100%','important');
+              primary.style.setProperty('height','100%','important');
+            }
+          }
+          var candidates=[];
+          var seen={};
+          [].slice.call(document.querySelectorAll('a[href],button,[role="button"],[onclick]')).forEach(function(el,i){
+            var label=(el.innerText||el.textContent||el.getAttribute('aria-label')||'').replace(/\s+/g,' ').trim().slice(0,65);
+            var href=el.href||el.getAttribute('data-url')||'';
+            if(label.length<2||label.length>65)return;
+            var relevant=/tv|live|channel|watch|play|stream|hd|sd/i.test(label)||
+                         /\/live\/|\.m3u8|\.mpd|embed\//i.test(href);
+            if(!relevant)return;
+            var key=label.toLowerCase()+'|'+href;
+            if(seen[key])return;seen[key]=1;
+            candidates.push({name:label,url:href,index:i});
+          });
+          window.__myHomeTvLinks=candidates.slice(0,70);
+          return JSON.stringify({videos:videos.length,frames:frames.length,
+             playing:!!(player&&!player.paused),candidates:window.__myHomeTvLinks});
+        }catch(e){return JSON.stringify({error:String(e)})}
+    })();"""
+    private fun inspectWebTv(viewer:WebView,index:Int,screen:FrameLayout,showMenu:Boolean=false){
+        if(web!==viewer || active!=index || videoScreen!==screen)return
+        viewer.evaluateJavascript(webTvJavascript()){raw->
+            if(web!==viewer || active!=index || videoScreen!==screen)return@evaluateJavascript
+            try{
+                val decoded=org.json.JSONTokener(raw).nextValue() as? String ?: raw
+                val data=JSONObject(decoded)
+                if(showMenu){
+                    val candidates=data.optJSONArray("candidates") ?: org.json.JSONArray()
+                    val labels=mutableListOf<String>()
+                    val urls=mutableListOf<String>()
+                    for(i in 0 until candidates.length()){
+                        val item=candidates.optJSONObject(i) ?:continue
+                        labels.add(item.optString("name","Channel "+(i+1)))
+                        urls.add(item.optString("url",""))
+                    }
+                    val options=arrayOf("Retry / fullscreen video","Open original webpage","Save current website as TV channel")+
+                        labels.map{"Channel: "+it}
+                    AlertDialog.Builder(this).setTitle("Web TV • "+channels[index].name)
+                        .setItems(options){_,choice->
+                            when(choice){
+                                0->inspectWebTv(viewer,index,screen,false)
+                                1->viewer.loadUrl(channels[index].url)
+                                2->saveWebTvChannel(channels[index].name,channels[index].url)
+                                else->{
+                                    val n=choice-3
+                                    if(n in urls.indices){
+                                        val target=urls[n]
+                                        if(target.startsWith("https://")||target.startsWith("http://")){
+                                            saveWebTvChannel(labels[n],target)
+                                            viewer.loadUrl(target)
+                                        }else{
+                                            val js="(function(){var a=window.__myHomeTvLinks||[];var c=a["+n+"];if(!c)return;var elements=[].slice.call(document.querySelectorAll('a[href],button,[role=button],[onclick]'));var el=elements[c.index];if(el)el.click();})();"
+                                            viewer.evaluateJavascript(js,null)
+                                            handler.postDelayed({inspectWebTv(viewer,index,screen,false)},1600L)
+                                        }
+                                    }
+                                }
+                            }
+                        }.setNegativeButton("Cancel",null).show()
+                }else if(data.optInt("videos")==0 && data.optInt("frames")==0){
+                    showBanner("No embedded video detected. Press MENU for web channels.",true)
+                }
+            }catch(e:Exception){
+                if(showMenu)showBanner("Web player menu unavailable: "+e.message,true)
+            }
+        }
+    }
+    private fun saveWebTvChannel(name:String,url:String){
+        if(!url.startsWith("http://") && !url.startsWith("https://"))return
+        val array=try{org.json.JSONArray(prefs.getString("myhometv_saved_web","[]"))}catch(_:Exception){org.json.JSONArray()}
+        for(i in 0 until array.length())if(array.optJSONObject(i)?.optString("url")==url){
+            showBanner("Already saved: "+name);return
+        }
+        val obj=JSONObject().put("name",name).put("url",url)
+        array.put(obj)
+        prefs.edit().putString("myhometv_saved_web",array.toString()).apply()
+        if(channels.none{it.url==url}){
+            channels.add(Channel(name,url,"Web TV",webChannel="auto"))
+        }
+        showBanner("Saved web channel: "+name)
+    }
+    private fun addSavedWebTv(out:MutableList<Channel>){
+        val array=try{org.json.JSONArray(prefs.getString("myhometv_saved_web","[]"))}catch(_:Exception){return}
+        for(i in 0 until array.length()){
+            val obj=array.optJSONObject(i)?:continue
+            val url=obj.optString("url")
+            if((url.startsWith("https://")||url.startsWith("http://")) && out.none{it.url==url})
+                out.add(Channel(obj.optString("name","Web TV"),url,"Web TV",webChannel="auto"))
+        }
+    }
+
     private fun playIndex(index:Int){
         if(index !in channels.indices)return
         val c=channels[index]
@@ -3674,7 +3812,7 @@ class MainActivity: Activity() {
             val u=Uri.parse(c.url)
             val h=u.host?.lowercase()?.removePrefix("www.") ?: ""
             (u.scheme=="http" || u.scheme=="https") &&
-                c.webChannel.isNotBlank()
+                isWebTv(c)
         }catch(_:Exception){false}
         // Restore the original WebView watch-page route for YouTube.
         // Native stream scraping and embed mode are not reliable substitutes here.
@@ -3757,29 +3895,34 @@ class MainActivity: Activity() {
             // Do not overlay HomeTV controls on YouTube's mute/play buttons.
             // The remote BACK and channel keys remain handled by the Activity.
             if(webPage){
-                if(c.webChannel.isNotBlank()){
-                    viewer.webViewClient=object:WebViewClient(){
-                        override fun onPageFinished(view:WebView,url:String){
-                            val wanted=JSONObject.quote(c.webChannel.trim())
-                            val js="""(function(){
-                                const norm=s=>String(s||'').replace(/\\s+/g,' ').trim().toLowerCase();
-                                const target=norm($wanted);
-                                const nodes=document.querySelectorAll('button,a,[role="button"],[onclick],label');
-                                for(const el of nodes){
-                                    if(norm(el.innerText||el.textContent||el.getAttribute('aria-label'))===target){
-                                        el.click();return 'selected';
-                                    }
-                                }
-                                return 'not-found';
-                            })();"""
-                            handler.postDelayed({
-                                if(web===viewer)viewer.evaluateJavascript(js){v->
-                                    if(v?.contains("not-found")==true && web===viewer)
-                                        showBanner("Web source not found: "+c.webChannel,true)
-                                }
-                            },1200L)
+                // Website TV mode: keep cookies, JavaScript and iframe media support.
+                viewer.settings.javaScriptCanOpenWindowsAutomatically=false
+                viewer.settings.setSupportMultipleWindows(false)
+                viewer.settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(viewer,true)
+                viewer.webViewClient=object:WebViewClient(){
+                    override fun onPageFinished(view:WebView,url:String){
+                        super.onPageFinished(view,url)
+                        if(web===view && active==index && videoScreen===screen){
+                            longArrayOf(1100L,3000L,6500L).forEach{delay->
+                                handler.postDelayed({inspectWebTv(view,index,screen,false)},delay)
+                            }
                         }
                     }
+                    override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
+                        if(request.isForMainFrame && web===view)
+                            showBanner("Web TV page failed: "+error.description,true)
+                    }
+                    override fun shouldOverrideUrlLoading(view:WebView,request:WebResourceRequest):Boolean{
+                        return request.url.scheme !in listOf("http","https")
+                    }
+                }
+                viewer.setOnKeyListener{_,key,event->
+                    if(event.action==KeyEvent.ACTION_DOWN && (key==KeyEvent.KEYCODE_MENU ||
+                        key==KeyEvent.KEYCODE_INFO)){
+                        inspectWebTv(viewer,index,screen,true);true
+                    }else false
                 }
                 viewer.loadUrl(c.url)
             }else{
