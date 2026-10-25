@@ -3335,13 +3335,10 @@ class MainActivity: Activity() {
     private fun requestYoutubeEnhancedQuality(viewer:WebView,index:Int,screen:FrameLayout){
         val preference=youtubeQualityPreference(index)
         if(preference=="Auto")return
-        // One quality request per page, after playback begins. Do not pin a
-        // quality range: adaptive bitrate must remain free to prevent stalls.
-        val wanted=when(preference){
-            "720p"->"hd720"
-            "1080p"->"hd1080"
-            else->"hd1080"
-        }
+        // Restore V7's HD quality selection. Apply once, not three times.
+        // Only reduce quality after repeated real buffering; never change the
+        // saved user preference or any Media3 / LibVLC playback settings.
+        val wanted=if(preference=="720p") "hd720" else "hd1080"
         handler.postDelayed({
             if(web===viewer && active==index && videoScreen===screen){
                 viewer.evaluateJavascript("""(function(){
@@ -3356,9 +3353,35 @@ class MainActivity: Activity() {
                         var chosen=levels.indexOf(preferred)>=0?preferred:
                             fallback.find(function(q){return levels.indexOf(q)>=0;});
                         if(!chosen)return 'no-supported-quality';
+                        if(typeof p.setPlaybackQualityRange==='function')
+                            p.setPlaybackQualityRange(chosen,chosen);
                         if(typeof p.setPlaybackQuality==='function')
                             p.setPlaybackQuality(chosen);
-                        return 'requested-once-'+chosen;
+                        // Count buffering episodes in a rolling 45-second window.
+                        // Ignore initial startup; only step down once after
+                        // three distinct stalls so normal 1080p remains sharp.
+                        if(!v.__homeTvQualityWatch){
+                            v.__homeTvQualityWatch=true;
+                            var started=Date.now(),events=[],lowered=false;
+                            v.addEventListener('waiting',function(){
+                                if(lowered || Date.now()-started<12000 || v.paused || v.ended)return;
+                                var now=Date.now();
+                                events=events.filter(function(t){return now-t<45000;});
+                                if(events.length && now-events[events.length-1]<2500)return;
+                                events.push(now);
+                                if(events.length<3)return;
+                                var q=chosen==='hd1080'?'hd720':'large';
+                                if(levels.indexOf(q)<0){q='auto';}
+                                try{
+                                    if(typeof p.setPlaybackQualityRange==='function')
+                                        p.setPlaybackQualityRange(q==='auto'?'tiny':q,q==='auto'?'hd1080':q);
+                                    if(q!=='auto' && typeof p.setPlaybackQuality==='function')
+                                        p.setPlaybackQuality(q);
+                                    lowered=true;
+                                }catch(e){}
+                            },{passive:true});
+                        }
+                        return 'hd-selected-'+chosen;
                     }catch(e){return 'quality-api-unavailable';}
                 })();""",null)
             }
