@@ -2616,16 +2616,43 @@ class MainActivity: Activity() {
         handler.postDelayed(task,15000L)
     }
     private fun unmuteYoutube(viewer:WebView,notify:Boolean=true){
+        // Only request sound; do not restart the video or click a mute button
+        // that could accidentally toggle an already unmuted player back to mute.
         viewer.evaluateJavascript("""(function(){
             var v=document.querySelector('video');
             if(!v)return 'Video not ready';
-            v.muted=false;v.defaultMuted=false;v.volume=1;
-            var mute=document.querySelector('.ytp-mute-button');
-            if(mute && mute.getAttribute('data-title-no-tooltip')==='Unmute')mute.click();
-            if(v.paused)v.play().catch(function(){});
+            try{
+                v.defaultMuted=false;
+                v.muted=false;
+                v.volume=1;
+                var yt=document.getElementById('movie_player');
+                if(yt && typeof yt.unMute==='function')yt.unMute();
+            }catch(e){}
             return v.muted?'YouTube requires manual unmute':'Sound requested';
         })();"""){result->
-            if(notify && result.contains("requires manual"))Toast.makeText(this@MainActivity,"Use YouTube mute button if sound stays off",Toast.LENGTH_SHORT).show()
+            if(notify && result.contains("requires manual"))
+                Toast.makeText(this@MainActivity,"Press volume up or use the YouTube mute button to enable sound",Toast.LENGTH_SHORT).show()
+        }
+    }
+    private fun requestYoutubeStartupAudio(viewer:WebView,channelIndex:Int,screen:FrameLayout){
+        // YouTube can attach its video element after onPageFinished. Retry
+        // briefly, but never force play(), reload the page or alter IPTV engines.
+        val delays=longArrayOf(600L,1400L,2700L,4500L,7000L)
+        delays.forEach{delay->
+            handler.postDelayed({
+                if(web===viewer && active==channelIndex && videoScreen===screen){
+                    viewer.evaluateJavascript("""(function(){
+                        var v=document.querySelector('video');
+                        if(!v || v.paused)return 'waiting';
+                        try{
+                            v.defaultMuted=false;v.muted=false;v.volume=1;
+                            var yt=document.getElementById('movie_player');
+                            if(yt && typeof yt.unMute==='function')yt.unMute();
+                        }catch(e){}
+                        return v.muted?'blocked':'unmuted';
+                    })();""",null)
+                }
+            },delay)
         }
     }
     private fun clockSettings(){
@@ -3594,6 +3621,7 @@ class MainActivity: Activity() {
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
+                        requestYoutubeStartupAudio(view,index,screen)
                     }
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
@@ -4174,6 +4202,15 @@ class MainActivity: Activity() {
             val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
             val direction=if(event.keyCode==KeyEvent.KEYCODE_VOLUME_UP)android.media.AudioManager.ADJUST_RAISE else android.media.AudioManager.ADJUST_LOWER
             audio.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC,direction,0)
+            // A TV remote volume key is a user action; retry unmuting
+            // YouTube without affecting Media3 or LibVLC playback.
+            if(event.keyCode==KeyEvent.KEYCODE_VOLUME_UP){
+                val current=channels.getOrNull(active)
+                val host=try{current?.url?.let{Uri.parse(it).host?.lowercase(java.util.Locale.ROOT)}}catch(_:Exception){null}
+                if(host!=null && (host=="youtu.be" || host=="youtube.com" ||
+                    host.endsWith(".youtube.com") || host=="youtube-nocookie.com"))
+                    web?.let{unmuteYoutube(it,false)}
+            }
             showHomeTvVolume()
             return true
         }
