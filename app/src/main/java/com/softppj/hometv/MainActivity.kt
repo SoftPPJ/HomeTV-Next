@@ -284,7 +284,7 @@ class MainActivity: Activity() {
     private var channelRepresentatives=emptyList<Int>()
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
-    private fun channelKey(c:Channel)=c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
+    private fun channelKey(c:Channel)=c.mediaType+"|"+c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
         c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
     private fun ensureChannelIndex(){
         if(channelIndexOwner===channels && channelIndexSize==channels.size)return
@@ -1575,6 +1575,89 @@ class MainActivity: Activity() {
 
     // My Home TV media library. Unmarked EXTINF entries are always Live TV.
     private fun mediaItems(type:String)=channels.indices.filter{channels[it].mediaType==type}
+    // Bounded image cache: do not start a network thread on every recycled list row.
+    private val posterCache=object:android.util.LruCache<String,android.graphics.Bitmap>(48){}
+    private val posterLoading=java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private fun loadPoster(image:android.widget.ImageView,url:String){
+        image.tag=url
+        if(url.isBlank()){image.setImageDrawable(null);return}
+        posterCache.get(url)?.let{image.setImageBitmap(it);return}
+        image.setImageDrawable(null)
+        if(!posterLoading.add(url))return
+        thread(name="MyHomeTV-poster"){
+            try{
+                val conn=URL(url).openConnection().apply{connectTimeout=5000;readTimeout=5000}
+                val bmp=conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
+                if(bmp!=null){
+                    posterCache.put(url,bmp)
+                    runOnUiThread{if(image.tag==url)image.setImageBitmap(bmp)}
+                }
+            }catch(_:Exception){}finally{posterLoading.remove(url)}
+        }
+    }
+    private fun mediaSeries(){
+        val items=mediaItems("series")
+        reset("My Home TV  •  Series")
+        root.addView(label("Series  |  "+items.size+" episodes"))
+        items.groupBy{channels[it].group}.toSortedMap().forEach{(name,episodes)->
+            root.addView(button("▣  "+name+"  •  "+episodes.size+" episodes"){
+                val ordered=episodes.sortedWith(compareBy<Int>(
+                    {channels[it].season.toIntOrNull()?:0},
+                    {channels[it].episode.toIntOrNull()?:0}
+                ))
+                mediaRows(name,ordered)
+            })
+        }
+        root.addView(button("▶  Continue Watching"){continueMedia()})
+        root.addView(button("←  Home"){showHome()})
+    }
+    private fun mediaMusic(){
+        val items=mediaItems("music")
+        reset("My Home TV  •  Music")
+        root.addView(label("Music  |  "+items.size+" songs"))
+        root.addView(button("♫  All Songs"){mediaRows("All Songs",items)})
+        items.groupBy{channels[it].artist.ifBlank{"Unknown Artist"}}.toSortedMap().forEach{(artist,songs)->
+            root.addView(button("♫  "+artist+"  ("+songs.size+")"){mediaRows(artist,songs)})
+        }
+        root.addView(button("←  Home"){showHome()})
+    }
+    private fun mediaPlaybackControls(){
+        val c=channels.getOrNull(active)?:return
+        if(c.mediaType !in setOf("movie","series","music"))return
+        val exo=player
+        val vlc=vlcPlayer
+        if(exo==null && vlc==null){
+            Toast.makeText(this,"This web player controls seeking on its own",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val duration=if(exo!=null)exo.duration else vlc?.length?:0L
+        val position=if(exo!=null)exo.currentPosition else vlc?.time?:0L
+        if(duration<=0L){Toast.makeText(this,"Seeking unavailable for this stream",Toast.LENGTH_SHORT).show();return}
+        val bar=android.widget.SeekBar(this).apply{
+            max=(duration/1000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            progress=(position/1000L).coerceAtMost(max.toLong()).toInt()
+        }
+        val info=TextView(this).apply{
+            setTextColor(android.graphics.Color.WHITE);textSize=18f
+            text="Use LEFT / RIGHT to seek, OK to play from selected position"
+            setPadding(20,20,20,20)
+        }
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;setPadding(30,20,30,20)
+            addView(info);addView(bar)
+        }
+        AlertDialog.Builder(this).setTitle("▶  "+c.name)
+            .setView(layout)
+            .setPositiveButton("▶  Play here"){_,_->
+                val target=bar.progress.toLong()*1000L
+                if(exo!=null)exo.seekTo(target) else vlc?.time=target
+            }
+            .setNeutralButton(if(exo?.isPlaying==true || vlc?.isPlaying==true)"Pause":"Play"){_,_->
+                if(exo!=null){if(exo.isPlaying)exo.pause() else exo.play()}
+                else if(vlc!=null){if(vlc.isPlaying)vlc.pause() else vlc.play()}
+            }
+            .setNegativeButton("Close",null).show()
+    }
     private fun mediaKey(c:Channel)="myhometv_progress_"+c.url.hashCode().toString()
     private fun mediaResumeSeconds(c:Channel):Long=prefs.getLong(mediaKey(c),0L)
     private fun saveCurrentMediaProgress(){
@@ -1652,18 +1735,7 @@ class MainActivity: Activity() {
                     (if(c.season.isNotBlank())"  S"+c.season+" E"+c.episode else "")+
                     (if(progress>0)"\n▶ Resume at "+(progress/60)+"m "+(progress%60)+"s" else "")
                 val image=row.getChildAt(0) as android.widget.ImageView
-                image.setImageDrawable(null)
-                val poster=c.logo.ifBlank{youtubeThumbnail(c.url)}
-                if(poster.isNotBlank()){
-                    image.tag=poster
-                    thread{
-                        try{
-                            val conn=URL(poster).openConnection().apply{connectTimeout=5000;readTimeout=5000}
-                            val bitmap=conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
-                            runOnUiThread{if(image.tag==poster)image.setImageBitmap(bitmap)}
-                        }catch(_:Exception){}
-                    }
-                }
+                loadPoster(image,c.logo.ifBlank{youtubeThumbnail(c.url)})
                 return row
             }
         }
@@ -1709,8 +1781,8 @@ class MainActivity: Activity() {
         reset("My Home TV  •  HOME")
         root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" LIVE CHANNELS"))
         root.addView(button("▣  Movies"){mediaLibrary("movie")})
-        root.addView(button("▤  Series"){mediaLibrary("series")})
-        root.addView(button("♫  Music"){mediaLibrary("music")})
+        root.addView(button("▤  Series"){mediaSeries()})
+        root.addView(button("♫  Music"){mediaMusic()})
         root.addView(button("◉  Web TV"){mediaLibrary("web")})
         root.addView(button("▶  Continue watching movies & series"){continueMedia()})
         root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()})
@@ -2041,7 +2113,7 @@ class MainActivity: Activity() {
                 }
             }
             val nextChannels=combined.distinctBy{
-                it.source.lowercase(java.util.Locale.ROOT)+"|"+
+                it.mediaType+"|"+it.source.lowercase(java.util.Locale.ROOT)+"|"+
                     it.name.lowercase(java.util.Locale.ROOT)+"|"+it.url
             }.toMutableList()
             runOnUiThread{
@@ -4643,6 +4715,20 @@ class MainActivity: Activity() {
             // Let an open channel drawer handle its own list navigation.
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
             if(!drawerOpen){
+                val media=channels.getOrNull(active)?.mediaType
+                if(media in setOf("movie","series","music")){
+                    when(event.keyCode){
+                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER->{mediaPlaybackControls();return true}
+                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE->{
+                            player?.let{if(it.isPlaying)it.pause() else it.play()}
+                            vlcPlayer?.let{if(it.isPlaying)it.pause() else it.play()}
+                            return true
+                        }
+                        KeyEvent.KEYCODE_BACK->{showHome();return true}
+                    }
+                }
                 when(event.keyCode){
                     KeyEvent.KEYCODE_LAST_CHANNEL->{returnToPreviousChannel();return true}
                     KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
