@@ -2383,12 +2383,16 @@ class MainActivity: Activity() {
                 val alt=Regex("""alt=["']([^"']+)["']""",RegexOption.IGNORE_CASE).find(inner)?.groupValues?.get(1)
                 val title=(alt?:inner.replace(Regex("<[^>]*>")," ").trim())
                     .replace("&amp;","&").replace(Regex("""\s+""")," ").trim()
-                    .ifBlank{url.substringAfterLast('/').replace('-',' ')}
+                    .ifBlank{url.trimEnd('/').substringAfterLast('/').replace('-',' ')}
+                val channelName=if(title.length<3 || title.equals("watch",true) ||
+                    title.equals("live",true) || title.equals("play",true))
+                    url.trimEnd('/').substringAfterLast('/').replace('-',' ')
+                    else title
                 val rawLogo=Regex("""(?:data-src|src)=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
                     .find(inner)?.groupValues?.get(1)?:""
                 val logo=try{if(rawLogo.isBlank())"" else URL(URL(address),rawLogo).toString()}catch(_:Exception){""}
                 if(url !in found && found.size<400){
-                    found[url]=Channel(title,url,entry.group,logo,entry.source,webChannel="auto",mediaType="web")
+                    found[url]=Channel(channelName,url,entry.group,logo,entry.source,webChannel="auto",mediaType="web")
                     added++
                 }
             }
@@ -3967,6 +3971,15 @@ class MainActivity: Activity() {
              var r=f.getBoundingClientRect();return r.width>180&&r.height>100;
           });
           var player=videos.find(function(v){return v.videoWidth>0||v.readyState>0;})||videos[0];
+          if(!player && !window.__myHomeTvAutoClicked){
+            var buttons=[].slice.call(document.querySelectorAll('button,[role="button"],a[href],.play-button,.vjs-big-play-button'));
+            var start=buttons.find(function(el){
+              var text=(el.getAttribute('aria-label')||el.title||el.innerText||'').trim();
+              return /^(play|watch live|watch now|start stream|play video)$/i.test(text) ||
+                     el.classList.contains('vjs-big-play-button');
+            });
+            if(start){window.__myHomeTvAutoClicked=true;try{start.click()}catch(e){}}
+          }
           if(player){
             player.controls=true;player.muted=false;player.volume=1;
             player.setAttribute('playsinline','true');
