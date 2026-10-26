@@ -30,7 +30,7 @@ import java.net.URL
 import java.security.MessageDigest
 import kotlin.concurrent.thread
 
-data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap(), val epgId:String="", val webChannel:String="")
+data class Channel(val name:String, val url:String, val group:String, val logo:String="", val source:String="", val headers:Map<String,String> = emptyMap(), val epgId:String="", val webChannel:String="", val mediaType:String="live", val year:String="", val genre:String="", val artist:String="", val album:String="", val season:String="", val episode:String="", val description:String="")
 data class Playlist(val name:String, val url:String, val enabled:Boolean=true)
 
 class MainActivity: Activity() {
@@ -698,7 +698,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{lockIds.contains(id(channels[it]))}
     }
-    private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives}
+    private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives.filter{channels[it].mediaType=="live"}}
     // Count logical channels, not multiple stream URLs belonging to the same channel.
     private fun actualChannelCount():Int=channelNumbers().size
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
@@ -1554,7 +1554,7 @@ class MainActivity: Activity() {
     private var currentMenu:(()->Unit)?=null
     private fun reset(title:String) {
         val destination:(()->Unit)?=when{
-            title.startsWith("HomeTV  •")->({showHome()})
+            title.startsWith("My Home TV  •")->({showHome()})
             title=="HomeTV Settings"->({settings()})
             else->null
         }
@@ -1572,9 +1572,148 @@ class MainActivity: Activity() {
         val arr=JSONArray(); list.filter{it.url!=licensedPlaylist}.forEach { arr.put(JSONObject().put("name",it.name).put("url",it.url).put("enabled",it.enabled)) }
         prefs.edit().putString("playlists",arr.toString()).apply()
     }
+
+    // My Home TV media library. Unmarked EXTINF entries are always Live TV.
+    private fun mediaItems(type:String)=channels.indices.filter{channels[it].mediaType==type}
+    private fun mediaKey(c:Channel)="myhometv_progress_"+c.url.hashCode().toString()
+    private fun mediaResumeSeconds(c:Channel):Long=prefs.getLong(mediaKey(c),0L)
+    private fun saveCurrentMediaProgress(){
+        val c=channels.getOrNull(active)?:return
+        if(c.mediaType !in setOf("movie","series","music"))return
+        val seconds=when{
+            player!=null->(player!!.currentPosition/1000L).coerceAtLeast(0L)
+            vlcPlayer!=null->(vlcPlayer!!.time/1000L).coerceAtLeast(0L)
+            else->0L
+        }
+        if(seconds>0L)prefs.edit().putLong(mediaKey(c),seconds).apply()
+    }
+    private fun continueMedia(){
+        val indices=channels.indices.filter{channels[it].mediaType in setOf("movie","series") && mediaResumeSeconds(channels[it])>0}
+        mediaRows("Continue Watching",indices)
+    }
+    private fun mediaLibrary(type:String){
+        val title=when(type){"movie"->"Movies";"series"->"Series";"music"->"Music";else->"Web TV"}
+        reset("My Home TV  •  "+title)
+        val indices=mediaItems(type)
+        root.addView(label(title+"  |  "+indices.size+" items"))
+        root.addView(button("⌕  Search "+title){mediaSearch(type)})
+        if(type=="movie"||type=="series")root.addView(button("▶  Continue Watching"){continueMedia()})
+        if(indices.isEmpty())root.addView(label("No items yet. Add media-type=\""+type+"\" to an EXTINF playlist entry."))
+        indices.map{channels[it].group}.distinct().sorted().forEach{group->
+            root.addView(button("▸  "+group+"  ("+indices.count{channels[it].group==group}+")"){
+                mediaRows(group,indices.filter{channels[it].group==group})
+            }}
+        }
+        root.addView(button("▦  All "+title){mediaRows(title,indices)})
+        root.addView(button("＋  Manage playlists"){managePlaylists()})
+        root.addView(button("←  Home"){showHome()})
+    }
+    private fun mediaSearch(type:String){
+        val input=EditText(this).apply{hint="Search title, artist, album or group"}
+        AlertDialog.Builder(this).setTitle("Search media").setView(input).setPositiveButton("Search"){_,_->
+            val q=input.text.toString()
+            mediaRows("Search: "+q,mediaItems(type).filter{
+                val c=channels[it]
+                c.name.contains(q,true)||c.group.contains(q,true)||
+                c.artist.contains(q,true)||c.album.contains(q,true)
+            })
+        }.setNegativeButton("Cancel",null).show()
+    }
+    private fun mediaRows(title:String,indices:List<Int>){
+        reset("My Home TV  •  "+title)
+        root.addView(label(indices.size.toString()+" items"))
+        val list=ListView(this).apply{
+            dividerHeight=2
+            isFocusable=true
+            setBackgroundColor(0xFF101E31.toInt())
+        }
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=indices.size
+            override fun getItem(position:Int):Any=channels[indices[position]]
+            override fun getItemId(position:Int)=position.toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val row=(convertView as? LinearLayout)?:LinearLayout(this@MainActivity).apply{
+                    orientation=LinearLayout.HORIZONTAL
+                    setPadding(16,8,16,8)
+                    addView(android.widget.ImageView(this@MainActivity).apply{
+                        layoutParams=LinearLayout.LayoutParams(108,86)
+                        scaleType=android.widget.ImageView.ScaleType.CENTER_CROP
+                    })
+                    addView(TextView(this@MainActivity).apply{
+                        textSize=18f
+                        setTextColor(android.graphics.Color.WHITE)
+                        setPadding(20,12,8,12)
+                    },LinearLayout.LayoutParams(0,-2,1f))
+                }
+                val c=channels[indices[position]]
+                val progress=mediaResumeSeconds(c)
+                (row.getChildAt(1) as TextView).text=c.name+
+                    (if(c.artist.isNotBlank())"\n"+c.artist else "")+
+                    (if(c.season.isNotBlank())"  S"+c.season+" E"+c.episode else "")+
+                    (if(progress>0)"\n▶ Resume at "+(progress/60)+"m "+(progress%60)+"s" else "")
+                val image=row.getChildAt(0) as android.widget.ImageView
+                image.setImageDrawable(null)
+                val poster=c.logo.ifBlank{youtubeThumbnail(c.url)}
+                if(poster.isNotBlank()){
+                    image.tag=poster
+                    thread{
+                        try{
+                            val conn=URL(poster).openConnection().apply{connectTimeout=5000;readTimeout=5000}
+                            val bitmap=conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
+                            runOnUiThread{if(image.tag==poster)image.setImageBitmap(bitmap)}
+                        }catch(_:Exception){}
+                    }
+                }
+                return row
+            }
+        }
+        list.setOnItemClickListener{_,_,position,_->mediaDetails(indices[position])}
+        root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        root.addView(button("←  Home"){showHome()})
+    }
+    private fun youtubeThumbnail(url:String):String{
+        val uri=try{Uri.parse(url)}catch(_:Exception){return ""}
+        val host=uri.host?.lowercase()?.removePrefix("www.")?:""
+        val id=when(host){
+            "youtu.be"->uri.path?.trim('/')?.substringBefore('/')
+            "youtube.com","m.youtube.com"->uri.getQueryParameter("v")
+            else->null
+        }
+        return if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))
+            "https://i.ytimg.com/vi/"+id+"/hqdefault.jpg" else ""
+    }
+    private fun mediaDetails(index:Int){
+        val c=channels.getOrNull(index)?:return
+        val position=mediaResumeSeconds(c)
+        val options=mutableListOf("▶  Play from beginning")
+        if(position>0)options.add("↻  Resume from "+(position/60)+"m "+(position%60)+"s")
+        options.add("★  Add / remove favorite")
+        options.add("Clear saved progress")
+        AlertDialog.Builder(this).setTitle(c.name)
+            .setMessage(listOf(c.group,c.genre,c.year,c.artist,c.album,c.description).filter{it.isNotBlank()}.joinToString(" • "))
+            .setItems(options.toTypedArray()){_,choice->
+                when(options[choice]){
+                    "▶  Play from beginning"->{prefs.edit().remove(mediaKey(c)).apply();playIndex(index)}
+                    else->when{
+                        options[choice].startsWith("↻")->playIndex(index)
+                        options[choice].startsWith("★")->{
+                            if(!favoriteIds.add(id(c)))favoriteIds.remove(id(c))
+                            saveFavorites()
+                        }
+                        else->prefs.edit().remove(mediaKey(c)).apply()
+                    }
+                }
+            }.setNegativeButton("Close",null).show()
+    }
+
     private fun showHome() {
-        reset("HomeTV  •  LIVE")
-        root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" CHANNELS"))
+        reset("My Home TV  •  HOME")
+        root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" LIVE CHANNELS"))
+        root.addView(button("▣  Movies"){mediaLibrary("movie")})
+        root.addView(button("▤  Series"){mediaLibrary("series")})
+        root.addView(button("♫  Music"){mediaLibrary("music")})
+        root.addView(button("◉  Web TV"){mediaLibrary("web")})
+        root.addView(button("▶  Continue watching movies & series"){continueMedia()})
         root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()})
         root.addView(label("DISCOVER"))
         root.addView(button("▦  All live channels"){allChannels()})
@@ -2121,9 +2260,10 @@ class MainActivity: Activity() {
     private fun parseM3u(body:String,source:String):List<Channel>{
         val out=mutableListOf<Channel>()
         var name="";var group="Other";var logo="";var epgId="";var webChannel=""
+        var mediaType="live";var year="";var genre="";var artist="";var album="";var season="";var episode="";var description=""
         var headers=mutableMapOf<String,String>()
         // Compile attribute patterns once per playlist, not once per channel field.
-        val attributes=listOf("group-title","tvg-logo","tvg-id","web-channel","user-agent","referrer")
+        val attributes=listOf("group-title","tvg-logo","tvg-id","web-channel","user-agent","referrer","media-type","year","genre","artist","album","season","episode","series-name","description")
             .associateWith{key->Regex(Regex.escape(key)+"""="([^"]*)" """.trim())}
         fun attr(line:String,key:String)=attributes[key]?.find(line)?.groupValues?.get(1)?:""
         fun applyHeader(key:String,value:String){
@@ -2144,6 +2284,11 @@ class MainActivity: Activity() {
                     logo=attr(line,"tvg-logo")
                     epgId=attr(line,"tvg-id")
                     webChannel=attr(line,"web-channel")
+                    mediaType=attr(line,"media-type").trim().lowercase(java.util.Locale.ROOT).ifBlank{if(webChannel.isNotBlank() && !webChannel.equals("no",true))"web" else "live"}
+                    if(mediaType !in setOf("live","movie","series","music","web"))mediaType="live"
+                    year=attr(line,"year");genre=attr(line,"genre");artist=attr(line,"artist");album=attr(line,"album")
+                    season=attr(line,"season");episode=attr(line,"episode");description=attr(line,"description")
+                    if(mediaType=="series" && attr(line,"series-name").isNotBlank())group=attr(line,"series-name")
                     headers=mutableMapOf()
                     applyHeader("user-agent",attr(line,"user-agent"))
                     applyHeader("referer",attr(line,"referrer"))
@@ -2174,7 +2319,7 @@ class MainActivity: Activity() {
                     val scheme=url.substringBefore("://","").lowercase(java.util.Locale.ROOT)
                     if("://" in url && scheme in setOf(
                             "http","https","rtmp","rtmps","rtsp","rtp","udp","mmsh","mms")){
-                        out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel))
+                        out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel,mediaType,year,genre,artist,album,season,episode,description))
                     }
                 }
             }
@@ -2803,6 +2948,10 @@ class MainActivity: Activity() {
                 panel.addView(view,0,FrameLayout.LayoutParams(-1,-1))
                 exo.setMediaItem(MediaItem.fromUri(c.url))
                 exo.prepare()
+                if(c.mediaType in setOf("movie","series","music")){
+                    val resume=mediaResumeSeconds(c)
+                    if(resume>0)exo.seekTo(resume*1000L)
+                }
                 exo.play()
                 exo.addListener(object:Player.Listener{
                     override fun onPlayerError(error:PlaybackException){
@@ -3930,6 +4079,13 @@ class MainActivity: Activity() {
                 viewer.loadUrl(if(yt.path?.startsWith("/embed/")==true) yt.toString() else yt.buildUpon().appendQueryParameter("autoplay","1").build().toString())
             }
             viewer.requestFocus()
+            if(c.mediaType in setOf("movie","series","music") && youtubeUri!=null){
+                val seconds=mediaResumeSeconds(c)
+                if(seconds>0L){
+                    // YouTube watch URLs support a time parameter, but WebView seeking is best-effort.
+                    viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("t",seconds.toString()+"s").appendQueryParameter("autoplay","1").build().toString())
+                }
+            }
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
@@ -4533,6 +4689,7 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        saveCurrentMediaProgress()
         networkRecoveryTask?.let{handler.removeCallbacks(it)}
         networkRecoveryTask=null
         closeVideoPreview()
