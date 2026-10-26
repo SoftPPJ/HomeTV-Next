@@ -9,8 +9,8 @@ android {
         applicationId = "com.softppj.myhometv"
         minSdk = 23
         targetSdk = 32
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "3.0.0"
     }
     applicationVariants.all {
         outputs.all {
