@@ -1697,8 +1697,7 @@ class MainActivity: Activity() {
                     else->when{
                         options[choice].startsWith("↻")->playIndex(index)
                         options[choice].startsWith("★")->{
-                            if(!favoriteIds.add(id(c)))favoriteIds.remove(id(c))
-                            saveFavorites()
+                            favorite(c)
                         }
                         else->prefs.edit().remove(mediaKey(c)).apply()
                     }
