@@ -1770,16 +1770,17 @@ class MainActivity: Activity() {
                 setPadding(0,0,0,20)
             })
         }
+        var mediaDialog:AlertDialog?=null
         val play=android.widget.Button(this).apply{
             text=if(c.mediaType=="web") "▶  Open Web TV" else "▶  Play from beginning"
             isFocusable=true
-            setOnClickListener{playIndex(index)}
+            setOnClickListener{mediaDialog?.dismiss();prefs.edit().remove(mediaKey(c)).apply();playIndex(index)}
         }
         layout.addView(play)
         if(position>0L){
             layout.addView(android.widget.Button(this).apply{
                 text="↻  Resume from "+(position/60)+"m "+(position%60)+"s"
-                setOnClickListener{playIndex(index)}
+                setOnClickListener{mediaDialog?.dismiss();playIndex(index)}
             })
         }
         layout.addView(android.widget.Button(this).apply{
@@ -1795,6 +1796,7 @@ class MainActivity: Activity() {
         })
         val dialog=AlertDialog.Builder(this).setTitle(c.name).setView(layout)
             .setNegativeButton("Close",null).create()
+        mediaDialog=dialog
         dialog.setOnShowListener{play.requestFocus()}
         dialog.show()
     }
@@ -2368,22 +2370,22 @@ class MainActivity: Activity() {
                 }
                 conn.getInputStream().bufferedReader().use{it.readText().take(1_500_000)}
             }catch(_:Exception){break}
-            val links=Regex("""<a\\b[^>]*href=["']([^"']+/live/[^"']+)["'][^>]*>([\\s\\S]*?)</a>""",RegexOption.IGNORE_CASE)
+            val links=Regex("""<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)</a>""",RegexOption.IGNORE_CASE)
             var added=0
             links.findAll(html).take(250).forEach{match->
                 val raw=match.groupValues[1].replace("&amp;","&")
                 val url=try{URL(URL(address),raw).toString().substringBefore('#')}catch(_:Exception){""}
                 if(!url.startsWith("https://") && !url.startsWith("http://"))return@forEach
-                if(!url.contains("bhoomtv.org/live/"))return@forEach
+                if(!url.contains("bhoomtv.org/live/") && !url.contains("bhoomtv.org/live/"))return@forEach
                 val inner=match.groupValues[2]
                 val alt=Regex("""alt=["']([^"']+)["']""",RegexOption.IGNORE_CASE).find(inner)?.groupValues?.get(1)
                 val title=(alt?:inner.replace(Regex("<[^>]*>")," ").trim())
-                    .replace("&amp;","&").replace(Regex("\\s+")," ").trim()
+                    .replace("&amp;","&").replace(Regex("""\s+""")," ").trim()
                     .ifBlank{url.substringAfterLast('/').replace('-',' ')}
-                val logo=Regex("""<img\\b[^>]*src=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
+                val logo=Regex("""(?:data-src|src)=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
                     .find(inner)?.groupValues?.get(1)?:""
                 if(url !in found && found.size<400){
-                    found[url]=Channel(title,url,"Web TV",logo,entry.source,webChannel="auto",mediaType="web")
+                    found[url]=Channel(title,url,entry.group,logo,entry.source,webChannel="auto",mediaType="web")
                     added++
                 }
             }
@@ -3910,6 +3912,8 @@ class MainActivity: Activity() {
     // My Home TV: dedicated website-video controls. No changes to YouTube or native players.
     private fun isWebTv(c:Channel):Boolean{
         val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
+        val path=(u.path ?: "").lowercase(java.util.Locale.ROOT)
+        if(path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith(".mp4") || path.endsWith(".ts"))return false
         return (u.scheme=="http" || u.scheme=="https") &&
             (c.mediaType=="web" || (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true)))
     }
