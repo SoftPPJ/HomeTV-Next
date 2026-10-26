@@ -1602,7 +1602,7 @@ class MainActivity: Activity() {
         indices.map{channels[it].group}.distinct().sorted().forEach{group->
             root.addView(button("▸  "+group+"  ("+indices.count{channels[it].group==group}+")"){
                 mediaRows(group,indices.filter{channels[it].group==group})
-            }}
+            })
         }
         root.addView(button("▦  All "+title){mediaRows(title,indices)})
         root.addView(button("＋  Manage playlists"){managePlaylists()})
