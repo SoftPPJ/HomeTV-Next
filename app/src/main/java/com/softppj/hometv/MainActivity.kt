@@ -1757,24 +1757,46 @@ class MainActivity: Activity() {
     private fun mediaDetails(index:Int){
         val c=channels.getOrNull(index)?:return
         val position=mediaResumeSeconds(c)
-        val options=mutableListOf("▶  Play from beginning")
-        if(position>0)options.add("↻  Resume from "+(position/60)+"m "+(position%60)+"s")
-        options.add("★  Add / remove favorite")
-        options.add("Clear saved progress")
-        AlertDialog.Builder(this).setTitle(c.name)
-            .setMessage(listOf(c.group,c.genre,c.year,c.artist,c.album,c.description).filter{it.isNotBlank()}.joinToString(" • "))
-            .setItems(options.toTypedArray()){_,choice->
-                when(options[choice]){
-                    "▶  Play from beginning"->{prefs.edit().remove(mediaKey(c)).apply();playIndex(index)}
-                    else->when{
-                        options[choice].startsWith("↻")->playIndex(index)
-                        options[choice].startsWith("★")->{
-                            favorite(c)
-                        }
-                        else->prefs.edit().remove(mediaKey(c)).apply()
-                    }
-                }
-            }.setNegativeButton("Close",null).show()
+        val details=listOf(c.group,c.genre,c.year,c.artist,c.album,c.description)
+            .filter{it.isNotBlank()}.joinToString(" • ")
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(28,20,28,20)
+        }
+        if(details.isNotBlank()){
+            layout.addView(TextView(this).apply{
+                text=details
+                textSize=16f
+                setPadding(0,0,0,20)
+            })
+        }
+        val play=android.widget.Button(this).apply{
+            text=if(c.mediaType=="web") "▶  Open Web TV" else "▶  Play from beginning"
+            isFocusable=true
+            setOnClickListener{playIndex(index)}
+        }
+        layout.addView(play)
+        if(position>0L){
+            layout.addView(android.widget.Button(this).apply{
+                text="↻  Resume from "+(position/60)+"m "+(position%60)+"s"
+                setOnClickListener{playIndex(index)}
+            })
+        }
+        layout.addView(android.widget.Button(this).apply{
+            text="★  Add / remove favorite"
+            setOnClickListener{favorite(c)}
+        })
+        layout.addView(android.widget.Button(this).apply{
+            text="Clear saved progress"
+            setOnClickListener{
+                prefs.edit().remove(mediaKey(c)).apply()
+                Toast.makeText(this@MainActivity,"Progress cleared",Toast.LENGTH_SHORT).show()
+            }
+        })
+        val dialog=AlertDialog.Builder(this).setTitle(c.name).setView(layout)
+            .setNegativeButton("Close",null).create()
+        dialog.setOnShowListener{play.requestFocus()}
+        dialog.show()
     }
 
     private fun showHome() {
