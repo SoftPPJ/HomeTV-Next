@@ -1754,6 +1754,7 @@ class MainActivity: Activity() {
         return if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}")))
             "https://i.ytimg.com/vi/"+id+"/hqdefault.jpg" else ""
     }
+    private var requestedMediaResumeSeconds=0L
     private fun mediaDetails(index:Int){
         val c=channels.getOrNull(index)?:return
         val position=mediaResumeSeconds(c)
@@ -1774,13 +1775,13 @@ class MainActivity: Activity() {
         val play=android.widget.Button(this).apply{
             text=if(c.mediaType=="web") "▶  Open Web TV" else "▶  Play from beginning"
             isFocusable=true
-            setOnClickListener{mediaDialog?.dismiss();prefs.edit().remove(mediaKey(c)).apply();playIndex(index)}
+            setOnClickListener{mediaDialog?.dismiss();requestedMediaResumeSeconds=0L;prefs.edit().remove(mediaKey(c)).apply();playIndex(index)}
         }
         layout.addView(play)
         if(position>0L){
             layout.addView(android.widget.Button(this).apply{
                 text="↻  Resume from "+(position/60)+"m "+(position%60)+"s"
-                setOnClickListener{mediaDialog?.dismiss();playIndex(index)}
+                setOnClickListener{mediaDialog?.dismiss();requestedMediaResumeSeconds=position;playIndex(index)}
             })
         }
         layout.addView(android.widget.Button(this).apply{
@@ -2917,6 +2918,41 @@ class MainActivity: Activity() {
             if(notify && result.contains("requires manual"))
                 Toast.makeText(this@MainActivity,"Press volume up or use the YouTube mute button to enable sound",Toast.LENGTH_SHORT).show()
         }
+    }
+    private fun isActiveYoutubeMedia():Boolean{
+        val c=channels.getOrNull(active)?:return false
+        if(c.mediaType !in setOf("movie","series","music"))return false
+        val host=try{Uri.parse(c.url).host?.lowercase(java.util.Locale.ROOT).orEmpty()}catch(_:Exception){""}
+        return host=="youtu.be" || host=="youtube.com" || host.endsWith(".youtube.com")
+    }
+    private fun youtubeRemoteAction(action:String){
+        val viewer=web?:return
+        val command=when(action){
+            "toggle"->"if(v.paused){v.play()}else{v.pause()}"
+            "back"->"v.currentTime=Math.max(0,v.currentTime-10)"
+            "forward"->"v.currentTime=Math.min(isFinite(v.duration)?v.duration:v.currentTime+10,v.currentTime+10)"
+            else->return
+        }
+        viewer.evaluateJavascript("(function(){var v=document.querySelector('video');if(v){"+command+";return true;}var p=document.getElementById('movie_player');if(p){"+
+            when(action){
+                "toggle"->"if(p.getPlayerState()===1)p.pauseVideo();else p.playVideo();"
+                "back"->"p.seekTo(Math.max(0,p.getCurrentTime()-10),true);"
+                else->"p.seekTo(p.getCurrentTime()+10,true);"
+            }+"return true;}return false;})()",null)
+    }
+    private fun beginYoutubeProgressTracking(viewer:WebView,channelIndex:Int,screen:FrameLayout){
+        val task=object:Runnable{
+            override fun run(){
+                if(web!==viewer || active!=channelIndex || videoScreen!==screen)return
+                viewer.evaluateJavascript("(function(){var v=document.querySelector('video');return v?Math.floor(v.currentTime||0):0;})()"){value->
+                    val seconds=value.trim().trim('"').toLongOrNull()?:0L
+                    if(seconds>0 && web===viewer && active==channelIndex)
+                        channels.getOrNull(channelIndex)?.let{prefs.edit().putLong(mediaKey(it),seconds).apply()}
+                }
+                handler.postDelayed(this,5000L)
+            }
+        }
+        handler.postDelayed(task,5000L)
     }
     private fun requestYoutubeStartupAudio(viewer:WebView,channelIndex:Int,screen:FrameLayout){
         // YouTube can attach its video element after onPageFinished. Retry
@@ -4175,6 +4211,7 @@ class MainActivity: Activity() {
                         view.evaluateJavascript(fullScreenCss,null)
                         requestYoutubeStartupAudio(view,index,screen)
                         requestYoutubeEnhancedQuality(view,index,screen)
+                        beginYoutubeProgressTracking(view,index,screen)
                     }
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
@@ -4230,7 +4267,8 @@ class MainActivity: Activity() {
             }
             viewer.requestFocus()
             if(c.mediaType in setOf("movie","series","music") && youtubeUri!=null){
-                val seconds=mediaResumeSeconds(c)
+                val seconds=requestedMediaResumeSeconds
+                requestedMediaResumeSeconds=0L
                 if(seconds>0L){
                     // YouTube watch URLs support a time parameter, but WebView seeking is best-effort.
                     viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("t",seconds.toString()+"s").appendQueryParameter("autoplay","1").build().toString())
@@ -4796,6 +4834,18 @@ class MainActivity: Activity() {
             if(!drawerOpen){
                 val media=channels.getOrNull(active)?.mediaType
                 if(media in setOf("movie","series","music")){
+                    if(isActiveYoutubeMedia()){
+                        when(event.keyCode){
+                            KeyEvent.KEYCODE_DPAD_LEFT->{youtubeRemoteAction("back");return true}
+                            KeyEvent.KEYCODE_DPAD_RIGHT->{youtubeRemoteAction("forward");return true}
+                            KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
+                            KeyEvent.KEYCODE_NUMPAD_ENTER,KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                            KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE->{
+                                youtubeRemoteAction("toggle");return true
+                            }
+                            KeyEvent.KEYCODE_BACK->{showHome();return true}
+                        }
+                    }
                     when(event.keyCode){
                         KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,
                         KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
