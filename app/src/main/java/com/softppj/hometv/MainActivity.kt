@@ -2074,7 +2074,9 @@ class MainActivity: Activity() {
                             }
                             val parsed=parseM3u(body,p.name)
                             if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
-                            results[index]=parsed
+                            val discovered=parsed.filter{it.mediaType=="web" && it.url.contains("/channel/")}
+                                .flatMap{discoverWebDirectory(it)}
+                            results[index]=parsed+discovered
                             refreshed[index]=true
                             val file=cacheFile(p)
                             val temp=java.io.File(file.absolutePath+".tmp")
@@ -2327,6 +2329,45 @@ class MainActivity: Activity() {
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
             handler.postDelayed(periodicProbeTask!!,15*60*1000L)
         }
+    }
+    // Discover links from a bounded Web TV directory, without touching normal IPTV entries.
+    // This extracts navigable channel pages; playable streams are resolved by the WebView.
+    private fun discoverWebDirectory(entry:Channel):List<Channel>{
+        val base=entry.url.trimEnd('/')
+        if(entry.mediaType!="web" || !base.contains("/channel/"))return emptyList()
+        val found=linkedMapOf<String,Channel>()
+        val pages=6
+        for(page in 1..pages){
+            val address=if(page==1)base+"/" else base+"/page/"+page+"/"
+            val html=try{
+                val conn=URL(address).openConnection().apply{
+                    connectTimeout=5000;readTimeout=7000
+                    setRequestProperty("User-Agent","Mozilla/5.0 (Android TV) MyHomeTV")
+                }
+                conn.getInputStream().bufferedReader().use{it.readText().take(1_500_000)}
+            }catch(_:Exception){break}
+            val links=Regex("""<a\\b[^>]*href=["']([^"']+/live/[^"']+)["'][^>]*>([\\s\\S]*?)</a>""",RegexOption.IGNORE_CASE)
+            var added=0
+            links.findAll(html).take(250).forEach{match->
+                val raw=match.groupValues[1].replace("&amp;","&")
+                val url=try{URL(URL(address),raw).toString().substringBefore('#')}catch(_:Exception){""}
+                if(!url.startsWith("https://") && !url.startsWith("http://"))return@forEach
+                if(!url.contains("bhoomtv.org/live/"))return@forEach
+                val inner=match.groupValues[2]
+                val alt=Regex("""alt=["']([^"']+)["']""",RegexOption.IGNORE_CASE).find(inner)?.groupValues?.get(1)
+                val title=(alt?:inner.replace(Regex("<[^>]*>")," ").trim())
+                    .replace("&amp;","&").replace(Regex("\\s+")," ").trim()
+                    .ifBlank{url.substringAfterLast('/').replace('-',' ')}
+                val logo=Regex("""<img\\b[^>]*src=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
+                    .find(inner)?.groupValues?.get(1)?:""
+                if(url !in found && found.size<400){
+                    found[url]=Channel(title,url,"Web TV",logo,entry.source,webChannel="auto",mediaType="web")
+                    added++
+                }
+            }
+            if(page>1 && added==0)break
+        }
+        return found.values.toList()
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
         val out=mutableListOf<Channel>()
