@@ -1668,7 +1668,7 @@ class MainActivity: Activity() {
             }
         }
         list.setOnItemClickListener{_,_,position,_->mediaDetails(indices[position])}
-        root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        root.addView(list,LinearLayout.LayoutParams(-1,(resources.displayMetrics.heightPixels*0.70).toInt()))
         root.addView(button("←  Home"){showHome()})
     }
     private fun youtubeThumbnail(url:String):String{
@@ -3776,7 +3776,7 @@ class MainActivity: Activity() {
     private fun isWebTv(c:Channel):Boolean{
         val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
         return (u.scheme=="http" || u.scheme=="https") &&
-            (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true))
+            (c.mediaType=="web" || (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true)))
     }
     private fun webTvJavascript():String = """(function(){
         try {
