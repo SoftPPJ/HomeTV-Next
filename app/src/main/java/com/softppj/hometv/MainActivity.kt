@@ -1652,7 +1652,7 @@ class MainActivity: Activity() {
                 val target=bar.progress.toLong()*1000L
                 if(exo!=null)exo.seekTo(target) else vlc?.time=target
             }
-            .setNeutralButton(if(exo?.isPlaying==true || vlc?.isPlaying==true)"Pause":"Play"){_,_->
+            .setNeutralButton(if(exo?.isPlaying==true || vlc?.isPlaying==true) "Pause" else "Play"){_,_->
                 if(exo!=null){if(exo.isPlaying)exo.pause() else exo.play()}
                 else if(vlc!=null){if(vlc.isPlaying)vlc.pause() else vlc.play()}
             }
