@@ -2376,14 +2376,16 @@ class MainActivity: Activity() {
                 val raw=match.groupValues[1].replace("&amp;","&")
                 val url=try{URL(URL(address),raw).toString().substringBefore('#')}catch(_:Exception){""}
                 if(!url.startsWith("https://") && !url.startsWith("http://"))return@forEach
-                if(!url.contains("bhoomtv.org/live/") && !url.contains("bhoomtv.org/live/"))return@forEach
+                val host=try{URL(url).host.lowercase(java.util.Locale.ROOT)}catch(_:Exception){return@forEach}
+                if(host !in setOf("bhoomtv.org","www.bhoomtv.org") || !URL(url).path.startsWith("/live/"))return@forEach
                 val inner=match.groupValues[2]
                 val alt=Regex("""alt=["']([^"']+)["']""",RegexOption.IGNORE_CASE).find(inner)?.groupValues?.get(1)
                 val title=(alt?:inner.replace(Regex("<[^>]*>")," ").trim())
                     .replace("&amp;","&").replace(Regex("""\s+""")," ").trim()
                     .ifBlank{url.substringAfterLast('/').replace('-',' ')}
-                val logo=Regex("""(?:data-src|src)=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
+                val rawLogo=Regex("""(?:data-src|src)=["']([^"']+)["']""",RegexOption.IGNORE_CASE)
                     .find(inner)?.groupValues?.get(1)?:""
+                val logo=try{if(rawLogo.isBlank())"" else URL(URL(address),rawLogo).toString()}catch(_:Exception){""}
                 if(url !in found && found.size<400){
                     found[url]=Channel(title,url,entry.group,logo,entry.source,webChannel="auto",mediaType="web")
                     added++
@@ -3970,6 +3972,12 @@ class MainActivity: Activity() {
             if(seen[key])return;seen[key]=1;
             candidates.push({name:label,url:href,index:i});
           });
+          [].slice.call(document.querySelectorAll('video source[src],video[src],iframe[src]')).forEach(function(el){
+            var raw=el.src||'';
+            if(raw.indexOf('https://')!==0 && raw.indexOf('http://')!==0)return;
+            if(candidates.some(function(c){return c.url===raw;}))return;
+            candidates.push({name:el.tagName==='IFRAME'?'Embedded player':'Direct video stream',url:raw,index:-1});
+          });
           window.__myHomeTvLinks=candidates.slice(0,70);
           return JSON.stringify({videos:videos.length,frames:frames.length,
              playing:!!(player&&!player.paused),candidates:window.__myHomeTvLinks});
@@ -3997,14 +4005,17 @@ class MainActivity: Activity() {
                         .setItems(options){_,choice->
                             when(choice){
                                 0->inspectWebTv(viewer,index,screen,false)
-                                1->viewer.loadUrl(channels[index].url)
+                                1->{
+                                    prefs.edit().remove("web_preferred_"+channels[index].url.hashCode()).apply()
+                                    viewer.loadUrl(channels[index].url)
+                                }
                                 2->saveWebTvChannel(channels[index].name,channels[index].url)
                                 else->{
                                     val n=choice-3
                                     if(n in urls.indices){
                                         val target=urls[n]
                                         if(target.startsWith("https://")||target.startsWith("http://")){
-                                            saveWebTvChannel(labels[n],target)
+                                            prefs.edit().putString("web_preferred_"+channels[index].url.hashCode(),target).apply()
                                             viewer.loadUrl(target)
                                         }else{
                                             val js="(function(){var a=window.__myHomeTvLinks||[];var c=a["+n+"];if(!c)return;var elements=[].slice.call(document.querySelectorAll('a[href],button,[role=button],[onclick]'));var el=elements[c.index];if(el)el.click();})();"
@@ -4211,7 +4222,8 @@ class MainActivity: Activity() {
                         inspectWebTv(viewer,index,screen,true);true
                     }else false
                 }
-                viewer.loadUrl(c.url)
+                val preferred=prefs.getString("web_preferred_"+c.url.hashCode(),"").orEmpty()
+                viewer.loadUrl(if(preferred.startsWith("https://") || preferred.startsWith("http://"))preferred else c.url)
             }else{
                 val yt=youtubeUri!!
                 viewer.loadUrl(if(yt.path?.startsWith("/embed/")==true) yt.toString() else yt.buildUpon().appendQueryParameter("autoplay","1").build().toString())
