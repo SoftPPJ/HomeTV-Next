@@ -729,8 +729,9 @@ class MainActivity: Activity() {
         val count=(recoveryAttempts[c.url] ?: 0)+1
         recoveryAttempts[c.url]=count
         if(count==1 || count%5==0)showBanner("Reconnecting "+c.name+" with "+current)
+        val recoveryGeneration=playbackGeneration
         val task=Runnable{
-            if(active==index && videoScreen===screen){
+            if(active==index && videoScreen===screen && playbackGeneration==recoveryGeneration){
                 fallbackEngineOverride=current
                 playIndex(index)
             }
@@ -4521,7 +4522,8 @@ class MainActivity: Activity() {
         if(prefs.getBoolean("auto_reconnect",true) && retryCount<2){
             retryCount++
             showBanner("Reconnecting "+c.name+" (attempt "+retryCount+"/2)")
-            val task=Runnable{if(active==index && videoScreen===screen)playIndex(index)}
+            val recoveryGeneration=playbackGeneration
+            val task=Runnable{if(active==index && videoScreen===screen && playbackGeneration==recoveryGeneration)playIndex(index)}
             retryTask=task
             handler.postDelayed(task,2000L*retryCount)
         }else showBanner("Stream stopped. Try another source or channel.",true)
