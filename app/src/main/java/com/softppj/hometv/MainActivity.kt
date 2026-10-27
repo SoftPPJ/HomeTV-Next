@@ -3156,16 +3156,16 @@ class MainActivity: Activity() {
         handler.postDelayed(task,5000L)
     }
     private fun requestYoutubeStartupAudio(viewer:WebView,channelIndex:Int,screen:FrameLayout){
-        // YouTube can attach its video element after onPageFinished. Retry
-        // briefly, but never force play(), reload the page or alter IPTV engines.
+        // YouTube inserts its video asynchronously. Retry only while audio is
+        // unavailable; do not restart playback or affect Media3/LibVLC streams.
         val generation=playbackGeneration
         val delays=longArrayOf(600L,1400L,2700L,4500L,7000L)
         youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
-        // One cancellable retry chain, rather than stacking retries on each page load.
         var attempt=0
         val retry=object:Runnable{
             override fun run(){
-                if(web!==viewer || active!=channelIndex || videoScreen!==screen || playbackGeneration!=generation)return
+                if(web!==viewer || active!=channelIndex || videoScreen!==screen ||
+                    playbackGeneration!=generation)return
                 viewer.evaluateJavascript("""(function(){
                     var v=document.querySelector('video');
                     if(!v || v.paused)return 'waiting';
@@ -3174,11 +3174,19 @@ class MainActivity: Activity() {
                         var yt=document.getElementById('movie_player');
                         if(yt && typeof yt.unMute==='function')yt.unMute();
                     }catch(e){}
-                    return v.muted?'blocked':'unmuted';
-                })();""",null)
-                attempt++
-                if(attempt<delays.size)handler.postDelayed(this,delays[attempt]-delays[attempt-1])
-                else youtubeUnmuteTask=null
+                    return (!v.muted && v.volume>0)?'unmuted':'blocked';
+                })();"""){result->
+                    if(web!==viewer || active!=channelIndex || videoScreen!==screen ||
+                        playbackGeneration!=generation)return@evaluateJavascript
+                    if(result=="\\\"unmuted\\\""){
+                        youtubeUnmuteTask=null
+                        return@evaluateJavascript
+                    }
+                    attempt++
+                    if(attempt<delays.size){
+                        handler.postDelayed(this,delays[attempt]-delays[attempt-1])
+                    }else youtubeUnmuteTask=null
+                }
             }
         }
         youtubeUnmuteTask=retry
