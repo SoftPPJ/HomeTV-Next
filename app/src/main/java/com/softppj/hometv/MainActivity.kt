@@ -115,35 +115,15 @@ class MainActivity: Activity() {
             showLicenseScreen()
             return
         }
-        // Optimistic startup is permitted only for a previously server-validated
-        // installation that has not been blocked by any subsequent failed check.
-        // This is a convenience tradeoff, NOT cryptographic offline authorization.
-        val mayResume=prefs.getBoolean("license_last_verified",false) &&
-            !prefs.getBoolean("license_validation_blocked",false)
+        // Fail closed: a previously validated token is not authorization to
+        // play cached streams before this session's server validation succeeds.
+        licenseReady=false
         licenseChecking=true
-        if(mayResume)licenseReady=true
-        else licenseReady=false
         showLicenseCheckingScreen()
         thread{
-            // Parsing large cached playlists on the main thread freezes Android TV.
-            // Load the cache on a worker, then publish the result on the UI thread.
-            if(mayResume){
-                val cached=try{cachedChannels()}catch(e:Exception){
-                    android.util.Log.w("HomeTV","Cached playlist parse failed",e)
-                    mutableListOf<Channel>()
-                }
-                runOnUiThread{
-                    if(licenseReady && licenseChecking && !isFinishing && !isDestroyed){
-                        channels=cached
-                        if(channels.isNotEmpty()){
-                            checkEpgTune()
-                            openStartupDestination()
-                        }
-                    }
-                }
-            }
             val result=try{
-                saveLicenseExpiry(licenseRequest("/validate",licensePayload()))
+                val response=licenseRequest("/validate",licensePayload())
+                saveLicenseExpiry(response)
                 null
             }catch(e:Exception){e.message?:"License validation failed"}
             runOnUiThread{
@@ -153,18 +133,8 @@ class MainActivity: Activity() {
                     prefs.edit().putBoolean("license_last_verified",true)
                         .putBoolean("license_validation_blocked",false).apply()
                     licenseReady=true
-                    // Refresh all playlist sources on every start, including fast starts.
-                    // Retune only if nothing was playing already.
-                    if(mayResume && channels.isNotEmpty()){
-                        refresh({
-                            if(licenseReady && channels.isEmpty())showHome()
-                            // The startup destination was already opened; do not
-                            // force playback when Resume is OFF or Home is selected.
-                        })
-                    }else startLicensedApp()
+                    startLicensedApp()
                 }else{
-                    // Persist the failure BEFORE stopping playback so subsequent
-                    // launches cannot resume optimistically.
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
                     licenseReady=false
