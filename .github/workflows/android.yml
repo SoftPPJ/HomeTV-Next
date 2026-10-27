@@ -33,10 +33,7 @@ jobs:
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Package V6 debug test APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Upload V6 debug test APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: HomeTV-V6-debug-test
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
+      - name: Verify V6 APK was assembled
+        run: |
+          ls -lh app/build/outputs/apk/debug/*.apk
+          test "$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | wc -l)" -ge 1
