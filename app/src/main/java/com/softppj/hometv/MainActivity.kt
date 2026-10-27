@@ -3837,8 +3837,9 @@ class MainActivity: Activity() {
         // Only reduce quality after repeated real buffering; never change the
         // saved user preference or any Media3 / LibVLC playback settings.
         val wanted=if(preference=="720p") "hd720" else "hd1080"
+        val qualityGeneration=playbackGeneration
         handler.postDelayed({
-            if(web===viewer && active==index && videoScreen===screen){
+            if(web===viewer && active==index && videoScreen===screen && playbackGeneration==qualityGeneration){
                 viewer.evaluateJavascript("""(function(){
                     try{
                         var p=document.getElementById('movie_player');
