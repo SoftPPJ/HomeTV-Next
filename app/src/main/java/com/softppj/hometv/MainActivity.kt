@@ -4085,11 +4085,23 @@ class MainActivity: Activity() {
             val displayHeight=(videoScreen?.height ?: 0).takeIf{it>0} ?: resources.displayMetrics.heightPixels
             val sourceRatio=if(ijkVideoWidth>0 && ijkVideoHeight>0)ijkVideoWidth.toFloat()/ijkVideoHeight else 16f/9f
             val targetRatio=if(forcedRatio>0f)forcedRatio else sourceRatio
-            val fill=mode=="Fill / Crop" || mode=="Stretch"
+            val screenRatio=displayWidth.toFloat()/displayHeight.coerceAtLeast(1)
             val zoom=when(mode){"Zoom 110%"->1.10f;"Zoom 125%"->1.25f;"Zoom 150%"->1.50f;else->1f}
-            val width=if(fill)displayWidth else minOf(displayWidth,(displayHeight*targetRatio).toInt()).coerceAtLeast(1)
-            val height=if(fill)displayHeight else minOf(displayHeight,(displayWidth/targetRatio).toInt()).coerceAtLeast(1)
-            val lp=FrameLayout.LayoutParams(width,height,android.view.Gravity.CENTER)
+            // Preserve video proportions in Fit/Original and crop only in Fill.
+            // Stretch intentionally fills the screen without preserving proportions.
+            val width:Int
+            val height:Int
+            if(mode=="Stretch"){
+                width=displayWidth
+                height=displayHeight
+            }else if(mode=="Fill / Crop"){
+                width=if(sourceRatio<screenRatio)displayWidth else (displayHeight*sourceRatio).toInt()
+                height=if(sourceRatio<screenRatio)(displayWidth/sourceRatio).toInt() else displayHeight
+            }else{
+                width=if(targetRatio>screenRatio)displayWidth else (displayHeight*targetRatio).toInt()
+                height=if(targetRatio>screenRatio)(displayWidth/targetRatio).toInt() else displayHeight
+            }
+            val lp=FrameLayout.LayoutParams(width.coerceAtLeast(1),height.coerceAtLeast(1),android.view.Gravity.CENTER)
             surface.layoutParams=lp
             surface.scaleX=zoom
             surface.scaleY=zoom
@@ -4662,19 +4674,35 @@ class MainActivity: Activity() {
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",10000000L)
             var started=false
             var failed=false
+            var firstFrame=false
             val watchdog=Runnable{
-                if(!started && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
+                if(!firstFrame && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
                     failed=true
+                    android.util.Log.w("HomeTV","IJKPlayer first-frame timeout for "+c.name)
                     handleEngineFailure(index,screen)
                 }
             }
+            ijk.setOnInfoListener{_,what,_->
+                // IJK/Android MEDIA_INFO_VIDEO_RENDERING_START == 3.
+                // Prepared alone does not establish that video actually rendered.
+                if(what==3){
+                    handler.post{
+                        if(!firstFrame && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
+                            firstFrame=true
+                            handler.removeCallbacks(watchdog)
+                            rememberWorking(c)
+                            autoBufferHealthy()
+                        }
+                    }
+                }
+                false
+            }
             ijk.setOnPreparedListener{
                 handler.post{
-                    if(ijkPlayer===ijk && active==index && videoScreen===screen){
+                    if(!failed && ijkPlayer===ijk && active==index && videoScreen===screen){
                         started=true
-                        handler.removeCallbacks(watchdog)
-                        try{ijk.start();rememberWorking(c);autoBufferHealthy()}
-                        catch(e:Exception){failed=true;android.util.Log.w("HomeTV","IJK start failed",e);handleEngineFailure(index,screen)}
+                        try{ijk.start()}
+                        catch(e:Exception){failed=true;handler.removeCallbacks(watchdog);android.util.Log.w("HomeTV","IJK start failed",e);handleEngineFailure(index,screen)}
                     }
                 }
             }
