@@ -343,13 +343,21 @@ class MainActivity: Activity() {
         val group=channelByKey[channelKey(c)] ?:return index
         val saved=prefs.getString("working_url_"+channelKey(c),null)
         val manual=prefs.getString("manual_url_"+channelKey(c),null)
-        val usable=group.filter{channels[it].url !in failedUrlsThisSession}
-        return usable.firstOrNull{channels[it].url==manual}
-            ?:usable.firstOrNull{channels[it].url==saved}
-            ?:usable.firstOrNull{probeReachable[channels[it].url]==true}
-            ?:usable.firstOrNull{vlcProbeReachable[channels[it].url]==true}
-            ?:usable.firstOrNull()
-            ?:group.first()
+        // One scan rather than repeatedly filtering large alternative-source groups.
+        var firstUsable:Int?=null
+        var savedMatch:Int?=null
+        var reachableMatch:Int?=null
+        var vlcMatch:Int?=null
+        for(candidate in group){
+            val url=channels[candidate].url
+            if(url in failedUrlsThisSession)continue
+            if(firstUsable==null)firstUsable=candidate
+            if(manual!=null && url==manual)return candidate
+            if(savedMatch==null && saved!=null && url==saved)savedMatch=candidate
+            if(reachableMatch==null && probeReachable[url]==true)reachableMatch=candidate
+            if(vlcMatch==null && vlcProbeReachable[url]==true)vlcMatch=candidate
+        }
+        return savedMatch ?:reachableMatch ?:vlcMatch ?:firstUsable ?:group.first()
     }
     private fun rememberWorking(c:Channel){
         playedThisSession.add(channelKey(c))
