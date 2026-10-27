@@ -1,13 +1,31 @@
-name: HomeTV source repository (APK builds disabled)
+name: HomeTV V6 source compilation (no APK release)
 
-# APKs are built on demand in ppj1981/HomeTV-Build.
-# Do not build or upload APKs from this repository.
 on:
+  push:
+    branches:
+      - my-home-tv-v6-development
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  source-only:
+  compile-v6:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
-      - name: APK generation moved to ppj1981/HomeTV-Build
-        run: echo "No APK is generated in SoftPPJ/HomeTV."
+      - name: Check out V6 development sources
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Compile Kotlin sources only (do not package or upload an APK)
+        run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
