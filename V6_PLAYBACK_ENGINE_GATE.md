@@ -33,3 +33,7 @@ This document is an implementation plan, not evidence that the third engine is i
 ## Implementation update — network recovery ownership
 - Commit 029bdd3: network recovery polling now captures playbackGeneration and checks both generation and task identity before retrying playback or rescheduling. This prevents an outdated polling task from reviving a replaced session.
 - Source change only; Kotlin compilation and real device tests are still pending. Other asynchronous callbacks and third-engine evaluation remain open.
+
+## Implementation update — confirmed URL scoping
+- Commit 65c67a3: handleEngineFailure treats a saved engine as confirmed only when the current channel URL equals the persisted working URL. This avoids applying the proven-source reconnect policy to an unproven alternative URL.
+- Follow-up needed: inspect engineFor and rememberWorking consistency when automatic fallback succeeds on a different URL, and verify manual override behavior. Not compiled or device-tested.
