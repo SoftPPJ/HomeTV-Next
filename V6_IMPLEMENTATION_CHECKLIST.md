@@ -39,3 +39,9 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 - Commit af523b2f: on-demand bounded Cloudflare download speed estimate, with connection timeouts.
 - Commit fe96dc7a: corrected per-playlist EPG offset mapping to the parsed channel source name.
 - These are source changes only. No Gradle compilation, device tests, or release acceptance has occurred. Do not mark corresponding checklist boxes as verified yet.
+
+## Verified build milestone — 27 October 2026
+- GitHub Actions run 40474655131: Gradle 8.9 `app:compileDebugKotlin` passed, 14 tasks executed. This verifies Kotlin compilation only, not APK packaging or TV runtime behavior.
+- Commit ab60b479: playback lifecycle HOME suspend/resume and BACK exit prompt; unverified on device.
+- Commit 4524e84b: resume matches exact stream identity before URL fallback and routes through parental PIN enforcement; compilation and TV regression pending.
+- Release-critical features above remain unchecked until individually verified. Do not interpret source presence as feature acceptance.
