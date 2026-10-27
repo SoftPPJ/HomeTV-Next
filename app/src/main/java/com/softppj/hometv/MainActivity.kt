@@ -714,6 +714,8 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        // Manual engine preference selects the first attempt, not an infinite
+        // retry of the same failed engine. The other engine remains a fallback.
         // A confirmed engine is only proven for its confirmed URL, not every
         // alternative URL of the same logical channel.
         val saved=prefs.contains("confirmed_engine_"+key) &&
