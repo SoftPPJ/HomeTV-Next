@@ -63,6 +63,14 @@ class MainActivity: Activity() {
             val body=(if(status in 200..299)conn.inputStream else conn.errorStream)?.bufferedReader()?.use{it.readText()} ?: ""
             val result=try{JSONObject(body)}catch(_:Exception){JSONObject()}
             if(status !in 200..299)throw IllegalStateException(result.optString("error","License server error: "+status))
+            // Never treat a 2xx HTTP response with an explicit rejection
+            // or a malformed body as a valid license.
+            if(body.isBlank() || result.length()==0)
+                throw IllegalStateException("Invalid license server response")
+            if(result.has("valid") && !result.optBoolean("valid",false))
+                throw IllegalStateException(result.optString("error","License rejected"))
+            if(result.has("success") && !result.optBoolean("success",false))
+                throw IllegalStateException(result.optString("error","License request rejected"))
             return result
         }finally{conn.disconnect()}
     }
@@ -193,6 +201,11 @@ class MainActivity: Activity() {
             setPadding(16,20,16,20)
         }
         root.addView(key)
+        if(!prefs.getString("license_token",null).isNullOrBlank()){
+            root.addView(button("Retry Existing License"){
+                beginLicensedSession()
+            })
+        }
         val activate=button("Activate HomeTV"){
             val value=key.text.toString().trim().uppercase(java.util.Locale.ROOT)
             if(value.isBlank()){key.error="Enter a license key";return@button}
@@ -205,7 +218,9 @@ class MainActivity: Activity() {
                 val error=try{
                     val result=licenseRequest("/activate",JSONObject().put("device",installationId()).put("password",value))
                     activationResult=result
-                    token=result.getString("token");null
+                    token=result.getString("token").takeIf{it.isNotBlank()}
+                    if(token==null)throw IllegalStateException("Activation returned an empty token")
+                    null
                 }catch(e:Exception){e.message?:"Activation failed"}
                 runOnUiThread{
                     if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
