@@ -698,7 +698,8 @@ class MainActivity: Activity() {
             if(next!=null){
                 fallbackEngineOverride=next.second
                 showBanner("Finding working source for "+c.name)
-                val task=Runnable{if(active==index && videoScreen===screen)playIndex(next.first)}
+                val failedSessionGeneration=playbackGeneration
+                val task=Runnable{if(active==index && videoScreen===screen && playbackGeneration==failedSessionGeneration)playIndex(next.first)}
                 retryTask=task
                 handler.postDelayed(task,900L)
                 return true
