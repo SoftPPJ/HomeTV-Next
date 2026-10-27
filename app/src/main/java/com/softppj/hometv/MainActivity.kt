@@ -966,6 +966,51 @@ class MainActivity: Activity() {
         val shift=(global+source).coerceIn(-1440,1440)*60000L
         return if(shift==0L)raw else raw.map{it.copy(start=it.start+shift,end=it.end+shift)}
     }
+    // On-demand only. Downloads at most 3 MB; no continuous network monitoring.
+    private fun runNetworkDiagnostics(){
+        val dialog=AlertDialog.Builder(this).setTitle("Network speed diagnostics")
+            .setMessage("Measuring download speed and latency…")
+            .setNegativeButton("Close",null).create()
+        dialog.show()
+        thread {
+            var result:String
+            try {
+                val start=android.os.SystemClock.elapsedRealtime()
+                val connection=(URL("https://speed.cloudflare.com/__down?bytes=3000000")
+                    .openConnection() as java.net.HttpURLConnection)
+                connection.connectTimeout=8000
+                connection.readTimeout=10000
+                connection.setRequestProperty("Accept-Encoding","identity")
+                connection.instanceFollowRedirects=false
+                try{
+                    connection.connect()
+                    val firstByte=android.os.SystemClock.elapsedRealtime()
+                    if(connection.responseCode !in 200..299)throw IllegalStateException("Test server returned "+connection.responseCode)
+                    val data=ByteArray(16384)
+                    var total=0L
+                    connection.inputStream.use{stream->
+                        while(total<3000000L){
+                            val read=stream.read(data,0,minOf(data.size,(3000000L-total).toInt()))
+                            if(read<0)break
+                            total+=read
+                        }
+                    }
+                    val elapsed=(android.os.SystemClock.elapsedRealtime()-start).coerceAtLeast(1L)
+                    val mbps=total*8.0/elapsed/1000.0
+                    result="Approx. download: "+String.format(java.util.Locale.US,"%.1f Mbps",mbps)+
+                        "\nTime to first byte: "+(firstByte-start)+" ms"+
+                        "\nDownloaded: "+(total/1024)+" KB"+
+                        "\nTest duration: "+elapsed+" ms"+
+                        "\nResults are estimates and may differ from IPTV server performance."
+                }finally{connection.disconnect()}
+            }catch(e:Exception){result="Network test failed: "+(e.message?:"Connection unavailable")}
+            runOnUiThread{
+                if(!isFinishing && !isDestroyed && dialog.isShowing){
+                    dialog.setMessage(result)
+                }
+            }
+        }
+    }
     private fun configureEpgOffset(){
         val sources=playlists().map{it.name to it.url}
         val choices=(listOf("All playlists (global)")+sources.map{it.first}).toTypedArray()
@@ -4765,6 +4810,7 @@ class MainActivity: Activity() {
         root.addView(button("Export settings backup"){exportSettings()})
         root.addView(button("Restore settings backup"){importSettings()})
         root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
+        root.addView(button("Test network download speed"){runNetworkDiagnostics()})
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
