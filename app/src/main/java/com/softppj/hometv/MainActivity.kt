@@ -907,8 +907,7 @@ class MainActivity: Activity() {
     private fun scheduleEpgTune(channel:Channel,programme:EpgProgramme,mode:String="auto"){
         val now=System.currentTimeMillis()
         if(programme.start<=now){
-            val index=channels.indexOfFirst{sameChannel(it,channel)}
-            if(index>=0)playIndex(preferredChannel(index))
+            Toast.makeText(this,"This programme has already started",Toast.LENGTH_SHORT).show()
             return
         }
         val saved=JSONArray(prefs.getString("epg_tune_schedules","[]"))
@@ -957,15 +956,13 @@ class MainActivity: Activity() {
             val url=entry.optString("url")
             val index=channels.indexOfFirst{channelKey(it)==key}.takeIf{it>=0}
                 ?:channels.indexOfFirst{it.url==url}
-            if(index>=0){
+            if(index>=0 && licenseReady && appInForeground && !isFinishing && !isDestroyed){
                 val channelName=channels[index].name
                 val target=preferredChannel(index)
                 if(entry.optString("mode","reminder")=="auto"){
                     // Auto-switch only when HomeTV is active; do not start
                     // playback in the background or bypass channel locks.
-                    if(appInForeground && !isFinishing && !isDestroyed){
-                        playIndex(target)
-                    }
+                    playIndex(target)
                 }else{
                     showSideDialog(AlertDialog.Builder(this)
                         .setTitle("Programme reminder")
@@ -4959,7 +4956,9 @@ class MainActivity: Activity() {
                     val backup=JSONObject(input.text.toString())
                     require(backup.optString("format")=="HomeTV-settings-v1")
                     val values=backup.getJSONObject("settings")
-                    val edit=prefs.edit()
+                    // Validate every entry before modifying preferences.
+                    // A malformed item must not leave a half-restored profile.
+                    val staged=mutableListOf<Pair<String,Any>>()
                     val iterator=values.keys()
                     var count=0
                     while(iterator.hasNext()){
@@ -4968,19 +4967,31 @@ class MainActivity: Activity() {
                             key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
                             key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
                         val item=values.getJSONObject(key)
-                        when(item.getString("type")){
-                            "string"->edit.putString(key,item.getString("value"))
-                            "boolean"->edit.putBoolean(key,item.getBoolean("value"))
-                            "int"->edit.putInt(key,item.getInt("value"))
-                            "long"->edit.putLong(key,item.getLong("value"))
-                            "float"->edit.putFloat(key,item.getDouble("value").toFloat())
+                        val value:Any=when(item.getString("type")){
+                            "string"->item.getString("value")
+                            "boolean"->item.getBoolean("value")
+                            "int"->item.getInt("value")
+                            "long"->item.getLong("value")
+                            "float"->item.getDouble("value").toFloat()
                             "strings"->{
                                 val arr=item.getJSONArray("value")
-                                edit.putStringSet(key,(0 until arr.length()).map{arr.getString(it)}.toSet())
+                                (0 until arr.length()).map{arr.getString(it)}.toSet()
                             }
-                            else->continue
+                            else->throw IllegalArgumentException("Unsupported setting type for "+key)
                         }
+                        staged.add(key to value)
                         count++
+                    }
+                    val edit=prefs.edit()
+                    staged.forEach{(key,value)->
+                        when(value){
+                            is String->edit.putString(key,value)
+                            is Boolean->edit.putBoolean(key,value)
+                            is Int->edit.putInt(key,value)
+                            is Long->edit.putLong(key,value)
+                            is Float->edit.putFloat(key,value)
+                            is Set<*>->edit.putStringSet(key,value.filterIsInstance<String>().toSet())
+                        }
                     }
                     edit.apply()
                     Toast.makeText(this,"Restored "+count+" settings. Restart HomeTV to apply all changes.",Toast.LENGTH_LONG).show()
