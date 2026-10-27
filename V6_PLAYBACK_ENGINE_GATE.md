@@ -21,3 +21,7 @@ Current inspected source: MainActivity.kt uses Media3 1.5.1 and LibVLC 3.5.1. ha
 - Compare same stream URL for player success, startup latency, resolution, dropped frames, audio sync, memory and crash rate.
 
 This document is an implementation plan, not evidence that the third engine is integrated or tested.
+
+## Implementation update — stale delayed fallback
+- Commit 58c697a: the delayed initial-discovery fallback Runnable now captures playbackGeneration and checks it before calling playIndex. This blocks that particular delayed callback from restarting a replaced session.
+- Other delayed recovery callbacks still require review. Compilation and Android TV regression tests have not been run for this commit.
