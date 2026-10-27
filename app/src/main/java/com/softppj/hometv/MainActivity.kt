@@ -706,10 +706,12 @@ class MainActivity: Activity() {
             tried.add(c.url+"|"+current)
             // Exhaust both engines for the selected source before probing
             // unrelated URLs. Keep a manually selected source first.
-            val options=(listOf(index)+alternateIndices(index).filter{it!=index}).flatMap{i->
-                listOf(Pair(i,"Media3"),Pair(i,"LibVLC"))
-            }
-            val next=options.firstOrNull{(i,engine)->
+            // Stream alternatives can number in the thousands. Avoid
+            // materializing two Pair objects per source on every failure.
+            val candidates=sequenceOf(index)+alternateIndices(index).asSequence().filter{it!=index}
+            val next=candidates.flatMap{i->
+                sequenceOf(Pair(i,"Media3"),Pair(i,"LibVLC"))
+            }.firstOrNull{(i,engine)->
                 !tried.contains(channels[i].url+"|"+engine)
             }
             if(next!=null){
@@ -4283,6 +4285,8 @@ class MainActivity: Activity() {
     }
 
     private fun playIndex(index:Int){
+        // No cached or delayed playback callback may bypass license validation.
+        if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
         if(unlockedChannel!=id(c) && isLocked(c)){
