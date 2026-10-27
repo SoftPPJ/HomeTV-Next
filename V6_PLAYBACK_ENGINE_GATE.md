@@ -25,3 +25,7 @@ This document is an implementation plan, not evidence that the third engine is i
 ## Implementation update — stale delayed fallback
 - Commit 58c697a: the delayed initial-discovery fallback Runnable now captures playbackGeneration and checks it before calling playIndex. This blocks that particular delayed callback from restarting a replaced session.
 - Other delayed recovery callbacks still require review. Compilation and Android TV regression tests have not been run for this commit.
+
+## Implementation update — reconnect generation guards
+- Commit 0ce0a7c: added playbackGeneration checks to delayed confirmed-stream reconnect and stream-stopped retry tasks, preventing these particular tasks from restarting a replaced playback session.
+- Network-recovery polling, player event listeners, engine selection, compilation and device tests remain to be reviewed/verified.
