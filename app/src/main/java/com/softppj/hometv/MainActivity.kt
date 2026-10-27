@@ -683,8 +683,10 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        // A confirmed engine is only proven for its confirmed URL, not every
+        // alternative URL of the same logical channel.
         val saved=prefs.contains("confirmed_engine_"+key) &&
-            !prefs.getString("working_url_"+key,null).isNullOrBlank()
+            prefs.getString("working_url_"+key,null)==c.url
         if(!saved && testingAlternativeKey!=key){
             // Initial discovery: try each distinct URL with Media3 and LibVLC.
             // Only a real player-ready/playing event records a successful combination.
