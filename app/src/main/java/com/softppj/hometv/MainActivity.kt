@@ -387,14 +387,59 @@ class MainActivity: Activity() {
     private var bannerTask:Runnable?=null
     private var clockTask:Runnable?=null
     private var fallbackAttempted=mutableSetOf<String>()
-    private val favoriteIds get()=prefs.getStringSet("favorites",emptySet()) ?: emptySet()
+    // Viewer-specific preferences; license, playlists and parental restrictions remain shared.
+    private fun viewerId():String=prefs.getString("active_viewer","default") ?: "default"
+    private fun viewerKey(key:String):String=if(viewerId()=="default")key else "viewer_"+viewerId()+"_"+key
+    private val favoriteIds get()=prefs.getStringSet(viewerKey("favorites"),emptySet()) ?: emptySet()
+    private fun manageViewerProfiles(){
+        val names=org.json.JSONArray(prefs.getString("viewer_profiles","[]"))
+        val entries=mutableListOf("Default")
+        for(i in 0 until names.length())entries.add(names.optString(i))
+        val options=entries+listOf("＋ Add viewer","− Remove current viewer")
+        val selected=if(viewerId()=="default")0 else entries.indexOfFirst{it==viewerId()}.coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Viewer profiles")
+            .setSingleChoiceItems(options.toTypedArray(),selected){dialog,which->
+                dialog.dismiss()
+                when {
+                    which<entries.size->{
+                        prefs.edit().putString("active_viewer",if(which==0)"default" else entries[which]).apply()
+                        settings()
+                    }
+                    which==entries.size->{
+                        val field=EditText(this).apply{hint="Viewer name (letters and numbers)"}
+                        AlertDialog.Builder(this).setTitle("Add viewer").setView(field)
+                            .setPositiveButton("Add"){_,_->
+                                val name=field.text.toString().trim()
+                                if(name.matches(Regex("[A-Za-z0-9 _-]{1,24}")) && name!="Default" && !entries.contains(name)){
+                                    names.put(name)
+                                    prefs.edit().putString("viewer_profiles",names.toString()).putString("active_viewer",name).apply()
+                                    settings()
+                                }else Toast.makeText(this,"Enter a unique name (1–24 letters/numbers)",Toast.LENGTH_LONG).show()
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                    viewerId()!="default"->{
+                        val old=viewerId()
+                        AlertDialog.Builder(this).setTitle("Remove "+old+"?")
+                            .setMessage("This removes the viewer's Favorites and history, not shared playlists.")
+                            .setPositiveButton("Remove"){_,_->
+                                val remaining=JSONArray()
+                                for(i in 0 until names.length())if(names.optString(i)!=old)remaining.put(names.optString(i))
+                                prefs.edit().putString("viewer_profiles",remaining.toString())
+                                    .putString("active_viewer","default")
+                                    .remove("viewer_"+old+"_favorites").remove("viewer_"+old+"_recent_channels").apply()
+                                settings()
+                            }.setNegativeButton("Cancel",null).show()
+                    }
+                }
+            }.setNegativeButton("Close",null).show()
+    }
     private var retryCount=0
     private var retryUrl:String?=null
     private var retryTask:Runnable?=null
     private fun favorite(c:Channel){
         val set=favoriteIds.toMutableSet()
         if(!set.add(id(c)))set.remove(id(c))
-        prefs.edit().putStringSet("favorites",set).apply()
+        prefs.edit().putStringSet(viewerKey("favorites"),set).apply()
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
@@ -744,13 +789,13 @@ class MainActivity: Activity() {
     }
     private fun rememberRecentChannel(channel:Channel){
         val key=channelKey(channel)
-        val recent=JSONArray(prefs.getString("recent_channels","[]"))
+        val recent=JSONArray(prefs.getString(viewerKey("recent_channels"),"[]"))
         val updated=JSONArray().put(key)
         for(i in 0 until recent.length()){
             val value=recent.optString(i)
             if(value!=key && updated.length()<20)updated.put(value)
         }
-        prefs.edit().putString("recent_channels",updated.toString()).apply()
+        prefs.edit().putString(viewerKey("recent_channels"),updated.toString()).apply()
     }
     private fun recentlyWatched(){
         val saved=JSONArray(prefs.getString("recent_channels","[]"))
@@ -915,8 +960,27 @@ class MainActivity: Activity() {
     private fun programmeList(c:Channel):List<EpgProgramme> {
         val id=c.epgId.trim().lowercase(java.util.Locale.ROOT)
         val name=c.name.trim().lowercase(java.util.Locale.ROOT)
-        return epgGuide[id]?.takeIf{it.isNotEmpty()}
-            ?:epgGuide[name] ?:emptyList()
+        val raw=epgGuide[id]?.takeIf{it.isNotEmpty()} ?:epgGuide[name] ?:emptyList()
+        val global=prefs.getInt("epg_offset_minutes",0)
+        val source=prefs.getInt("epg_offset_source_"+c.source.hashCode(),0)
+        val shift=(global+source).coerceIn(-1440,1440)*60000L
+        return if(shift==0L)raw else raw.map{it.copy(start=it.start+shift,end=it.end+shift)}
+    }
+    private fun configureEpgOffset(){
+        val sources=playlists().map{it.name to it.url}
+        val choices=(listOf("All playlists (global)")+sources.map{it.first}).toTypedArray()
+        AlertDialog.Builder(this).setTitle("EPG time correction")
+            .setItems(choices){_,index->
+                val key=if(index==0)"epg_offset_minutes" else "epg_offset_source_"+sources[index-1].second.hashCode()
+                val values=(-12..12).map{it*30}
+                val labels=values.map{v->if(v==0)"No correction" else (if(v>0)"+" else "")+v+" minutes"}.toTypedArray()
+                val current=prefs.getInt(key,0)
+                AlertDialog.Builder(this).setTitle("Adjust EPG programme times")
+                    .setSingleChoiceItems(labels,values.indexOf(current)){dialog,which->
+                        prefs.edit().putInt(key,values[which]).apply()
+                        dialog.dismiss();settings()
+                    }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).show()
     }
     private fun programmeTime(t:Long):String =
         java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(t))
@@ -1658,7 +1722,7 @@ class MainActivity: Activity() {
             }
             .setNegativeButton("Close",null).show()
     }
-    private fun mediaKey(c:Channel)="myhometv_progress_"+c.url.hashCode().toString()
+    private fun mediaKey(c:Channel)=viewerKey("myhometv_progress_"+c.url.hashCode().toString())
     private fun mediaResumeSeconds(c:Channel):Long=prefs.getLong(mediaKey(c),0L)
     private fun saveCurrentMediaProgress(){
         val c=channels.getOrNull(active)?:return
@@ -4705,6 +4769,8 @@ class MainActivity: Activity() {
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
+        root.addView(button("EPG time correction"){configureEpgOffset()})
+        root.addView(button("Viewer profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
         root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
         root.addView(settingsToggle("Show EPG in channel info","show_channel_epg",true))
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
