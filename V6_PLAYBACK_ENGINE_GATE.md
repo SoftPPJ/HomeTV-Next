@@ -41,3 +41,7 @@ This document is an implementation plan, not evidence that the third engine is i
 ## Implementation update — confirmed engine/URL pairing
 - Commit d3fbeb6: rememberWorking now persists the confirmed engine and URL together after actual playback, except when testing an alternative or preserving a different manually pinned URL. engineFor only uses channel-level confirmed engine when current URL matches working URL.
 - Remaining: confirm manual engine overrides and alternative test promotion behavior, run Kotlin compile and APK build, and test on Android TV. This is source-only, unverified.
+
+## Implementation update — manual alternative stream selection
+- Commit f700e19: switchAlternative and selectAlternative persist manual_url but clear previous working_url and confirmed_engine; a new stream must actually play before being marked confirmed. Existing manual engine preferences are retained.
+- Caveat: clearing the previous confirmed pair on manual selection is intentional for discovery but needs regression testing, including returning to a previous source and honoring pinned engine behavior. Not compiled or device-tested.
