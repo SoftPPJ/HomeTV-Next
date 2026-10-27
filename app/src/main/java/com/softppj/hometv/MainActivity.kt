@@ -3171,7 +3171,7 @@ class MainActivity: Activity() {
         // YouTube inserts its video asynchronously. Retry only while audio is
         // unavailable; do not restart playback or affect Media3/LibVLC streams.
         val generation=playbackGeneration
-        val delays=longArrayOf(600L,1400L,2700L,4500L,7000L)
+        val delays=longArrayOf(600L,1400L,2700L,4500L,7000L,11000L,15000L)
         youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
         var attempt=0
         val retry=object:Runnable{
@@ -3180,7 +3180,9 @@ class MainActivity: Activity() {
                     playbackGeneration!=generation)return
                 viewer.evaluateJavascript("""(function(){
                     var v=document.querySelector('video');
-                    if(!v || v.paused)return 'waiting';
+                    if(!v)return 'waiting';
+                    // A muted YouTube player can be paused during its initial
+                    // buffering/advert transition; prepare audio even then.
                     try{
                         v.defaultMuted=false;v.muted=false;v.volume=1;
                         var yt=document.getElementById('movie_player');
@@ -4460,7 +4462,14 @@ class MainActivity: Activity() {
                               'ytm-topbar-menu-button-renderer,ytm-topbar-logo-renderer,'+
                               'ytm-companion-slot-renderer,.ytm-open-app-button,.ytp-open-app-button,'+
                               '.ytp-watch-later-button,.ytp-share-button{display:none!important;pointer-events:none!important}'+
-                              '.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}'+
+                              // Keep mute accessible but suppress YouTube's other
+                              // transport/settings buttons that overlap TV controls.
+                              '.ytp-chrome-bottom .ytp-left-controls > :not(.ytp-volume-area),'+
+                              '.ytp-chrome-bottom .ytp-right-controls > :not(.ytp-volume-area),'+
+                              '.ytp-settings-button,.ytp-subtitles-button,.ytp-size-button,.ytp-fullscreen-button,'+
+                              '.ytp-miniplayer-button,.ytp-next-button,.ytp-prev-button,.ytp-play-button,'+
+                              '.ytp-progress-bar-container{display:none!important;pointer-events:none!important}'+
+                              '.ytp-volume-area,.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}'+
                               '.ytp-chrome-top .ytp-title-container,.ytp-chrome-top .ytp-title-text{display:none!important}';
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
