@@ -274,7 +274,11 @@ class MainActivity: Activity() {
         channelByKey=groups
         channelRepresentatives=groups.values.map{it.first()}
         liveChannelRepresentatives=channelRepresentatives.filter{channels[it].mediaType=="live"}
-        channelPosition=groups.keys.withIndex().associate{it.value to it.index+1}
+        // Channel numbers refer to live logical channels only, never VOD
+        // entries or additional URLs for the same channel.
+        channelPosition=liveChannelRepresentatives.withIndex().associate{(position,index)->
+            channelKey(channels[index]) to position+1
+        }
         channelIndexOwner=channels
         channelIndexSize=channels.size
     }
