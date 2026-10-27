@@ -56,3 +56,24 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 - Commit b020da5: V6 development push workflow now compiles Kotlin, assembles a debug test APK, and uploads a 14-day HomeTV-V6-debug-test artifact. A successful build has not yet been confirmed.
 - Do not mark any of the 20 release gates verified on source changes alone. A test APK is not the final release.
 - Required next steps: inspect current Actions result and resolve errors; complete feature-by-feature regression testing (playback, YouTube, large playlists, controls, EPG, PIN/licensing, profiles, diagnostics), test Android TV devices, and decide whether IJKPlayer is warranted.
+
+## Release verification update — 27 October 2026
+- GitHub Actions run 40490592071 / job 122143247463 passed Kotlin compilation and debug APK assembly. Produced HomeTV-V6.apk (~191 MB) on the runner; no downloadable artifact upload is configured. This does **not** verify playback or Android TV behavior.
+- IJKPlayer 0.8.8 dependencies resolved after commit 3982ab0 using a scoped JCenter mirror. Security, long-term availability, license compliance, runtime ABI and device compatibility remain unverified.
+- Commit 073c5e2 adds IJKPlayer video-surface aspect sizing and video-size callbacks. Requires new compilation and device testing. SurfaceView sizing is not equivalent to hardware-decoder crop/stretch validation.
+
+### Required regression matrix — do not mark passed without observed results
+| Area | Verification | Result |
+| --- | --- | --- |
+| Build | Kotlin compile + APK assembly after latest commit | PENDING |
+| YouTube | Live video, automatic unmute, no remote-control overlap | PENDING DEVICE |
+| Media3 | HLS, MPEG-TS, RTSP if supported, normal audio/video | PENDING DEVICE |
+| LibVLC | Fallback on Media3 failure, remember confirmed URL+engine | PENDING DEVICE |
+| IJKPlayer | Manual selection, playback, fallback, ARM32/ARM64, aspect modes | PENDING DEVICE |
+| Licensing | New activation, expired token, surrender, offline/invalid response | PENDING INTEGRATION |
+| Playlists | 1k/5k/10k import, logical counts, memory, rapid channel switching | PENDING DEVICE |
+| Remote | DPAD, OK, BACK, HOME, aspect preview rollback | PENDING DEVICE |
+| EPG | Programme reminder, timezone offset, automatic tune, PIN | PENDING DEVICE |
+| Persistence | Favorites, profiles, manual URL/engine, backup/restore | PENDING DEVICE |
+
+Release rule: do not describe the app as fully implemented or production-ready until these gates pass. Avoid uploading or publishing an APK without explicit approval.
