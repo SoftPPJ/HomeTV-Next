@@ -552,7 +552,12 @@ class MainActivity: Activity() {
         val next=options.firstOrNull{!alternativeAttempted.contains(channels[it].url)}
             ?:return false
         showBanner("Trying alternative source for "+channels[index].name)
-        handler.post{if(active==index)playIndex(next)}
+        val sourceScreen=videoScreen
+        val sourceGeneration=playbackGeneration
+        handler.post{
+            if(active==index && videoScreen===sourceScreen && playbackGeneration==sourceGeneration)
+                playIndex(next)
+        }
         return true
     }
     private fun hasNetworkConnection():Boolean{
