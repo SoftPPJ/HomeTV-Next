@@ -2467,7 +2467,10 @@ class MainActivity: Activity() {
         val total=channels.size
         val start=if(total>0)backgroundProbeOffset%total else 0
         var scanned=0
-        while(scanned<total && snapshot.size<250){
+        // Bound work per UI dispatch even when many entries share one URL.
+        // The rotating offset resumes scanning on the next cycle.
+        val scanBudget=minOf(total,1000)
+        while(scanned<scanBudget && snapshot.size<250){
             val position=(start+scanned)%total
             val candidate=channels[position]
             scanned++
@@ -4672,7 +4675,6 @@ class MainActivity: Activity() {
             surface.post{if(ijkPlayer===ijk)applyVideoSize()}
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",1L)
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",10000000L)
-            var started=false
             var failed=false
             var firstFrame=false
             val watchdog=Runnable{
@@ -4683,9 +4685,9 @@ class MainActivity: Activity() {
                 }
             }
             ijk.setOnInfoListener{_,what,_->
-                // IJK/Android MEDIA_INFO_VIDEO_RENDERING_START == 3.
-                // Prepared alone does not establish that video actually rendered.
-                if(what==3){
+                // First video frame (3) or first audio rendering (10002).
+                // Prepared alone does not establish that media actually rendered.
+                if(what==3 || what==10002){
                     handler.post{
                         if(!firstFrame && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
                             firstFrame=true
@@ -4700,7 +4702,6 @@ class MainActivity: Activity() {
             ijk.setOnPreparedListener{
                 handler.post{
                     if(!failed && ijkPlayer===ijk && active==index && videoScreen===screen){
-                        started=true
                         try{ijk.start()}
                         catch(e:Exception){failed=true;handler.removeCallbacks(watchdog);android.util.Log.w("HomeTV","IJK start failed",e);handleEngineFailure(index,screen)}
                     }
