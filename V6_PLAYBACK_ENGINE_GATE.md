@@ -29,3 +29,7 @@ This document is an implementation plan, not evidence that the third engine is i
 ## Implementation update — reconnect generation guards
 - Commit 0ce0a7c: added playbackGeneration checks to delayed confirmed-stream reconnect and stream-stopped retry tasks, preventing these particular tasks from restarting a replaced playback session.
 - Network-recovery polling, player event listeners, engine selection, compilation and device tests remain to be reviewed/verified.
+
+## Implementation update — network recovery ownership
+- Commit 029bdd3: network recovery polling now captures playbackGeneration and checks both generation and task identity before retrying playback or rescheduling. This prevents an outdated polling task from reviving a replaced session.
+- Source change only; Kotlin compilation and real device tests are still pending. Other asynchronous callbacks and third-engine evaluation remain open.
