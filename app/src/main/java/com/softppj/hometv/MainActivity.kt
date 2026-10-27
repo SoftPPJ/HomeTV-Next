@@ -266,6 +266,9 @@ class MainActivity: Activity() {
 
     private var player:ExoPlayer?=null
     private var ijkPlayer:IjkMediaPlayer?=null
+    private var ijkSurface:SurfaceView?=null
+    private var ijkVideoWidth=0
+    private var ijkVideoHeight=0
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
@@ -4069,6 +4072,20 @@ class MainActivity: Activity() {
                 surface.scaleY=zoom
             }
         }
+        ijkSurface?.let{surface->
+            val displayWidth=(videoScreen?.width ?: 0).takeIf{it>0} ?: resources.displayMetrics.widthPixels
+            val displayHeight=(videoScreen?.height ?: 0).takeIf{it>0} ?: resources.displayMetrics.heightPixels
+            val sourceRatio=if(ijkVideoWidth>0 && ijkVideoHeight>0)ijkVideoWidth.toFloat()/ijkVideoHeight else 16f/9f
+            val targetRatio=if(forcedRatio>0f)forcedRatio else sourceRatio
+            val fill=mode=="Fill / Crop" || mode=="Stretch"
+            val zoom=when(mode){"Zoom 110%"->1.10f;"Zoom 125%"->1.25f;"Zoom 150%"->1.50f;else->1f}
+            val width=if(fill)displayWidth else minOf(displayWidth,(displayHeight*targetRatio).toInt()).coerceAtLeast(1)
+            val height=if(fill)displayHeight else minOf(displayHeight,(displayWidth/targetRatio).toInt()).coerceAtLeast(1)
+            val lp=FrameLayout.LayoutParams(width,height,android.view.Gravity.CENTER)
+            surface.layoutParams=lp
+            surface.scaleX=zoom
+            surface.scaleY=zoom
+        }
         vlcPlayer?.let{vlc->
             try{
                 val displayRatio=resources.displayMetrics.let{if(it.heightPixels>0)it.widthPixels.toFloat()/it.heightPixels else 16f/9f}
@@ -4619,8 +4636,13 @@ class MainActivity: Activity() {
             val ijk=IjkMediaPlayer()
             ijkPlayer=ijk
             val surface=SurfaceView(this)
+            ijkSurface=surface
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             ijk.setDisplay(surface.holder)
+            ijk.setOnVideoSizeChangedListener{_,width,height,_,_->
+                handler.post{if(ijkPlayer===ijk){ijkVideoWidth=width;ijkVideoHeight=height;applyVideoSize()}}
+            }
+            surface.post{if(ijkPlayer===ijk)applyVideoSize()}
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",1L)
             ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",10000000L)
             var started=false
@@ -4636,9 +4658,8 @@ class MainActivity: Activity() {
                     if(ijkPlayer===ijk && active==index && videoScreen===screen){
                         started=true
                         handler.removeCallbacks(watchdog)
-                        ijk.start()
-                        rememberWorking(c)
-                        autoBufferHealthy()
+                        try{ijk.start();rememberWorking(c);autoBufferHealthy()}
+                        catch(e:Exception){failed=true;android.util.Log.w("HomeTV","IJK start failed",e);handleEngineFailure(index,screen)}
                     }
                 }
             }
@@ -5223,6 +5244,7 @@ class MainActivity: Activity() {
         qualityUpgradeTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         ijkPlayer?.let{try{it.stop();it.release()}catch(_:Exception){}};ijkPlayer=null
+        ijkSurface=null;ijkVideoWidth=0;ijkVideoHeight=0
         player?.release();player=null
         vlcPlayer?.let{v->
             try{v.stop();v.vlcVout.detachViews();v.release()}catch(_:Exception){}
