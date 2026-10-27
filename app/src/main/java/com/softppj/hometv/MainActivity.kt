@@ -1016,7 +1016,7 @@ class MainActivity: Activity() {
         val choices=(listOf("All playlists (global)")+sources.map{it.first}).toTypedArray()
         AlertDialog.Builder(this).setTitle("EPG time correction")
             .setItems(choices){_,index->
-                val key=if(index==0)"epg_offset_minutes" else "epg_offset_source_"+sources[index-1].second.hashCode()
+                val key=if(index==0)"epg_offset_minutes" else "epg_offset_source_"+sources[index-1].first.hashCode()
                 val values=(-12..12).map{it*30}
                 val labels=values.map{v->if(v==0)"No correction" else (if(v>0)"+" else "")+v+" minutes"}.toTypedArray()
                 val current=prefs.getInt(key,0)
