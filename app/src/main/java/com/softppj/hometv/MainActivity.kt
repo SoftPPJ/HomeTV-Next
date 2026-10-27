@@ -3178,7 +3178,7 @@ class MainActivity: Activity() {
                 })();"""){result->
                     if(web!==viewer || active!=channelIndex || videoScreen!==screen ||
                         playbackGeneration!=generation)return@evaluateJavascript
-                    if(result=="\\\"unmuted\\\""){
+                    if(result=="\"unmuted\""){
                         youtubeUnmuteTask=null
                         return@evaluateJavascript
                     }
