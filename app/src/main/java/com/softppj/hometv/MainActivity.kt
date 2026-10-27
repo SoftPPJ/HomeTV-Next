@@ -4387,6 +4387,54 @@ class MainActivity: Activity() {
              playing:!!(player&&!player.paused),candidates:window.__myHomeTvLinks});
         }catch(e){return JSON.stringify({error:String(e)})}
     })();"""
+    private var webTvDirectoryUrl:String?=null
+    private var webTvDirectoryEntries:List<Pair<String,String>> = emptyList()
+    private fun showWebTvDirectory(viewer:WebView,index:Int,screen:FrameLayout){
+        if(web!==viewer || active!=index || videoScreen!==screen)return
+        val entries=webTvDirectoryEntries
+        if(entries.isEmpty())return
+        AlertDialog.Builder(this)
+            .setTitle("SELECT CHANNEL  •  "+channels[index].name)
+            .setItems(entries.map{it.first}.toTypedArray()){_,selected->
+                if(web!==viewer || active!=index || videoScreen!==screen)return@setItems
+                viewer.loadUrl(entries[selected].second)
+            }
+            .setNegativeButton("Back to Web TV"){_,_->mediaLibrary("web")}
+            .show()
+    }
+    private fun inspectWebTvDirectory(viewer:WebView,index:Int,screen:FrameLayout){
+        if(web!==viewer || active!=index || videoScreen!==screen)return
+        val js="""(function(){
+          var seen={},channels=[];
+          document.querySelectorAll('a[href*="/live/"]').forEach(function(a){
+            var u=a.href||'', name=(a.innerText||a.getAttribute('title')||
+              (a.querySelector('img')||{}).alt||'').replace(/\\s+/g,' ').trim();
+            if(!name && a.parentElement)name=(a.parentElement.innerText||'').replace(/\\s+/g,' ').trim();
+            if(!name||name.length>75||seen[u]||!/^https?:/.test(u))return;
+            seen[u]=true;channels.push({name:name,url:u});
+          });
+          return JSON.stringify(channels.slice(0,180));
+        })();"""
+        viewer.evaluateJavascript(js){raw->
+            if(web!==viewer || active!=index || videoScreen!==screen)return@evaluateJavascript
+            try{
+                val decoded=org.json.JSONTokener(raw).nextValue() as? String ?:raw
+                val list=org.json.JSONArray(decoded)
+                val entries=mutableListOf<Pair<String,String>>()
+                for(n in 0 until list.length()){
+                    val item=list.optJSONObject(n)?:continue
+                    val title=item.optString("name").trim()
+                    val url=item.optString("url")
+                    if(title.isNotBlank() && url.startsWith("https://bhoomtv.org/live/"))
+                        entries.add(title to url)
+                }
+                if(entries.isNotEmpty()){
+                    webTvDirectoryEntries=entries
+                    showWebTvDirectory(viewer,index,screen)
+                }else inspectWebTv(viewer,index,screen,true)
+            }catch(_:Exception){inspectWebTv(viewer,index,screen,true)}
+        }
+    }
     private fun inspectWebTv(viewer:WebView,index:Int,screen:FrameLayout,showMenu:Boolean=false){
         if(web!==viewer || active!=index || videoScreen!==screen)return
         viewer.evaluateJavascript(webTvJavascript()){raw->
@@ -4618,8 +4666,13 @@ class MainActivity: Activity() {
                     override fun onPageFinished(view:WebView,url:String){
                         super.onPageFinished(view,url)
                         if(web===view && active==index && videoScreen===screen){
-                            longArrayOf(1100L,3000L,6500L).forEach{delay->
-                                handler.postDelayed({inspectWebTv(view,index,screen,false)},delay)
+                            if(url.startsWith("https://bhoomtv.org/channel/")){
+                                webTvDirectoryUrl=url
+                                inspectWebTvDirectory(view,index,screen)
+                            }else{
+                                longArrayOf(1100L,3000L,6500L).forEach{delay->
+                                    handler.postDelayed({inspectWebTv(view,index,screen,false)},delay)
+                                }
                             }
                         }
                     }
@@ -4642,7 +4695,8 @@ class MainActivity: Activity() {
                     }else false
                 }
                 val preferred=prefs.getString("web_preferred_"+c.url.hashCode(),"").orEmpty()
-                viewer.loadUrl(if(preferred.startsWith("https://") || preferred.startsWith("http://"))preferred else c.url)
+                val isBhoomDirectory=c.url.startsWith("https://bhoomtv.org/channel/")
+                viewer.loadUrl(if(!isBhoomDirectory && (preferred.startsWith("https://") || preferred.startsWith("http://")))preferred else c.url)
             }else{
                 val yt=youtubeUri!!
                 viewer.loadUrl(if(yt.path?.startsWith("/embed/")==true) yt.toString() else yt.buildUpon().appendQueryParameter("autoplay","1").build().toString())
@@ -5376,6 +5430,11 @@ class MainActivity: Activity() {
         }
         if(active>=0){
             val screen=videoScreen
+            if(web!=null && webTvDirectoryEntries.isNotEmpty() &&
+                screen!=null && channels.getOrNull(active)?.mediaType=="web"){
+                showWebTvDirectory(web!!,active,screen)
+                return
+            }
             val drawer=screen?.findViewWithTag<View>("channel_drawer")
                 ?:screen?.findViewWithTag<View>("settings_drawer")
                 ?:screen?.findViewWithTag<View>("left_navigation")
@@ -5430,6 +5489,8 @@ class MainActivity: Activity() {
         vlcPlayer=null
         vlcCore?.release();vlcCore=null
         web?.onPause();web?.destroy();web=null
+        webTvDirectoryUrl=null
+        webTvDirectoryEntries=emptyList()
         active=-1
     }
     override fun onDestroy(){epgTuneTask?.let{handler.removeCallbacks(it)};epgTuneTask=null;sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null;stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
