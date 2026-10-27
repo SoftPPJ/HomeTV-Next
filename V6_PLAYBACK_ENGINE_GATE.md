@@ -37,3 +37,7 @@ This document is an implementation plan, not evidence that the third engine is i
 ## Implementation update — confirmed URL scoping
 - Commit 65c67a3: handleEngineFailure treats a saved engine as confirmed only when the current channel URL equals the persisted working URL. This avoids applying the proven-source reconnect policy to an unproven alternative URL.
 - Follow-up needed: inspect engineFor and rememberWorking consistency when automatic fallback succeeds on a different URL, and verify manual override behavior. Not compiled or device-tested.
+
+## Implementation update — confirmed engine/URL pairing
+- Commit d3fbeb6: rememberWorking now persists the confirmed engine and URL together after actual playback, except when testing an alternative or preserving a different manually pinned URL. engineFor only uses channel-level confirmed engine when current URL matches working URL.
+- Remaining: confirm manual engine overrides and alternative test promotion behavior, run Kotlin compile and APK build, and test on Android TV. This is source-only, unverified.
