@@ -2457,9 +2457,9 @@ class MainActivity: Activity() {
         if(!prefs.getBoolean("background_url_checks",false))return
         // Probe closest channels first in the last remote-control direction.
         // Never interrupt the on-screen channel or probe it a second time.
-        val firstPositionByUrl=HashMap<String,Int>()
-        channels.forEachIndexed{index,c->firstPositionByUrl.putIfAbsent(c.url,index)}
-        probePositionByUrl=firstPositionByUrl
+        // Only the bounded probe window needs URL positions. Scanning every
+        // channel on the UI thread made each background refresh O(playlist size).
+        val firstPositionByUrl=HashMap<String,Int>(256)
         // Scan a rotating window, not always the first 250 streams. Even a
         // very large playlist is eventually covered without a giant queue.
         val snapshot=ArrayList<Channel>(250)
@@ -2468,13 +2468,16 @@ class MainActivity: Activity() {
         val start=if(total>0)backgroundProbeOffset%total else 0
         var scanned=0
         while(scanned<total && snapshot.size<250){
-            val candidate=channels[(start+scanned)%total]
+            val position=(start+scanned)%total
+            val candidate=channels[position]
             scanned++
             if(candidate.url!=channels.getOrNull(active)?.url && seenUrls.add(candidate.url)){
+                firstPositionByUrl[candidate.url]=position
                 snapshot.add(candidate)
             }
         }
         if(total>0)backgroundProbeOffset=(start+scanned)%total
+        probePositionByUrl=firstPositionByUrl
         val anchor=active.coerceAtLeast(0)
         val count=channels.size.coerceAtLeast(1)
         val ordered=snapshot.sortedWith(compareBy<Channel>{candidate->
