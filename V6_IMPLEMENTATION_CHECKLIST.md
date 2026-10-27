@@ -33,3 +33,9 @@ Build V6 only after feature review, compilation and regression tests.
 
 ## Release rule
 Do not trigger V6 workflow or claim full feature completion until all release-critical features pass. Defer optional features explicitly if tests show unacceptable memory, security, maintenance or stability costs. In particular, IJKPlayer must not be shipped merely because another APK bundles it.
+
+## Implementation activity — 27 October 2026
+- Commit cc1d4b19: viewer profiles with separate Favorites, recent channels, movie/series progress key, and configurable EPG offsets.
+- Commit af523b2f: on-demand bounded Cloudflare download speed estimate, with connection timeouts.
+- Commit fe96dc7a: corrected per-playlist EPG offset mapping to the parsed channel source name.
+- These are source changes only. No Gradle compilation, device tests, or release acceptance has occurred. Do not mark corresponding checklist boxes as verified yet.
