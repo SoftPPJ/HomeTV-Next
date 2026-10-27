@@ -81,6 +81,8 @@ class MainActivity: Activity() {
         }finally{conn.disconnect()}
     }
     private fun showLicenseCheckingScreen(){
+        // License checks must not leave a previous video or its audio running.
+        stopPlayback()
         val screen=LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL
             gravity=Gravity.CENTER
