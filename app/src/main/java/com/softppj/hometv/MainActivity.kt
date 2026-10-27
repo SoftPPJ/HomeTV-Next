@@ -2024,7 +2024,7 @@ class MainActivity: Activity() {
         dialog.show()
     }
 
-    private var homeScreenVisible=false
+
     // V6 cinematic Android TV components. Remote focus never relies on touch.
     private fun tvDp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun tvBg(color:Int=0xFF152A43.toInt()):android.graphics.drawable.GradientDrawable =
