@@ -45,3 +45,8 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 - Commit ab60b479: playback lifecycle HOME suspend/resume and BACK exit prompt; unverified on device.
 - Commit 4524e84b: resume matches exact stream identity before URL fallback and routes through parental PIN enforcement; compilation and TV regression pending.
 - Release-critical features above remain unchecked until individually verified. Do not interpret source presence as feature acceptance.
+
+## V6 packaging preparation — 27 October 2026
+- Commit 421c0d2: changed development application ID to `com.softppj.myhometv.v6`, version code to 6, version name to `6.0.0-dev`, and intended APK filename to `HomeTV-V6.apk`.
+- This is a source configuration change only; Gradle packaging, install compatibility, licensing migration, and TV runtime remain unverified.
+- Next release-critical tasks: inspect playback code, verify Media3/LibVLC fallback, evaluate IJKPlayer without bundling prematurely, and run APK packaging plus device regressions.
