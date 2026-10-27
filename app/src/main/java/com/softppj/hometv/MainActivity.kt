@@ -1481,7 +1481,7 @@ class MainActivity: Activity() {
             dividerHeight=1
             isFocusable=true
             isFocusableInTouchMode=true
-            setBackgroundColor(0xFF101E31.toInt())
+            setBackgroundColor(0xFF0B1B2B.toInt())
         }
         val names=indices.map{i->
             val c=channels[i]
@@ -1495,8 +1495,12 @@ class MainActivity: Activity() {
                 val view=(convertView as? TextView) ?: TextView(this@MainActivity).apply{
                     textSize=18f
                     setTextColor(android.graphics.Color.WHITE)
-                    setPadding(22,17,18,17)
-                    minHeight=62
+                    setPadding(tvDp(22),tvDp(17),tvDp(18),tvDp(17))
+                    minHeight=tvDp(62)
+                    background=tvBg()
+                    setOnFocusChangeListener{v,focus->
+                        v.background=tvBg(if(focus)0xFF18628C.toInt() else 0xFF152A43.toInt())
+                    }
                     isSingleLine=true
                     ellipsize=android.text.TextUtils.TruncateAt.END
                 }
@@ -1738,6 +1742,8 @@ class MainActivity: Activity() {
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
     private fun button(s:String, action:()->Unit)=Button(this).apply {
         text=s;isAllCaps=false;textSize=17f
+        minHeight=tvDp(54)
+        setPadding(tvDp(18),tvDp(10),tvDp(18),tvDp(10))
         setTextColor(android.graphics.Color.WHITE)
         backgroundTintList=android.content.res.ColorStateList(
             arrayOf(
@@ -1745,7 +1751,7 @@ class MainActivity: Activity() {
                 intArrayOf(android.R.attr.state_pressed),
                 intArrayOf()
             ),
-            intArrayOf(0xFFFFB300.toInt(),0xFFFFB300.toInt(),0xFF254466.toInt())
+            intArrayOf(0xFF5FE6CC.toInt(),0xFF5FE6CC.toInt(),0xFF173550.toInt())
         )
         setOnFocusChangeListener{view,focused->
             (view as Button).setTextColor(if(focused)android.graphics.Color.BLACK else android.graphics.Color.WHITE)
@@ -1767,7 +1773,19 @@ class MainActivity: Activity() {
             navigationHistory.add(currentMenu!!)
         }
         if(destination!=null)currentMenu=destination
-        settingsScreenVisible=false; stopPlayback(); window.decorView.systemUiVisibility=0; setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})}); root.removeAllViews(); root.addView(label(title)) }
+        settingsScreenVisible=false
+        stopPlayback()
+        window.decorView.systemUiVisibility=0
+        root.setBackgroundColor(0xFF091421.toInt())
+        root.setPadding(tvDp(22),tvDp(12),tvDp(22),tvDp(22))
+        setContentView(android.widget.ScrollView(this).apply{
+            isFillViewport=true
+            setBackgroundColor(0xFF091421.toInt())
+            addView(root.also{(it.parent as? android.view.ViewGroup)?.removeView(it)})
+        })
+        root.removeAllViews()
+        root.addView(label(title))
+    }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
         return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
@@ -2007,29 +2025,86 @@ class MainActivity: Activity() {
     }
 
     private var homeScreenVisible=false
-    private fun showHome() {
+    // V6 cinematic Android TV components. Remote focus never relies on touch.
+    private fun tvDp(v:Int)=(v*resources.displayMetrics.density).toInt()
+    private fun tvBg(color:Int=0xFF152A43.toInt()):android.graphics.drawable.GradientDrawable =
+        android.graphics.drawable.GradientDrawable().apply{
+            setColor(color);cornerRadius=tvDp(16).toFloat()
+            setStroke(tvDp(1),0xFF356080.toInt())
+        }
+    private fun tvText(t:String,size:Float=17f,color:Int=android.graphics.Color.WHITE)=
+        TextView(this).apply{text=t;textSize=size;setTextColor(color);gravity=Gravity.CENTER_VERTICAL}
+    private fun tvSection(t:String)=tvText(t,19f,0xFF6CE4FF.toInt()).apply{
+        setPadding(tvDp(3),tvDp(20),0,tvDp(12))
+    }
+    private fun tvCard(icon:String,title:String,detail:String,action:()->Unit):LinearLayout =
+        LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER_VERTICAL
+            setPadding(tvDp(18),tvDp(13),tvDp(12),tvDp(12))
+            background=tvBg();isFocusable=true;isClickable=true
+            addView(tvText(icon,30f,0xFF6CE4FF.toInt()))
+            addView(tvText(title,19f).apply{setPadding(0,tvDp(6),0,0)})
+            addView(tvText(detail,12f,0xFFB0C6D9.toInt()).apply{maxLines=2;setPadding(0,tvDp(4),0,0)})
+            setOnFocusChangeListener{v,focus->
+                v.background=tvBg(if(focus)0xFF18628C.toInt() else 0xFF152A43.toInt())
+                v.scaleX=if(focus)1.04f else 1f
+                v.scaleY=if(focus)1.04f else 1f
+                v.elevation=tvDp(if(focus)10 else 2).toFloat()
+            }
+            setOnClickListener{action()}
+        }
+    private fun tvRow(vararg cards:LinearLayout)=LinearLayout(this).apply{
+        orientation=LinearLayout.HORIZONTAL
+        cards.forEach{addView(it,LinearLayout.LayoutParams(0,tvDp(146),1f).apply{marginEnd=tvDp(12)})}
+    }
+    private var homeScreenVisible=false
+    private fun showHome(){
         reset("My Home TV  •  HOME")
         homeScreenVisible=true
-        root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" LIVE CHANNELS"))
-        root.addView(button("▣  Movies"){mediaLibrary("movie")})
-        root.addView(button("▤  Series"){mediaSeries()})
-        root.addView(button("♫  Music"){mediaMusic()})
-        root.addView(button("◉  Web TV"){mediaLibrary("web")})
-        root.addView(button("▶  Continue watching movies & series"){continueMedia()})
-        root.addView(button("▶  Continue watching"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()})
-        root.addView(label("DISCOVER"))
-        root.addView(button("▦  All live channels"){allChannels()})
-        root.addView(button("★  My favorites"){favorites()})
-        root.addView(button("⌕  Search channels and programmes"){searchChannels()})
-        root.addView(button("◷  Recently watched"){recentlyWatched()})
-        root.addView(button("🙈  Hidden channels"){hiddenChannels()})
-        root.addView(button("▤  TV programme guide (EPG)"){showEpg()})
-        root.addView(button("☷  Browse by category"){showChannels()})
-        root.addView(label("LIBRARY & CONTROLS"))
-        root.addView(button("↻  Rebuild channel playlists"){refresh({showHome()},true)})
-        root.addView(button("＋  Manage playlists"){managePlaylists()})
-        root.addView(button("⚙  Player & TV settings"){settings()})
-        root.addView(button("▶  Return to channel"){resumeLast()})
+        root.removeAllViews()
+        root.setPadding(tvDp(27),tvDp(18),tvDp(27),tvDp(24))
+        val hero=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(tvDp(24),tvDp(20),tvDp(24),tvDp(20))
+            background=android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(0xFF16466C.toInt(),0xFF0A1728.toInt())
+            ).apply{cornerRadius=tvDp(19).toFloat()}
+            addView(tvText("⌂  MY HOME TV",32f,0xFF92E9FF.toInt()))
+            addView(tvText("Your entertainment. Your way.",16f,0xFFB7C8D8.toInt()))
+            addView(tvText(actualChannelCount().toString()+" LIVE CHANNELS   •   "+viewerId().uppercase(),14f,0xFF5FE6CC.toInt()))
+            addView(tvText("BY PPJSoft",12f,0xFFB7C8D8.toInt()).apply{gravity=Gravity.RIGHT})
+        }
+        root.addView(hero)
+        root.addView(tvSection("WATCH NOW"))
+        root.addView(tvRow(
+            tvCard("▶","Continue TV","Resume last channel"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()},
+            tvCard("▦","Live channels","Browse all channels"){allChannels()},
+            tvCard("★","Favorites","Your saved channels"){favorites()},
+            tvCard("▤","TV guide","Programmes and reminders"){showEpg()}
+        ))
+        root.addView(tvSection("EXPLORE"))
+        root.addView(tvRow(
+            tvCard("▣","Movies","Movie library"){mediaLibrary("movie")},
+            tvCard("▤","Series","Episodes and shows"){mediaSeries()},
+            tvCard("♫","Music","Music library"){mediaMusic()},
+            tvCard("◉","Web TV","Web channels"){mediaLibrary("web")}
+        ))
+        root.addView(tvSection("DISCOVER"))
+        root.addView(tvRow(
+            tvCard("⌕","Search","Find channels"){searchChannels()},
+            tvCard("☷","Categories","Channel groups"){showChannels()},
+            tvCard("◷","History","Recently watched"){recentlyWatched()},
+            tvCard("▶","Continue media","Resume films and series"){continueMedia()}
+        ))
+        root.addView(tvSection("TOOLS"))
+        root.addView(tvRow(
+            tvCard("＋","Playlists","Manage sources"){managePlaylists()},
+            tvCard("↻","Refresh","Rebuild playlists"){refresh({showHome()},true)},
+            tvCard("⚙","Settings","Personalize HomeTV"){settings()},
+            tvCard("🙈","Hidden","Hidden channels"){hiddenChannels()}
+        ))
+        root.post{(root.getChildAt(2) as? LinearLayout)?.getChildAt(0)?.requestFocus()}
     }
     private val importPlaylistRequest=7291
     private fun importLocalPlaylist(){
@@ -5074,11 +5149,18 @@ class MainActivity: Activity() {
             settingsScrollY=0
         }
         reset("HomeTV Settings")
+        root.removeAllViews()
+        root.addView(tvText("⚙  SETTINGS",30f,0xFF8CE8FF.toInt()).apply{
+            setPadding(tvDp(12),tvDp(15),0,tvDp(6))
+        })
+        root.addView(tvText("Personalize your TV experience",14f,0xFFB0C6D9.toInt()))
         settingsScreenVisible=true
+        root.addView(tvSection("ACCOUNT & LIBRARY"))
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
         root.addView(button("Export settings backup"){exportSettings()})
         root.addView(button("Restore settings backup"){importSettings()})
+        root.addView(tvSection("DIAGNOSTICS"))
         root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
         root.addView(button("Test network download speed"){runNetworkDiagnostics()})
         root.addView(button("Sleep timer"){sleepTimer()})
@@ -5087,6 +5169,7 @@ class MainActivity: Activity() {
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
         root.addView(button("EPG time correction"){configureEpgOffset()})
         root.addView(button("Viewer profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
+        root.addView(tvSection("PLAYBACK & DISPLAY"))
         root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
         root.addView(settingsToggle("Show EPG in channel info","show_channel_epg",true))
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
@@ -5104,6 +5187,7 @@ class MainActivity: Activity() {
         root.addView(settingsToggle("Auto-skip non-working channels","auto_skip_nonworking",true))
         root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
         root.addView(settingsToggle("Auto-reconnect streams","auto_reconnect",true))
+        root.addView(tvSection("PARENTAL CONTROLS"))
         root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
         root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
         root.addView(button("Set / change lock password"){
