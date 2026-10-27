@@ -160,6 +160,8 @@ class MainActivity: Activity() {
     }
     private fun startLicensedApp(){
         if(!licenseReady)return
+        // Discard cached-load results from an earlier activation/session.
+        val operation=licenseOperationGeneration
         showLicenseCheckingScreen()
         thread{
             val cached=try{cachedChannels()}catch(e:Exception){
@@ -167,7 +169,7 @@ class MainActivity: Activity() {
                 mutableListOf<Channel>()
             }
             runOnUiThread{
-                if(!licenseReady || isFinishing || isDestroyed)return@runOnUiThread
+                if(operation!=licenseOperationGeneration || !licenseReady || isFinishing || isDestroyed)return@runOnUiThread
                 channels=cached
                 checkEpgTune()
                 refresh({
@@ -186,6 +188,7 @@ class MainActivity: Activity() {
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
+        licenseOperationGeneration++
         // Invalidate a pending playlist refresh so it cannot publish old
         // results after authorization has been revoked or surrendered.
         refreshGeneration++
