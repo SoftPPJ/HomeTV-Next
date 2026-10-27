@@ -519,7 +519,8 @@ class MainActivity: Activity() {
         alternativeSessionKey=null
         val selected=channels[options[(current+1)%options.size]]
         prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
-            .putString("working_url_"+channelKey(selected),selected.url).apply()
+            .remove("working_url_"+channelKey(selected))
+            .remove("confirmed_engine_"+channelKey(selected)).apply()
         playIndex(options[(current+1)%options.size])
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
@@ -538,7 +539,8 @@ class MainActivity: Activity() {
                 alternativeSessionKey=null
                 val selected=channels[target]
                 prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
-                    .putString("working_url_"+channelKey(selected),selected.url).apply()
+                    .remove("working_url_"+channelKey(selected))
+                    .remove("confirmed_engine_"+channelKey(selected)).apply()
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
