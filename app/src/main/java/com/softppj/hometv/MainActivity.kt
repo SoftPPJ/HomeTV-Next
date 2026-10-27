@@ -300,7 +300,7 @@ class MainActivity: Activity() {
     }
     // Parallel, bounded URL reachability checks; no extra video decoders or player switches.
     private fun checkChannelAlternativesInParallel(index:Int){
-        val candidates=alternateIndices(index).asSequence().filter{candidate->
+        val candidates=alternateIndices(index).asSequence().distinctBy{channels[it].url}.filter{candidate->
             val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
             (url.startsWith("http://") || url.startsWith("https://")) &&
                 !url.contains("youtube.com") && !url.contains("youtu.be") &&
@@ -3149,22 +3149,29 @@ class MainActivity: Activity() {
         // briefly, but never force play(), reload the page or alter IPTV engines.
         val generation=playbackGeneration
         val delays=longArrayOf(600L,1400L,2700L,4500L,7000L)
-        delays.forEach{delay->
-            handler.postDelayed({
-                if(web===viewer && active==channelIndex && videoScreen===screen && playbackGeneration==generation){
-                    viewer.evaluateJavascript("""(function(){
-                        var v=document.querySelector('video');
-                        if(!v || v.paused)return 'waiting';
-                        try{
-                            v.defaultMuted=false;v.muted=false;v.volume=1;
-                            var yt=document.getElementById('movie_player');
-                            if(yt && typeof yt.unMute==='function')yt.unMute();
-                        }catch(e){}
-                        return v.muted?'blocked':'unmuted';
-                    })();""",null)
-                }
-            },delay)
+        youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
+        // One cancellable retry chain, rather than stacking retries on each page load.
+        var attempt=0
+        val retry=object:Runnable{
+            override fun run(){
+                if(web!==viewer || active!=channelIndex || videoScreen!==screen || playbackGeneration!=generation)return
+                viewer.evaluateJavascript("""(function(){
+                    var v=document.querySelector('video');
+                    if(!v || v.paused)return 'waiting';
+                    try{
+                        v.defaultMuted=false;v.muted=false;v.volume=1;
+                        var yt=document.getElementById('movie_player');
+                        if(yt && typeof yt.unMute==='function')yt.unMute();
+                    }catch(e){}
+                    return v.muted?'blocked':'unmuted';
+                })();""",null)
+                attempt++
+                if(attempt<delays.size)handler.postDelayed(this,delays[attempt]-delays[attempt-1])
+                else youtubeUnmuteTask=null
+            }
         }
+        youtubeUnmuteTask=retry
+        handler.postDelayed(retry,delays[0])
     }
     private fun clockSettings(){
         val choices=arrayOf(
