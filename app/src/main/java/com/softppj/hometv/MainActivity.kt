@@ -518,9 +518,11 @@ class MainActivity: Activity() {
         alternativeAttempted.clear()
         alternativeSessionKey=null
         val selected=channels[options[(current+1)%options.size]]
-        prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
-            .remove("working_url_"+channelKey(selected))
-            .remove("confirmed_engine_"+channelKey(selected)).apply()
+        val selectedKey=channelKey(selected)
+        val editor=prefs.edit().putString("manual_url_"+selectedKey,selected.url)
+        if(prefs.getString("working_url_"+selectedKey,null)!=selected.url)
+            editor.remove("working_url_"+selectedKey).remove("confirmed_engine_"+selectedKey)
+        editor.apply()
         playIndex(options[(current+1)%options.size])
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
@@ -530,17 +532,22 @@ class MainActivity: Activity() {
             Toast.makeText(this,"No alternative stream for this channel",Toast.LENGTH_SHORT).show()
             return
         }
+        val selectionGeneration=playbackGeneration
+        val selectionScreen=videoScreen
         val dialog=AlertDialog.Builder(this).setTitle(channels[index].name+" — Alternative streams")
             .setItems(options.mapIndexed{n,i->
                 "Stream option "+(n+1)+(if(i==active)"  •  Playing" else "")
             }.toTypedArray()){_,choice->
+                if(active!=index || videoScreen!==selectionScreen || playbackGeneration!=selectionGeneration)return@setItems
                 val target=options[choice]
                 alternativeAttempted.clear()
                 alternativeSessionKey=null
                 val selected=channels[target]
-                prefs.edit().putString("manual_url_"+channelKey(selected),selected.url)
-                    .remove("working_url_"+channelKey(selected))
-                    .remove("confirmed_engine_"+channelKey(selected)).apply()
+                val selectedKey=channelKey(selected)
+                val editor=prefs.edit().putString("manual_url_"+selectedKey,selected.url)
+                if(prefs.getString("working_url_"+selectedKey,null)!=selected.url)
+                    editor.remove("working_url_"+selectedKey).remove("confirmed_engine_"+selectedKey)
+                editor.apply()
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
@@ -704,7 +711,9 @@ class MainActivity: Activity() {
             // Only a real player-ready/playing event records a successful combination.
             val tried=initialTried.getOrPut(key){mutableSetOf()}
             tried.add(c.url+"|"+current)
-            val options=alternateIndices(index).flatMap{i->
+            // Exhaust both engines for the selected source before probing
+            // unrelated URLs. Keep a manually selected source first.
+            val options=(listOf(index)+alternateIndices(index).filter{it!=index}).flatMap{i->
                 listOf(Pair(i,"Media3"),Pair(i,"LibVLC"))
             }
             val next=options.firstOrNull{(i,engine)->
