@@ -1756,6 +1756,7 @@ class MainActivity: Activity() {
     private var navigatingBack=false
     private var currentMenu:(()->Unit)?=null
     private fun reset(title:String) {
+        homeScreenVisible=false
         val destination:(()->Unit)?=when{
             title.startsWith("My Home TV  •")->({showHome()})
             title=="HomeTV Settings"->({settings()})
@@ -2005,8 +2006,10 @@ class MainActivity: Activity() {
         dialog.show()
     }
 
+    private var homeScreenVisible=false
     private fun showHome() {
         reset("My Home TV  •  HOME")
+        homeScreenVisible=true
         root.addView(label("YOUR TELEVISION  |  "+actualChannelCount()+" LIVE CHANNELS"))
         root.addView(button("▣  Movies"){mediaLibrary("movie")})
         root.addView(button("▤  Series"){mediaSeries()})
@@ -2861,13 +2864,27 @@ class MainActivity: Activity() {
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
+    // Explicitly classify .mpd URLs, including .isml/.mpd and query strings.
+    // HLS and ordinary streams keep their existing Media3 handling.
+    private fun mediaItemForStream(url:String):MediaItem {
+        val path=try{Uri.parse(url).path.orEmpty().lowercase(java.util.Locale.ROOT)}
+            catch(_:Exception){url.substringBefore('?').lowercase(java.util.Locale.ROOT)}
+        return if(path.endsWith(".mpd"))
+            MediaItem.Builder().setUri(url)
+                .setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MPD).build()
+        else MediaItem.fromUri(url)
+    }
     private fun confirmExit(){
-        val dialog=AlertDialog.Builder(this).setTitle("Exit playback?")
-            .setMessage("Stop the current video and return to Home?")
-            .setPositiveButton("Yes"){_,_->stopPlayback();showHome()}
-            .setNegativeButton("No",null).create()
+        val dialog=AlertDialog.Builder(this).setTitle("Exit HomeTV?")
+            .setMessage("Stop playback and close HomeTV?")
+            .setPositiveButton("Exit"){_,_->
+                // Exit the task instead of returning to the Home menu.
+                stopPlayback()
+                finishAffinity()
+            }
+            .setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
-        // Android TV: initial OK confirms Yes; Back dismisses and resumes playback.
+        // Android TV: initial OK confirms Exit; Back dismisses the dialog.
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
     }
     private fun audioTracks(){
@@ -3360,7 +3377,7 @@ class MainActivity: Activity() {
                     resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
                 panel.addView(view,0,FrameLayout.LayoutParams(-1,-1))
-                exo.setMediaItem(MediaItem.fromUri(c.url))
+                exo.setMediaItem(mediaItemForStream(c.url))
                 exo.prepare()
                 if(c.mediaType in setOf("movie","series","music")){
                     val resume=mediaResumeSeconds(c)
@@ -4646,7 +4663,7 @@ class MainActivity: Activity() {
                 }
             })
             try{
-                exo.setMediaItem(MediaItem.fromUri(c.url))
+                exo.setMediaItem(mediaItemForStream(c.url))
                 exo.prepare()
                 exo.play()
             }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true);handleEngineFailure(index,screen)}
@@ -5256,7 +5273,7 @@ class MainActivity: Activity() {
         return super.dispatchKeyEvent(event)
     }
     override fun onBackPressed(){
-        if(!licenseReady){showHome();return}
+        if(!licenseReady){confirmExit();return}
         // Navigate back to the screen that opened Settings, never exit here.
         if(settingsScreenVisible){
             val previous=if(navigationHistory.isNotEmpty())navigationHistory.removeAt(navigationHistory.lastIndex) else ({showHome()})
@@ -5276,8 +5293,8 @@ class MainActivity: Activity() {
             }
             confirmExit()
         }else{
-            // Non-playback menus return to Home. Exit is offered only in playback.
-            showHome()
+            // BACK from Home offers exit; nested menus still return Home.
+            if(homeScreenVisible)confirmExit() else showHome()
         }
     }
     private fun stopPlayback(){
