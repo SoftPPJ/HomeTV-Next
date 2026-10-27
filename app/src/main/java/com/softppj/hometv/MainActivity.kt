@@ -7,6 +7,7 @@ import android.view.*
 import android.widget.*
 import android.webkit.*
 import android.net.Uri
+import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media as VlcMedia
 import org.videolan.libvlc.MediaPlayer as VlcPlayer
@@ -264,6 +265,7 @@ class MainActivity: Activity() {
     }
 
     private var player:ExoPlayer?=null
+    private var ijkPlayer:IjkMediaPlayer?=null
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
@@ -371,7 +373,7 @@ class MainActivity: Activity() {
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
         // Record the player that actually reached playback, not a pending fallback hint.
-        val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        val engine=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
         // Keep the confirmed engine paired with the URL that actually played.
         // A manually pinned URL must not be silently replaced by a tested alternative.
         val confirmedKey=channelKey(c)
@@ -719,7 +721,7 @@ class MainActivity: Activity() {
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val key=channelKey(c)
-        val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
+        val current=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
         // Manual engine preference selects the first attempt, not an infinite
         // retry of the same failed engine. The other engine remains a fallback.
         // A confirmed engine is only proven for its confirmed URL, not every
@@ -737,7 +739,7 @@ class MainActivity: Activity() {
             // materializing two Pair objects per source on every failure.
             val candidates=sequenceOf(index)+alternateIndices(index).asSequence().filter{it!=index}
             val next=candidates.flatMap{i->
-                sequenceOf(Pair(i,"Media3"),Pair(i,"LibVLC"))
+                sequenceOf(Pair(i,"Media3"),Pair(i,"LibVLC"),Pair(i,"IJKPlayer"))
             }.firstOrNull{(i,engine)->
                 !tried.contains(channels[i].url+"|"+engine)
             }
@@ -1594,27 +1596,28 @@ class MainActivity: Activity() {
     private fun engineFor(c:Channel):String{
         fallbackEngineOverride?.let{return it}
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
-            if(it=="Media3" || it=="LibVLC")return it
+            if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
         }
         // Confirmation belongs to a specific URL, not every source of this channel.
         if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
             prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
-                if(it=="Media3" || it=="LibVLC")return it
+                if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
             }
         }
         val universal=prefs.getString("engine","Auto") ?: "Auto"
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
-        if(universal=="Media3" || universal=="LibVLC")return universal
+        if(universal=="Media3" || universal=="LibVLC" || universal=="IJKPlayer")return universal
         return "Media3"
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
         val universal=prefs.getString("engine","Media3") ?: "Media3"
-        val choices=arrayOf("Auto (Universal: "+universal+")","Media3","LibVLC")
+        val choices=arrayOf("Auto (Universal: "+universal+")","Media3","LibVLC","IJKPlayer")
         val selected=when(prefs.getString("manual_engine_"+channelKey(c),null)){
             "Media3"->1
             "LibVLC"->2
+            "IJKPlayer"->3
             else->0
         }
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
@@ -4504,6 +4507,8 @@ class MainActivity: Activity() {
                     viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("t",seconds.toString()+"s").appendQueryParameter("autoplay","1").build().toString())
                 }
             }
+        }else if(engineFor(c)=="IJKPlayer"){
+            startIjk(c,index,screen)
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
@@ -4608,6 +4613,60 @@ class MainActivity: Activity() {
             retryTask=task
             handler.postDelayed(task,2000L*retryCount)
         }else showBanner("Stream stopped. Try another source or channel.",true)
+    }
+    private fun startIjk(c:Channel,index:Int,screen:FrameLayout){
+        try{
+            val ijk=IjkMediaPlayer()
+            ijkPlayer=ijk
+            val surface=SurfaceView(this)
+            screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
+            ijk.setDisplay(surface.holder)
+            ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",1L)
+            ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",10000000L)
+            var started=false
+            var failed=false
+            val watchdog=Runnable{
+                if(!started && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
+                    failed=true
+                    handleEngineFailure(index,screen)
+                }
+            }
+            ijk.setOnPreparedListener{
+                handler.post{
+                    if(ijkPlayer===ijk && active==index && videoScreen===screen){
+                        started=true
+                        handler.removeCallbacks(watchdog)
+                        ijk.start()
+                        rememberWorking(c)
+                        autoBufferHealthy()
+                    }
+                }
+            }
+            ijk.setOnErrorListener{_,_,_->
+                handler.post{
+                    if(ijkPlayer===ijk && active==index && videoScreen===screen && !failed){
+                        failed=true
+                        handler.removeCallbacks(watchdog)
+                        handleEngineFailure(index,screen)
+                    }
+                }
+                true
+            }
+            ijk.setOnCompletionListener{
+                handler.post{
+                    if(ijkPlayer===ijk && active==index && videoScreen===screen && !failed){
+                        failed=true
+                        handleEngineFailure(index,screen)
+                    }
+                }
+            }
+            ijk.setDataSource(this,Uri.parse(c.url),c.headers)
+            ijk.prepareAsync()
+            handler.postDelayed(watchdog,15000L)
+        }catch(e:Exception){
+            android.util.Log.w("HomeTV","IJKPlayer startup failed",e)
+            handleEngineFailure(index,screen)
+        }
     }
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
@@ -5163,6 +5222,7 @@ class MainActivity: Activity() {
         qualityUpgradeTask?.let{handler.removeCallbacks(it)}
         qualityUpgradeTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
+        ijkPlayer?.let{try{it.stop();it.release()}catch(_:Exception){}};ijkPlayer=null
         player?.release();player=null
         vlcPlayer?.let{v->
             try{v.stop();v.vlcVout.detachViews();v.release()}catch(_:Exception){}
