@@ -300,17 +300,16 @@ class MainActivity: Activity() {
     }
     // Parallel, bounded URL reachability checks; no extra video decoders or player switches.
     private fun checkChannelAlternativesInParallel(index:Int){
-        val candidates=alternateIndices(index).filter{candidate->
+        val candidates=alternateIndices(index).asSequence().filter{candidate->
             val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
             (url.startsWith("http://") || url.startsWith("https://")) &&
                 !url.contains("youtube.com") && !url.contains("youtu.be") &&
                 !prefs.getBoolean("libvlc_only_"+hash(channels[candidate].url),false)
-        }
+        }.take(12).toList()
         if(candidates.size<2)return
         val generation=playbackGeneration
-        // Limit per-channel background probing on huge multi-source playlists.
-        // The selected source remains the foreground playback priority.
-        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates.take(12))
+        // Bound both candidate discovery and network checks on huge playlists.
+        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates)
         repeat(minOf(3,queue.size)){
             thread(name="HomeTV-channel-url-check"){
                 while(true){
@@ -766,6 +765,12 @@ class MainActivity: Activity() {
         fallbackEngineOverride=current
         val count=(recoveryAttempts[c.url] ?: 0)+1
         recoveryAttempts[c.url]=count
+        // A broken confirmed stream must not reconnect forever. Preserve its
+        // saved preference and allow the viewer to select another source.
+        if(count>6){
+            showBanner("Stream unavailable after 6 reconnects • Select another source",true)
+            return true
+        }
         if(count==1 || count%5==0)showBanner("Reconnecting "+c.name+" with "+current)
         val recoveryGeneration=playbackGeneration
         val task=Runnable{
@@ -4401,7 +4406,8 @@ class MainActivity: Activity() {
                               'ytm-topbar-menu-button-renderer,ytm-topbar-logo-renderer,'+
                               'ytm-companion-slot-renderer,.ytm-open-app-button,.ytp-open-app-button,'+
                               '.ytp-watch-later-button,.ytp-share-button{display:none!important;pointer-events:none!important}'+
-                              '.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}';
+                              '.ytp-mute-button{display:inline-flex!important;visibility:visible!important;pointer-events:auto!important}'+
+                              '.ytp-chrome-top .ytp-title-container,.ytp-chrome-top .ytp-title-text{display:none!important}';
                             (document.head||document.documentElement).appendChild(style);
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
