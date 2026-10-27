@@ -50,3 +50,9 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 - Commit 421c0d2: changed development application ID to `com.softppj.myhometv.v6`, version code to 6, version name to `6.0.0-dev`, and intended APK filename to `HomeTV-V6.apk`.
 - This is a source configuration change only; Gradle packaging, install compatibility, licensing migration, and TV runtime remain unverified.
 - Next release-critical tasks: inspect playback code, verify Media3/LibVLC fallback, evaluate IJKPlayer without bundling prematurely, and run APK packaging plus device regressions.
+
+## V6 implementation and build update — 27 October 2026
+- Commit 420f255: guard queued alternative-stream switches with playback session generation and screen identity.
+- Commit b020da5: V6 development push workflow now compiles Kotlin, assembles a debug test APK, and uploads a 14-day HomeTV-V6-debug-test artifact. A successful build has not yet been confirmed.
+- Do not mark any of the 20 release gates verified on source changes alone. A test APK is not the final release.
+- Required next steps: inspect current Actions result and resolve errors; complete feature-by-feature regression testing (playback, YouTube, large playlists, controls, EPG, PIN/licensing, profiles, diagnostics), test Android TV devices, and decide whether IJKPlayer is warranted.
