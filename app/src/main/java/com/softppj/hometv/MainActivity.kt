@@ -1626,23 +1626,33 @@ class MainActivity: Activity() {
     // Android HOME / app switching: never leave a video or WebView playing off-screen.
     // Keep the selected URL and VOD resume position; only restore a session
     // that this Activity itself suspended, after licensing is still valid.
+    // Preserve the exact stream variant when different channels share a URL.
+    // The suspended identity is transient: no secret or player object is persisted.
     private var suspendedPlaybackUrl:String?=null
+    private var suspendedPlaybackIdentity:String?=null
     override fun onResume(){
         super.onResume()
         appInForeground=true
         armEpgTune()
         val url=suspendedPlaybackUrl
+        val identity=suspendedPlaybackIdentity
         suspendedPlaybackUrl=null
+        suspendedPlaybackIdentity=null
         if(url!=null && licenseReady && channels.isNotEmpty()){
-            val index=channels.indexOfFirst{it.url==url}
-            if(index>=0 && !isLocked(channels[index]))playIndex(index)
-            else showHome()
+            val index=channels.indexOfFirst{it.url==url && id(it)==identity}
+                .takeIf{it>=0} ?:channels.indexOfFirst{it.url==url}
+            if(index>=0){
+                // Do not bypass parental controls on resume.
+                playIndex(index)
+            }else showHome()
         }
     }
     override fun onPause(){
         appInForeground=false
         if(active in channels.indices && !isFinishing){
-            suspendedPlaybackUrl=channels[active].url
+            val current=channels[active]
+            suspendedPlaybackUrl=current.url
+            suspendedPlaybackIdentity=id(current)
             // stopPlayback saves VOD progress and releases Media3, LibVLC and WebView.
             stopPlayback()
         }
