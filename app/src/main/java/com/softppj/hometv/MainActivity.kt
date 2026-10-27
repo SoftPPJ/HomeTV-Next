@@ -224,6 +224,11 @@ class MainActivity: Activity() {
                     activationResult=result
                     token=result.getString("token").takeIf{it.isNotBlank()}
                     if(token==null)throw IllegalStateException("Activation returned an empty token")
+                    // Activation alone must not bypass the normal server-side
+                    // device/token validation required at every app startup.
+                    val verified=licenseRequest("/validate",JSONObject()
+                        .put("device",installationId()).put("token",token))
+                    activationResult=verified
                     null
                 }catch(e:Exception){e.message?:"Activation failed"}
                 runOnUiThread{
@@ -941,11 +946,13 @@ class MainActivity: Activity() {
         val now=System.currentTimeMillis()
         val keep=JSONArray()
         val due=mutableListOf<JSONObject>()
+        val canDeliver=licenseReady && appInForeground && !isFinishing && !isDestroyed
         for(i in 0 until saved.length()){
             val entry=saved.optJSONObject(i) ?:continue
             val start=entry.optLong("start")
-            if(start<=now && start>=now-120000L)due.add(entry)
-            else if(start>now)keep.put(entry)
+            if(start<=now && start>=now-120000L){
+                if(canDeliver)due.add(entry) else keep.put(entry)
+            }else if(start>now)keep.put(entry)
         }
         prefs.edit().putString("epg_tune_schedules",keep.toString()).apply()
         // If several programmes begin together, use the most recently added
@@ -1693,7 +1700,7 @@ class MainActivity: Activity() {
     override fun onResume(){
         super.onResume()
         appInForeground=true
-        armEpgTune()
+        if(licenseReady)checkEpgTune() else armEpgTune()
         val url=suspendedPlaybackUrl
         val identity=suspendedPlaybackIdentity
         suspendedPlaybackUrl=null
