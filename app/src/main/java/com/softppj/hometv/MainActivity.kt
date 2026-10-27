@@ -4318,7 +4318,7 @@ class MainActivity: Activity() {
         try {
           if(!document.getElementById('myhometv-web-style')){
             var style=document.createElement('style');style.id='myhometv-web-style';
-            style.textContent='html,body{background:#000!important;margin:0!important}video{object-fit:contain!important;max-width:100vw!important;max-height:100vh!important}';
+            style.textContent='html,body{background:#000!important;margin:0!important;overflow:hidden!important}video{object-fit:contain!important;max-width:100vw!important;max-height:100vh!important}';
             document.head.appendChild(style);
           }
           var videos=[].slice.call(document.querySelectorAll('video'));
@@ -4336,7 +4336,7 @@ class MainActivity: Activity() {
             if(start){window.__myHomeTvAutoClicked=true;try{start.click()}catch(e){}}
           }
           if(player){
-            player.controls=true;player.muted=false;player.volume=1;
+            player.controls=false;player.muted=false;player.volume=1;
             player.setAttribute('playsinline','true');
             var play=player.play();if(play&&play.catch)play.catch(function(){});
           }
@@ -4632,6 +4632,10 @@ class MainActivity: Activity() {
                     }
                 }
                 viewer.setOnKeyListener{_,key,event->
+                    if(key==KeyEvent.KEYCODE_BACK){
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0)onBackPressed()
+                        return@setOnKeyListener true
+                    }
                     if(event.action==KeyEvent.ACTION_DOWN && (key==KeyEvent.KEYCODE_MENU ||
                         key==KeyEvent.KEYCODE_INFO)){
                         inspectWebTv(viewer,index,screen,true);true
@@ -5276,6 +5280,11 @@ class MainActivity: Activity() {
         // Give a visible AlertDialog its own remote OK and directional navigation.
         // Avoid processing dialog keys as channel commands in the Activity.
         if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
+        // Fullscreen WebView/HTML5 video can swallow the remote BACK key.
+        if(active>=0 && event.keyCode==KeyEvent.KEYCODE_BACK){
+            if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0)onBackPressed()
+            return true
+        }
         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount>0 &&
             (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
              event.keyCode==KeyEvent.KEYCODE_ENTER ||
@@ -5375,7 +5384,11 @@ class MainActivity: Activity() {
                 screen.requestFocus()
                 return
             }
-            confirmExit()
+            // BACK from playback returns to the selection screen.
+            // The explicit Exit action remains available from Home.
+            val mediaType=channels.getOrNull(active)?.mediaType
+            if(mediaType in setOf("movie","series","music","web"))mediaLibrary(mediaType!!)
+            else showHome()
         }else{
             // BACK from Home offers exit; nested menus still return Home.
             if(homeScreenVisible)confirmExit() else showHome()
