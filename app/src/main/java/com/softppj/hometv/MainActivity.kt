@@ -41,6 +41,7 @@ class MainActivity: Activity() {
     private val licensedPlaylist="hometv://licensed-playlist"
     private var licenseReady=false
     private var licenseChecking=false
+    private var licenseOperationGeneration=0
     private fun saveLicenseExpiry(response:JSONObject){
         response.optString("expiry","").takeIf{it.isNotBlank()}?.let{prefs.edit().putString("license_expiry",it).apply()}
     }
@@ -119,6 +120,7 @@ class MainActivity: Activity() {
         // play cached streams before this session's server validation succeeds.
         licenseReady=false
         licenseChecking=true
+        val operation=++licenseOperationGeneration
         showLicenseCheckingScreen()
         thread{
             val result=try{
@@ -127,8 +129,8 @@ class MainActivity: Activity() {
                 null
             }catch(e:Exception){e.message?:"License validation failed"}
             runOnUiThread{
+                if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                 licenseChecking=false
-                if(isFinishing||isDestroyed)return@runOnUiThread
                 if(result==null){
                     prefs.edit().putBoolean("license_last_verified",true)
                         .putBoolean("license_validation_blocked",false).apply()
@@ -189,6 +191,7 @@ class MainActivity: Activity() {
             val value=key.text.toString().trim().uppercase(java.util.Locale.ROOT)
             if(value.isBlank()){key.error="Enter a license key";return@button}
             key.isEnabled=false
+            val operation=++licenseOperationGeneration
             reset("HomeTV • Activating license")
             thread{
                 var token:String?=null
@@ -199,7 +202,7 @@ class MainActivity: Activity() {
                     token=result.getString("token");null
                 }catch(e:Exception){e.message?:"Activation failed"}
                 runOnUiThread{
-                    if(isFinishing||isDestroyed)return@runOnUiThread
+                    if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                     if(token!=null){
                         prefs.edit().putString("license_token",token).putBoolean("license_last_verified",true).putBoolean("license_validation_blocked",false).apply()
                         activationResult?.let{saveLicenseExpiry(it)}
@@ -215,14 +218,20 @@ class MainActivity: Activity() {
         AlertDialog.Builder(this).setTitle("Surrender License")
             .setMessage("Release this device from its license key? You will need a key to activate again.")
             .setPositiveButton("Surrender"){_,_->
+                val operation=++licenseOperationGeneration
+                licenseReady=false
+                stopPlayback()
                 reset("HomeTV • Releasing license")
                 thread{
                     val error=try{licenseRequest("/surrender",licensePayload());null}catch(e:Exception){e.message?:"Unable to release license"}
                     runOnUiThread{
+                        if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                         if(error==null){
                             prefs.edit().remove("license_token").remove("license_expiry").putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
+                            // Server did not confirm surrender: retain the token,
+                            // but require fresh validation before playback resumes.
                             showLicenseScreen("Could not surrender: "+error)
                         }
                     }
