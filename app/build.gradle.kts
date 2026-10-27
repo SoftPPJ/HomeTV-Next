@@ -24,6 +24,7 @@ android {
 dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     // FFmpeg software audio decoder. Media3 hardware/platform decoders remain preferred.
     // Jellyfin 1.5.0+1 matches the existing Media3 1.5.x API; GPLv3 applies.
