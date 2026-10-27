@@ -354,8 +354,15 @@ class MainActivity: Activity() {
         unavailableChannels.remove(channelKey(c))
         // Record the player that actually reached playback, not a pending fallback hint.
         val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
-        if(!prefs.contains("confirmed_engine_"+channelKey(c)) && testingAlternativeKey!=channelKey(c)){
-            prefs.edit().putString("confirmed_engine_"+channelKey(c),engine).apply()
+        // Keep the confirmed engine paired with the URL that actually played.
+        // A manually pinned URL must not be silently replaced by a tested alternative.
+        val confirmedKey=channelKey(c)
+        val pinnedUrl=prefs.getString("manual_url_"+confirmedKey,null)
+        if(testingAlternativeKey!=confirmedKey && (pinnedUrl==null || pinnedUrl==c.url)){
+            prefs.edit()
+                .putString("confirmed_engine_"+confirmedKey,engine)
+                .putString("working_url_"+confirmedKey,c.url)
+                .apply()
         }
         initialTried.remove(channelKey(c))
         if(engine=="Media3"){
@@ -370,9 +377,6 @@ class MainActivity: Activity() {
         // Preserve a user's explicit stream choice until they change it.
         // Automatically confirmed alternatives remain usable as fallbacks,
         // but must not silently replace the manual preference.
-        val manual=prefs.getString("manual_url_"+channelKey(c),null)
-        if(manual==null || manual==c.url)
-            prefs.edit().putString("working_url_"+channelKey(c),c.url).apply()
         if(testingAlternativeKey==channelKey(c))testingAlternativeKey=null
     }
     private var youtubeUnmuteTask:Runnable?=null
@@ -1547,8 +1551,11 @@ class MainActivity: Activity() {
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
             if(it=="Media3" || it=="LibVLC")return it
         }
-        prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
-            if(it=="Media3" || it=="LibVLC")return it
+        // Confirmation belongs to a specific URL, not every source of this channel.
+        if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
+            prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
+                if(it=="Media3" || it=="LibVLC")return it
+            }
         }
         val universal=prefs.getString("engine","Auto") ?: "Auto"
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
