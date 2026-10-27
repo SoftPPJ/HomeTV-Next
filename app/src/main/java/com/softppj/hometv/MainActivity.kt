@@ -1623,14 +1623,29 @@ class MainActivity: Activity() {
         showSideDialog(dialog)
     }
 
+    // Android HOME / app switching: never leave a video or WebView playing off-screen.
+    // Keep the selected URL and VOD resume position; only restore a session
+    // that this Activity itself suspended, after licensing is still valid.
+    private var suspendedPlaybackUrl:String?=null
     override fun onResume(){
         super.onResume()
         appInForeground=true
-        // Re-arm persisted programme selections after an Activity restart.
         armEpgTune()
+        val url=suspendedPlaybackUrl
+        suspendedPlaybackUrl=null
+        if(url!=null && licenseReady && channels.isNotEmpty()){
+            val index=channels.indexOfFirst{it.url==url}
+            if(index>=0 && !isLocked(channels[index]))playIndex(index)
+            else showHome()
+        }
     }
     override fun onPause(){
         appInForeground=false
+        if(active in channels.indices && !isFinishing){
+            suspendedPlaybackUrl=channels[active].url
+            // stopPlayback saves VOD progress and releases Media3, LibVLC and WebView.
+            stopPlayback()
+        }
         super.onPause()
     }
     override fun onCreate(savedInstanceState:Bundle?) {
@@ -2757,9 +2772,9 @@ class MainActivity: Activity() {
         }
     }
     private fun confirmExit(){
-        val dialog=AlertDialog.Builder(this).setTitle("Exit HomeTV?")
-            .setMessage("Do you want to exit the application?")
-            .setPositiveButton("Yes"){_,_->stopPlayback();finishAffinity()}
+        val dialog=AlertDialog.Builder(this).setTitle("Exit playback?")
+            .setMessage("Stop the current video and return to Home?")
+            .setPositiveButton("Yes"){_,_->stopPlayback();showHome()}
             .setNegativeButton("No",null).create()
         showSideDialog(dialog)
         // Android TV: initial OK confirms Yes; Back dismisses and resumes playback.
@@ -4968,7 +4983,7 @@ class MainActivity: Activity() {
                             KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE->{
                                 youtubeRemoteAction("toggle");return true
                             }
-                            KeyEvent.KEYCODE_BACK->{showHome();return true}
+                            KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
                         }
                     }
                     when(event.keyCode){
@@ -4980,7 +4995,7 @@ class MainActivity: Activity() {
                             vlcPlayer?.let{if(it.isPlaying)it.pause() else it.play()}
                             return true
                         }
-                        KeyEvent.KEYCODE_BACK->{showHome();return true}
+                        KeyEvent.KEYCODE_BACK->{onBackPressed();return true}
                     }
                 }
                 when(event.keyCode){
