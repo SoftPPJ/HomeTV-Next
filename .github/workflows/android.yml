@@ -1,4 +1,4 @@
-name: HomeTV V6 source compilation (no APK release)
+name: HomeTV V6 debug test APK
 
 on:
   push:
@@ -29,5 +29,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Compile Kotlin sources only (do not package or upload an APK)
+      - name: Compile V6 Kotlin sources
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
+      - name: Package V6 debug test APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload V6 debug test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-V6-debug-test
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
