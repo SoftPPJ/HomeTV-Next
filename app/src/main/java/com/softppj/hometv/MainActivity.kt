@@ -176,6 +176,7 @@ class MainActivity: Activity() {
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
+        stopPlayback()
         reset("HomeTV • License activation")
         root.addView(label("Enter your HomeTV License Key"))
         if(!error.isNullOrBlank())root.addView(label(error))
