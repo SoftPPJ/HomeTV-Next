@@ -640,6 +640,7 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         if(!failureSearches.add(key))return
+        val searchGeneration=playbackGeneration
         val candidates=alternateIndices(index).filter{it!=index}.take(12)
         if(candidates.isEmpty()){
             failureSearches.remove(key)
@@ -666,13 +667,13 @@ class MainActivity: Activity() {
             }
             handler.post{
                 failureSearches.remove(key)
-                if(active!=index || videoScreen!==screen)return@post
+                if(active!=index || videoScreen!==screen || playbackGeneration!=searchGeneration)return@post
                 val alternative=found
                 if(alternative!=null){
                     AlertDialog.Builder(this).setTitle("Alternative source available")
                         .setMessage("A different URL for "+c.name+" responded successfully. This does not guarantee playback. Test it and save it only if it plays?")
                         .setPositiveButton("Test alternative"){_,_->
-                            if(active==index && videoScreen===screen){
+                            if(active==index && videoScreen===screen && playbackGeneration==searchGeneration){
                                 // Test without overwriting the confirmed source.
                                 testingAlternativeKey=key
                                 fallbackEngineOverride=null
