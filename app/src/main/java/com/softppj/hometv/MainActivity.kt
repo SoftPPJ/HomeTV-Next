@@ -178,6 +178,9 @@ class MainActivity: Activity() {
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
+        // Invalidate a pending playlist refresh so it cannot publish old
+        // results after authorization has been revoked or surrendered.
+        refreshGeneration++
         stopPlayback()
         reset("HomeTV • License activation")
         root.addView(label("Enter your HomeTV License Key"))
@@ -2243,10 +2246,12 @@ class MainActivity: Activity() {
         if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
         val playingBeforeRefresh=channels.getOrNull(active)
         val playingUrlBeforeRefresh=playingBeforeRefresh?.url
-        // Preserve each existing source when a network rebuild and its cache both fail.
-        val previousBySource=channels.groupBy{it.source}
+        // Take an immutable reference snapshot; grouping thousands of channels
+        // on the TV UI thread causes visible freezes during refresh.
+        val previousChannels=channels.toList()
         val generation=++refreshGeneration
         thread(name="HomeTV-playlist-refresh"){
+            val previousBySource=previousChannels.groupBy{it.source}
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
             // A playlist may contain thousands of channels. Do not create a
