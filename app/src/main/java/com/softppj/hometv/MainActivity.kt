@@ -282,6 +282,7 @@ class MainActivity: Activity() {
     private var channelIndexOwner:MutableList<Channel>?=null
     private var channelIndexSize=-1
     private var channelRepresentatives=emptyList<Int>()
+    private var liveChannelRepresentatives=emptyList<Int>()
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
     private fun channelKey(c:Channel)=c.mediaType+"|"+c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
@@ -292,6 +293,7 @@ class MainActivity: Activity() {
         channels.forEachIndexed{i,c->groups.getOrPut(channelKey(c)){mutableListOf()}.add(i)}
         channelByKey=groups
         channelRepresentatives=groups.values.map{it.first()}
+        liveChannelRepresentatives=channelRepresentatives.filter{channels[it].mediaType=="live"}
         channelPosition=groups.keys.withIndex().associate{it.value to it.index+1}
         channelIndexOwner=channels
         channelIndexSize=channels.size
@@ -769,7 +771,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{lockIds.contains(id(channels[it]))}
     }
-    private fun channelNumbers():List<Int>{ensureChannelIndex();return channelRepresentatives.filter{channels[it].mediaType=="live"}}
+    private fun channelNumbers():List<Int>{ensureChannelIndex();return liveChannelRepresentatives}
     // Count logical channels, not multiple stream URLs belonging to the same channel.
     private fun actualChannelCount():Int=channelNumbers().size
     private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
@@ -3107,27 +3109,32 @@ class MainActivity: Activity() {
                 else->"p.seekTo(p.getCurrentTime()+10,true);"
             }+"return true;}return false;})()",null)
     }
+    private var youtubeProgressTask:Runnable?=null
     private fun beginYoutubeProgressTracking(viewer:WebView,channelIndex:Int,screen:FrameLayout){
+        youtubeProgressTask?.let{handler.removeCallbacks(it)}
+        val generation=playbackGeneration
         val task=object:Runnable{
             override fun run(){
-                if(web!==viewer || active!=channelIndex || videoScreen!==screen)return
+                if(web!==viewer || active!=channelIndex || videoScreen!==screen || playbackGeneration!=generation || youtubeProgressTask!==this)return
                 viewer.evaluateJavascript("(function(){var v=document.querySelector('video');return v?Math.floor(v.currentTime||0):0;})()"){value->
                     val seconds=value.trim().trim('"').toLongOrNull()?:0L
-                    if(seconds>0 && web===viewer && active==channelIndex)
+                    if(seconds>0 && web===viewer && active==channelIndex && videoScreen===screen && playbackGeneration==generation)
                         channels.getOrNull(channelIndex)?.let{prefs.edit().putLong(mediaKey(it),seconds).apply()}
                 }
                 handler.postDelayed(this,5000L)
             }
         }
+        youtubeProgressTask=task
         handler.postDelayed(task,5000L)
     }
     private fun requestYoutubeStartupAudio(viewer:WebView,channelIndex:Int,screen:FrameLayout){
         // YouTube can attach its video element after onPageFinished. Retry
         // briefly, but never force play(), reload the page or alter IPTV engines.
+        val generation=playbackGeneration
         val delays=longArrayOf(600L,1400L,2700L,4500L,7000L)
         delays.forEach{delay->
             handler.postDelayed({
-                if(web===viewer && active==channelIndex && videoScreen===screen){
+                if(web===viewer && active==channelIndex && videoScreen===screen && playbackGeneration==generation){
                     viewer.evaluateJavascript("""(function(){
                         var v=document.querySelector('video');
                         if(!v || v.paused)return 'waiting';
@@ -5093,6 +5100,8 @@ class MainActivity: Activity() {
         previewIndex=-1
         youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
         youtubeUnmuteTask=null
+        youtubeProgressTask?.let{handler.removeCallbacks(it)}
+        youtubeProgressTask=null
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigitTask=null
         channelDigits=""
