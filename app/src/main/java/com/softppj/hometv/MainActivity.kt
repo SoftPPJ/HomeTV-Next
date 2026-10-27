@@ -558,12 +558,13 @@ class MainActivity: Activity() {
         networkRecoveryTask?.let{handler.removeCallbacks(it)}
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
         showBanner("Internet disconnected • Waiting to reconnect",true)
+        val recoveryGeneration=playbackGeneration
         val task=object:Runnable{
             override fun run(){
-                if(active!=index || videoScreen!==screen)return
+                if(active!=index || videoScreen!==screen || playbackGeneration!=recoveryGeneration || networkRecoveryTask!==this)return
                 if(hasNetworkConnection()){
                     networkRecoveryTask=null
-                    if(active==index && videoScreen===screen)playIndex(index)
+                    playIndex(index)
                 }else handler.postDelayed(this,3000L)
             }
         }
