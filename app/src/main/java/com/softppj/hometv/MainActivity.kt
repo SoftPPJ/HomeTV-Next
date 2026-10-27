@@ -1700,7 +1700,6 @@ class MainActivity: Activity() {
     override fun onResume(){
         super.onResume()
         appInForeground=true
-        if(licenseReady)checkEpgTune() else armEpgTune()
         val url=suspendedPlaybackUrl
         val identity=suspendedPlaybackIdentity
         suspendedPlaybackUrl=null
@@ -1713,6 +1712,9 @@ class MainActivity: Activity() {
                 playIndex(index)
             }else showHome()
         }
+        // Resume the suspended channel first. Otherwise an EPG auto-tune
+        // can be immediately overwritten by the old channel on return.
+        if(licenseReady)checkEpgTune() else armEpgTune()
     }
     override fun onPause(){
         appInForeground=false
