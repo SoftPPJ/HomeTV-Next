@@ -308,8 +308,10 @@ class MainActivity: Activity() {
         }
         if(candidates.size<2)return
         val generation=playbackGeneration
-        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates)
-        repeat(minOf(3,candidates.size)){
+        // Limit per-channel background probing on huge multi-source playlists.
+        // The selected source remains the foreground playback priority.
+        val queue=java.util.concurrent.ConcurrentLinkedQueue(candidates.take(12))
+        repeat(minOf(3,queue.size)){
             thread(name="HomeTV-channel-url-check"){
                 while(true){
                     val candidate=queue.poll() ?:break
