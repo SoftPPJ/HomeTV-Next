@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   compile-v6:
@@ -37,3 +37,18 @@ jobs:
         run: |
           ls -lh app/build/outputs/apk/debug/*.apk
           test "$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f | wc -l)" -ge 1
+
+      - name: Publish V6 APK as GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)
+          test -n "$APK"
+          cp "$APK" HomeTV-V6-debug.apk
+          TAG="hometv-v6-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" HomeTV-V6-debug.apk \
+            --title "HomeTV V6 - Test Build ${GITHUB_RUN_NUMBER}" \
+            --notes "Development debug APK from commit ${GITHUB_SHA}. Device testing required." \
+            --target "${GITHUB_SHA}" \
+            --prerelease
