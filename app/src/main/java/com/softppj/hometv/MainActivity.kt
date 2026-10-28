@@ -747,7 +747,7 @@ class MainActivity: Activity() {
             // materializing two Pair objects per source on every failure.
             val candidates=sequenceOf(index)+alternateIndices(index).asSequence().filter{it!=index}
             val next=candidates.flatMap{i->
-                sequenceOf(Pair(i,"Media3"),Pair(i,"LibVLC"),Pair(i,"IJKPlayer"))
+                initialEngines(channels[i]).asSequence().map{engine->Pair(i,engine)}
             }.firstOrNull{(i,engine)->
                 !tried.contains(channels[i].url+"|"+engine)
             }
@@ -1604,6 +1604,33 @@ class MainActivity: Activity() {
                 dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
+    // Stream routing is independent of the user-selected engine and never
+    // overrides a confirmed working URL/engine or a manual engine selection.
+    private fun streamKind(url:String):String{
+        val uri=try{Uri.parse(url.trim())}catch(_:Exception){return "unknown"}
+        val scheme=uri.scheme?.lowercase(java.util.Locale.ROOT) ?:return "unknown"
+        val path=uri.path.orEmpty().lowercase(java.util.Locale.ROOT)
+        val query=uri.query.orEmpty().lowercase(java.util.Locale.ROOT)
+        return when{
+            scheme=="rtsp" || scheme=="rtsps"->"rtsp"
+            scheme=="rtmp" || scheme=="rtmps" || scheme=="rtmpt"->"rtmp"
+            scheme=="udp" || scheme=="rtp" || scheme=="mms" || scheme=="mmsh"->"vlc"
+            scheme!="http" && scheme!="https"->"unknown"
+            path.endsWith(".m3u8") || query.contains("format=m3u8")->"hls"
+            path.endsWith(".mpd") || query.contains("format=mpd")->"dash"
+            path.endsWith(".ism/manifest") || path.endsWith(".isml/manifest")->"smooth"
+            path.endsWith(".mp4") || path.endsWith(".m4v") ||
+                path.endsWith(".mkv") || path.endsWith(".webm") ||
+                path.endsWith(".ts") || path.endsWith(".mp3") ||
+                path.endsWith(".aac") || path.endsWith(".flv")->"file"
+            path.endsWith(".swf")->"flash"
+            else->"http"
+        }
+    }
+    private fun initialEngines(c:Channel):List<String> = when(streamKind(c.url)){
+        "rtmp","vlc"->listOf("LibVLC","IJKPlayer","Media3")
+        else->listOf("Media3","LibVLC","IJKPlayer")
+    }
     private fun engineFor(c:Channel):String{
         fallbackEngineOverride?.let{return it}
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
@@ -1618,7 +1645,7 @@ class MainActivity: Activity() {
         val universal=prefs.getString("engine","Auto") ?: "Auto"
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
         if(universal=="Media3" || universal=="LibVLC" || universal=="IJKPlayer")return universal
-        return "Media3"
+        return initialEngines(c).first()
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
@@ -2944,9 +2971,13 @@ class MainActivity: Activity() {
     private fun mediaItemForStream(url:String):MediaItem {
         val path=try{Uri.parse(url).path.orEmpty().lowercase(java.util.Locale.ROOT)}
             catch(_:Exception){url.substringBefore('?').lowercase(java.util.Locale.ROOT)}
-        return if(path.endsWith(".mpd"))
-            MediaItem.Builder().setUri(url)
-                .setMimeType(androidx.media3.common.MimeTypes.APPLICATION_MPD).build()
+        val mime=when(streamKind(url)){
+            "dash"->androidx.media3.common.MimeTypes.APPLICATION_MPD
+            "hls"->androidx.media3.common.MimeTypes.APPLICATION_M3U8
+            "smooth"->androidx.media3.common.MimeTypes.APPLICATION_SS
+            else->null
+        }
+        return if(mime!=null)MediaItem.Builder().setUri(url).setMimeType(mime).build()
         else MediaItem.fromUri(url)
     }
     private fun confirmExit(){
@@ -4310,7 +4341,7 @@ class MainActivity: Activity() {
     private fun isWebTv(c:Channel):Boolean{
         val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
         val path=(u.path ?: "").lowercase(java.util.Locale.ROOT)
-        if(path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith(".mp4") || path.endsWith(".ts"))return false
+        if(streamKind(c.url) in setOf("hls","dash","smooth","file","rtsp","rtmp","vlc","flash"))return false
         if(u.scheme!="http" && u.scheme!="https")return false
         if(c.mediaType=="web" || (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true)))return true
         // Website URLs in ordinary M3U playlists should use Web TV even without
@@ -4319,7 +4350,9 @@ class MainActivity: Activity() {
         if(host=="cmalayalamtv.com" || host=="www.cmalayalamtv.com" ||
             host=="bhoomtv.org" || host=="www.bhoomtv.org")return true
         return path.endsWith("/livetv") || path.startsWith("/live/") ||
-            path.startsWith("/channel/") || path.endsWith("/live-tv")
+            path.startsWith("/channel/") || path.endsWith("/live-tv") ||
+            path.endsWith("/watch") || path.endsWith("/player") ||
+            path.endsWith("/stream")
     }
     private fun webTvJavascript():String = """(function(){
         try {
@@ -4531,6 +4564,12 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        if(streamKind(c.url)=="flash"){
+            AlertDialog.Builder(this).setTitle("Unsupported Flash stream")
+                .setMessage("Adobe Flash (.swf) cannot run on Android TV. Add a modern website or HTML5 stream URL instead.")
+                .setPositiveButton("OK",null).show()
+            return
+        }
         if(unlockedChannel!=id(c) && isLocked(c)){
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
