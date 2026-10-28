@@ -4373,7 +4373,7 @@ class MainActivity: Activity() {
                     }
                     val mime=connection.contentType.orEmpty().substringBefore(';').trim().lowercase(java.util.Locale.ROOT)
                     val finalPath=connection.url.path.lowercase(java.util.Locale.ROOT)
-                    val sample=if(connection.responseCode in 200..299 || connection.responseCode==206){
+                    val sample=if(connection.responseCode in 200..299){
                         connection.inputStream.use{input->
                             val buffer=ByteArray(512)
                             val count=input.read(buffer)
@@ -4381,13 +4381,15 @@ class MainActivity: Activity() {
                         }
                     }else ""
                     val prefix=sample.trimStart().lowercase(java.util.Locale.ROOT)
+                    val playlist=prefix.startsWith("#extm3u")
+                    val dashXml=prefix.contains("<mpd") &&
+                        (prefix.startsWith("<?xml") || prefix.startsWith("<mpd"))
                     route=when{
                         mime.contains("text/html") || prefix.startsWith("<!doctype html") ||
                             prefix.startsWith("<html")->"web"
                         mime.contains("mpegurl") || mime.contains("dash+xml") ||
                             mime.startsWith("video/") || mime.startsWith("audio/") ||
-                            mime.contains("octet-stream") || prefix.startsWith("#extm3u") ||
-                            prefix.startsWith("<?xml") && prefix.contains("<mpd") ||
+                            mime.contains("octet-stream") || playlist || dashXml ||
                             finalPath.endsWith(".m3u8") || finalPath.endsWith(".mpd")->"native"
                         else->"web"
                     }
@@ -4633,6 +4635,11 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        // Do not contact or classify a locked channel before PIN approval.
+        if(unlockedChannel!=id(c) && isLocked(c)){
+            requirePin {unlockedChannel=id(c);playIndex(index)}
+            return
+        }
         // Explicit and known stream URLs bypass classification. Unknown HTTP
         // URLs get a short bounded content-type check before choosing WebView.
         if(routeWebOverride==null && streamKind(c.url)=="http" &&
@@ -4645,10 +4652,6 @@ class MainActivity: Activity() {
             AlertDialog.Builder(this).setTitle("Unsupported Flash stream")
                 .setMessage("Adobe Flash (.swf) cannot run on Android TV. Add a modern website or HTML5 stream URL instead.")
                 .setPositiveButton("OK",null).show()
-            return
-        }
-        if(unlockedChannel!=id(c) && isLocked(c)){
-            requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
         // Invalidate outstanding classification when a channel actually starts.
@@ -5563,6 +5566,8 @@ class MainActivity: Activity() {
             return
         }
         if(active>=0){
+            // Cancel a pending unknown-URL probe on remote BACK.
+            httpRouteGeneration++
             val screen=videoScreen
             if(web!=null && webTvDirectoryEntries.isNotEmpty() &&
                 screen!=null && channels.getOrNull(active)?.mediaType=="web"){
@@ -5588,6 +5593,9 @@ class MainActivity: Activity() {
         }
     }
     private fun stopPlayback(){
+        // A pending HTTP classification must never restart playback after BACK,
+        // channel exit, or switching to the Home screen.
+        httpRouteGeneration++
         saveCurrentMediaProgress()
         networkRecoveryTask?.let{handler.removeCallbacks(it)}
         networkRecoveryTask=null
