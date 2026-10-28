@@ -4311,8 +4311,15 @@ class MainActivity: Activity() {
         val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
         val path=(u.path ?: "").lowercase(java.util.Locale.ROOT)
         if(path.endsWith(".m3u8") || path.endsWith(".mpd") || path.endsWith(".mp4") || path.endsWith(".ts"))return false
-        return (u.scheme=="http" || u.scheme=="https") &&
-            (c.mediaType=="web" || (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true)))
+        if(u.scheme!="http" && u.scheme!="https")return false
+        if(c.mediaType=="web" || (c.webChannel.isNotBlank() && !c.webChannel.equals("no",true)))return true
+        // Website URLs in ordinary M3U playlists should use Web TV even without
+        // explicit media-type=web. Preserve direct streams and YouTube handling.
+        val host=u.host?.lowercase(java.util.Locale.ROOT) ?:return false
+        if(host=="cmalayalamtv.com" || host=="www.cmalayalamtv.com" ||
+            host=="bhoomtv.org" || host=="www.bhoomtv.org")return true
+        return path.endsWith("/livetv") || path.startsWith("/live/") ||
+            path.startsWith("/channel/") || path.endsWith("/live-tv")
     }
     private fun webTvJavascript():String = """(function(){
         try {
@@ -4362,6 +4369,15 @@ class MainActivity: Activity() {
               primary.style.setProperty('width','100%','important');
               primary.style.setProperty('height','100%','important');
             }
+          }
+          // Some embedded sites keep their video inside a cross-origin iframe.
+          // Preserve the iframe as a whole rather than trying to access its DOM.
+          // Only suppress surrounding website chrome after a visible player exists.
+          if(primary && !document.getElementById('myhometv-player-mask')){
+            var mask=document.createElement('style');
+            mask.id='myhometv-player-mask';
+            mask.textContent='html,body{overflow:hidden!important}';
+            document.head.appendChild(mask);
           }
           var candidates=[];
           var seen={};
@@ -4657,7 +4673,7 @@ class MainActivity: Activity() {
             // The remote BACK and channel keys remain handled by the Activity.
             if(webPage){
                 // Website TV mode: keep cookies, JavaScript and iframe media support.
-                viewer.settings.javaScriptCanOpenWindowsAutomatically=false
+                viewer.settings.javaScriptCanOpenWindowsAutomatically=true
                 viewer.settings.setSupportMultipleWindows(false)
                 viewer.settings.mixedContentMode=android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 android.webkit.CookieManager.getInstance().setAcceptCookie(true)
