@@ -4345,6 +4345,68 @@ class MainActivity: Activity() {
     }
 
     // My Home TV: dedicated website-video controls. No changes to YouTube or native players.
+    // Ambiguous HTTP links are classified off the UI thread. This does not
+    // probe obvious direct streams, so normal IPTV channel switching stays fast.
+    private val urlRouteCache=mutableMapOf<String,Pair<String,Long>>()
+    private fun routeHttpChannel(index:Int){
+        val c=channels.getOrNull(index) ?:return
+        val url=c.url
+        val cached=urlRouteCache[url]
+        val now=android.os.SystemClock.elapsedRealtime()
+        if(cached!=null && now-cached.second<3600000L){
+            playIndexResolved(index,cached.first=="web")
+            return
+        }
+        val requestedGeneration=++httpRouteGeneration
+        thread(name="HomeTV-URL-Classifier"){
+            var route="web" // Unknown HTTP pages are safer in WebView than a native decoder.
+            try{
+                val connection=(URL(url).openConnection() as java.net.HttpURLConnection)
+                try{
+                    connection.instanceFollowRedirects=true
+                    connection.connectTimeout=3500
+                    connection.readTimeout=3500
+                    connection.requestMethod="GET"
+                    connection.setRequestProperty("Range","bytes=0-511")
+                    c.headers.forEach{(k,v)->
+                        if(!k.equals("Host",true) && !k.equals("Range",true))connection.setRequestProperty(k,v)
+                    }
+                    val mime=connection.contentType.orEmpty().substringBefore(';').trim().lowercase(java.util.Locale.ROOT)
+                    val finalPath=connection.url.path.lowercase(java.util.Locale.ROOT)
+                    val sample=if(connection.responseCode in 200..299 || connection.responseCode==206){
+                        connection.inputStream.use{input->
+                            val buffer=ByteArray(512)
+                            val count=input.read(buffer)
+                            if(count>0)String(buffer,0,count,Charsets.UTF_8) else ""
+                        }
+                    }else ""
+                    val prefix=sample.trimStart().lowercase(java.util.Locale.ROOT)
+                    route=when{
+                        mime.contains("text/html") || prefix.startsWith("<!doctype html") ||
+                            prefix.startsWith("<html")->"web"
+                        mime.contains("mpegurl") || mime.contains("dash+xml") ||
+                            mime.startsWith("video/") || mime.startsWith("audio/") ||
+                            mime.contains("octet-stream") || prefix.startsWith("#extm3u") ||
+                            prefix.startsWith("<?xml") && prefix.contains("<mpd") ||
+                            finalPath.endsWith(".m3u8") || finalPath.endsWith(".mpd")->"native"
+                        else->"web"
+                    }
+                }finally{connection.disconnect()}
+            }catch(_:Exception){route="web"}
+            handler.post{
+                if(requestedGeneration!=httpRouteGeneration || !licenseReady)return@post
+                if(index !in channels.indices || channels[index].url!=url)return@post
+                urlRouteCache[url]=Pair(route,android.os.SystemClock.elapsedRealtime())
+                playIndexResolved(index,route=="web")
+            }
+        }
+    }
+    private var httpRouteGeneration=0
+    private var routeWebOverride:Boolean?=null
+    private fun playIndexResolved(index:Int,webRoute:Boolean){
+        routeWebOverride=webRoute
+        try{playIndex(index)}finally{routeWebOverride=null}
+    }
     private fun isWebTv(c:Channel):Boolean{
         val u=try{Uri.parse(c.url)}catch(_:Exception){return false}
         val path=(u.path ?: "").lowercase(java.util.Locale.ROOT)
@@ -4571,6 +4633,14 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        // Explicit and known stream URLs bypass classification. Unknown HTTP
+        // URLs get a short bounded content-type check before choosing WebView.
+        if(routeWebOverride==null && streamKind(c.url)=="http" &&
+            !isWebTv(c) && !c.url.contains("youtube.com",true) &&
+            !c.url.contains("youtu.be",true)){
+            routeHttpChannel(index)
+            return
+        }
         if(streamKind(c.url)=="flash"){
             AlertDialog.Builder(this).setTitle("Unsupported Flash stream")
                 .setMessage("Adobe Flash (.swf) cannot run on Android TV. Add a modern website or HTML5 stream URL instead.")
@@ -4581,6 +4651,8 @@ class MainActivity: Activity() {
             requirePin {unlockedChannel=id(c);playIndex(index)}
             return
         }
+        // Invalidate outstanding classification when a channel actually starts.
+        httpRouteGeneration++
         // Keep channel changes independent of optional background probes.
         playbackGeneration++
         autoBufferStableSince=0L
@@ -4626,7 +4698,7 @@ class MainActivity: Activity() {
             val u=Uri.parse(c.url)
             val h=u.host?.lowercase()?.removePrefix("www.") ?: ""
             (u.scheme=="http" || u.scheme=="https") &&
-                isWebTv(c)
+                (routeWebOverride ?: isWebTv(c))
         }catch(_:Exception){false}
         // Restore the original WebView watch-page route for YouTube.
         // Native stream scraping and embed mode are not reliable substitutes here.
