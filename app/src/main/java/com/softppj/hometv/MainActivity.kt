@@ -736,12 +736,19 @@ class MainActivity: Activity() {
         // alternative URL of the same logical channel.
         val saved=prefs.contains("confirmed_engine_"+key) &&
             prefs.getString("working_url_"+key,null)==c.url
+        // If the viewer explicitly chose a player, do not silently switch it.
+        // Retry only that engine until the viewer changes the setting.
+        val manualEngine=prefs.getString("manual_engine_"+key,null)
+        if(manualEngine in setOf("Media3","LibVLC","IJKPlayer")){
+            showBanner("Selected player "+manualEngine+" failed • Choose Auto or another player in channel settings",true)
+            return true
+        }
         if(!saved && testingAlternativeKey!=key){
-            // Initial discovery: try each distinct URL with Media3 and LibVLC.
+            // Initial discovery: try each distinct URL with its protocol-aware engine order.
             // Only a real player-ready/playing event records a successful combination.
             val tried=initialTried.getOrPut(key){mutableSetOf()}
             tried.add(c.url+"|"+current)
-            // Exhaust both engines for the selected source before probing
+            // Exhaust compatible engines for the selected source before probing
             // unrelated URLs. Keep a manually selected source first.
             // Stream alternatives can number in the thousands. Avoid
             // materializing two Pair objects per source on every failure.
