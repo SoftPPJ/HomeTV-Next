@@ -3159,7 +3159,8 @@ class MainActivity: Activity() {
             "Subtitles",
             "Sleep timer",
             "Playback Engine",
-            "Channel list"
+            "Channel list",
+            "Volume control"
         )
         val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
@@ -3175,6 +3176,7 @@ class MainActivity: Activity() {
                     8->sleepTimer()
                     9->chooseChannelEngine(active)
                     10->showOverlayList()
+                    11->showVolumeControl()
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -3912,6 +3914,83 @@ class MainActivity: Activity() {
         }
         list.requestFocus()
     }
+    // Uses Android's music stream so all playback engines share the same volume.
+    // Fixed-volume TV outputs must be controlled using the TV/soundbar remote.
+    private fun showVolumeControl(){
+        val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        if(audio.isVolumeFixed){
+            AlertDialog.Builder(this).setTitle("Volume control")
+                .setMessage("This device uses fixed audio output. Adjust volume using your TV or soundbar remote.")
+                .setPositiveButton("OK",null).show()
+            return
+        }
+        val stream=android.media.AudioManager.STREAM_MUSIC
+        val max=audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+        val container=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(28,18,28,10)
+        }
+        val level=TextView(this).apply{
+            textSize=20f
+            gravity=Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+        }
+        val slider=SeekBar(this).apply{
+            this.max=max
+            progress=audio.getStreamVolume(stream)
+        }
+        val buttons=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER
+        }
+        val down=Button(this).apply{text="−"}
+        val mute=Button(this).apply{text="Mute"}
+        val up=Button(this).apply{text="+"}
+        buttons.addView(down,LinearLayout.LayoutParams(0,-2,1f))
+        buttons.addView(mute,LinearLayout.LayoutParams(0,-2,2f))
+        buttons.addView(up,LinearLayout.LayoutParams(0,-2,1f))
+        container.addView(level)
+        container.addView(slider)
+        container.addView(buttons)
+        fun refresh(){
+            val current=audio.getStreamVolume(stream)
+            val muted=audio.isStreamMute(stream) || current==0
+            slider.progress=current
+            level.text="Volume: "+(current*100/max)+"%"
+            mute.text=if(muted)"Unmute" else "Mute"
+            showHomeTvVolume()
+        }
+        slider.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+            override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){
+                if(fromUser){
+                    audio.setStreamVolume(stream,progress,0)
+                    refresh()
+                }
+            }
+            override fun onStartTrackingTouch(seekBar:SeekBar?){}
+            override fun onStopTrackingTouch(seekBar:SeekBar?){}
+        })
+        down.setOnClickListener{
+            audio.adjustStreamVolume(stream,android.media.AudioManager.ADJUST_LOWER,0)
+            refresh()
+        }
+        up.setOnClickListener{
+            audio.adjustStreamVolume(stream,android.media.AudioManager.ADJUST_RAISE,0)
+            refresh()
+        }
+        mute.setOnClickListener{
+            audio.adjustStreamVolume(stream,
+                if(audio.isStreamMute(stream) || audio.getStreamVolume(stream)==0)
+                    android.media.AudioManager.ADJUST_UNMUTE
+                else android.media.AudioManager.ADJUST_MUTE,0)
+            refresh()
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("TV Volume Control")
+            .setView(container).setPositiveButton("Close",null).create()
+        dialog.setOnShowListener{refresh();slider.requestFocus()}
+        dialog.show()
+    }
+
     private fun showPlaybackSettings(){
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
@@ -3920,7 +3999,7 @@ class MainActivity: Activity() {
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Subtitles","Sleep timer","Playback engine",
-            "Date & time overlay","Alternative stream / URL","Home screen","Full settings"
+            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Volume control"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -3955,6 +4034,7 @@ class MainActivity: Activity() {
                 9->selectAlternative(active)
                 10->showHome()
                 11->liveSettings()
+                12->showVolumeControl()
             }
         }
         list.setOnKeyListener{_,code,event->
