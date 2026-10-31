@@ -3574,8 +3574,10 @@ class MainActivity: Activity() {
         val next=nextSurfingIndex(current,delta,available)
         if(next !in channels.indices)return
         previewIndex=next
+        // Remote UP/DOWN must not create a second video decoder. On low-memory
+        // Android TVs this can terminate the entire process immediately.
+        // Keep current playback untouched; OK confirms the highlighted channel.
         showChannelInfo(previewIndex)
-        showVideoPreview(previewIndex)
         val task=Runnable{previewIndex=-1;closeVideoPreview()}
         previewTask=task
         handler.postDelayed(task,8000)
