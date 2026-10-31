@@ -1826,7 +1826,23 @@ class MainActivity: Activity() {
     }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
-        return mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply { addAll(MutableList(arr.length()){ val o=arr.getJSONObject(it); Playlist(o.getString("name"),o.getString("url"),o.optBoolean("enabled",true)) }) }
+        // Upgrade only the user's existing TV.m3u feed; do not alter the
+        // licence-managed playlist or unrelated providers with the same filename.
+        val oldFeed="https://raw.githubusercontent.com/my-hometv/tv/main/TV.m3u"
+        val newFeed="https://raw.githubusercontent.com/my-hometv/tv/main/Master.m3u"
+        var migrated=false
+        val configured=MutableList(arr.length()){ i->
+            val o=arr.getJSONObject(i)
+            val original=o.getString("url")
+            val normalized=original.substringBefore('?').substringBefore('#')
+            val isOldFeed=normalized.equals(oldFeed,true) ||
+                normalized.equals("https://github.com/my-hometv/tv/blob/main/TV.m3u",true)
+            if(isOldFeed)migrated=true
+            Playlist(o.getString("name"),if(isOldFeed)newFeed else original,o.optBoolean("enabled",true))
+        }
+        val result=mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply{addAll(configured)}
+        if(migrated)savePlaylists(result)
+        return result
     }
     private fun savePlaylists(list:List<Playlist>) {
         val arr=JSONArray(); list.filter{it.url!=licensedPlaylist}.forEach { arr.put(JSONObject().put("name",it.name).put("url",it.url).put("enabled",it.enabled)) }
