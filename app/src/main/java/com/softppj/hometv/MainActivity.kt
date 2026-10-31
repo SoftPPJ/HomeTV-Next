@@ -809,7 +809,8 @@ class MainActivity: Activity() {
             try{core?.release()}catch(_:Exception){}
             probe=null
             core=null
-            if(working)offer(candidate,"LibVLC") else handler.post{next()}
+            if(working)offer(candidate,"LibVLC")
+            else handler.post{probeAlternativeIjk(candidate,target,offer,next)}
         }
         try{
             val vlc=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200"))
@@ -834,6 +835,46 @@ class MainActivity: Activity() {
             handler.postDelayed(watchdog!!,7000L)
             p.play()
         }catch(e:Exception){android.util.Log.w("HomeTV","Alternative VLC probe failed",e);finish(false)}
+    }
+    // Last fallback: headless, muted IJK probe, separate from foreground.
+    private fun probeAlternativeIjk(
+        candidate:Int,target:Channel,offer:(Int,String)->Unit,next:()->Unit
+    ){
+        var probe:IjkMediaPlayer?=null
+        var finished=false
+        var watchdog:Runnable?=null
+        fun finish(working:Boolean){
+            if(finished)return
+            finished=true
+            watchdog?.let{handler.removeCallbacks(it)}
+            try{probe?.stop();probe?.release()}catch(_:Exception){}
+            probe=null
+            if(working)offer(candidate,"IJKPlayer") else handler.post{next()}
+        }
+        try{
+            val p=IjkMediaPlayer()
+            probe=p
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",0L)
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"start-on-prepared",0L)
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",7000000L)
+            p.setVolume(0f,0f)
+            p.setOnPreparedListener{handler.post{
+                if(!finished)try{p.start()}catch(_:Exception){finish(false)}
+            }}
+            p.setOnInfoListener{_,what,_->
+                if(what==3 || what==10002)handler.post{finish(true)}
+                false
+            }
+            p.setOnErrorListener{_,_,_->handler.post{finish(false)};true}
+            p.setOnCompletionListener{handler.post{finish(false)}}
+            watchdog=Runnable{finish(false)}
+            handler.postDelayed(watchdog!!,8000L)
+            p.dataSource=target.url
+            p.prepareAsync()
+        }catch(e:Exception){
+            android.util.Log.w("HomeTV","Alternative IJK probe failed",e)
+            finish(false)
+        }
     }
     private var testingAlternativeKey:String?=null
     // Once a channel has played successfully, the URL and engine are pinned.
