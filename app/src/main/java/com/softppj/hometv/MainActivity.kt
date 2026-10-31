@@ -785,6 +785,26 @@ class MainActivity: Activity() {
             showBanner("Selected player "+manualEngine+" failed • Choose Auto or another player in channel settings",true)
             return true
         }
+        // Auto mode must recover when a previously confirmed player stops
+        // working. Try other engines for the SAME URL before touching sources.
+        // Never replace a confirmed URL/engine until a new player succeeds.
+        if(saved && testingAlternativeKey!=key){
+            val tried=initialTried.getOrPut(key){mutableSetOf()}
+            tried.add(c.url+"|"+current)
+            val next=initialEngines(c).firstOrNull{!tried.contains(c.url+"|"+it)}
+            if(next!=null){
+                fallbackEngineOverride=next
+                showBanner("Trying "+next+" for "+c.name)
+                val generation=playbackGeneration
+                val task=Runnable{
+                    if(active==index && videoScreen===screen && playbackGeneration==generation)
+                        playIndex(index)
+                }
+                retryTask=task
+                handler.postDelayed(task,700L)
+                return true
+            }
+        }
         if(!saved && testingAlternativeKey!=key){
             // Initial discovery: try each distinct URL with its protocol-aware engine order.
             // Only a real player-ready/playing event records a successful combination.
