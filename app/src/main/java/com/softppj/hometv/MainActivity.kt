@@ -408,7 +408,7 @@ class MainActivity: Activity() {
         var vlcMatch:Int?=null
         for(candidate in group){
             val url=channels[candidate].url
-            if(url in failedUrlsThisSession)continue
+            if(url in failedUrlsThisSession && url!=manual && url!=saved)continue
             if(firstUsable==null)firstUsable=candidate
             if(manual!=null && url==manual)return candidate
             if(savedMatch==null && saved!=null && url==saved)savedMatch=candidate
@@ -624,6 +624,8 @@ class MainActivity: Activity() {
     }
     private fun tryNextAlternative(index:Int):Boolean{
         if(index !in channels.indices)return false
+        val key=channelKey(channels[index])
+        if(prefs.contains("working_url_"+key) || prefs.contains("manual_url_"+key))return false
         val options=alternateIndices(index)
         alternativeAttempted.add(channels[index].url)
         val next=options.firstOrNull{!alternativeAttempted.contains(channels[it].url)}
@@ -763,151 +765,67 @@ class MainActivity: Activity() {
         }
     }
     private var testingAlternativeKey:String?=null
+    // Once a channel has played successfully, the URL and engine are pinned.
+    // Recovery never changes either; only a viewer action may replace them.
     private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
-        if(!hasNetworkConnection()){
-            awaitNetworkRecovery(index,screen)
-            return true
-        }
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val key=channelKey(c)
         val current=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
-        // A selected engine is authoritative: never change it on failure.
-        // Automatic selection retries the current engine before trying others.
-        // A confirmed engine is specific to its working URL.
-        val saved=prefs.contains("confirmed_engine_"+key) &&
-            prefs.getString("working_url_"+key,null)==c.url
-        // If the viewer explicitly chose a player, do not silently switch it.
-        // Retry only that engine until the viewer changes the setting.
-        val manualEngine=prefs.getString("manual_engine_"+key,null)
-        if(manualEngine in setOf("Media3","LibVLC","IJKPlayer")){
-            // V5 behavior: same engine, same source, bounded reconnect attempts.
-            if(!prefs.getBoolean("auto_reconnect",true)){
-                showBanner("Selected player unavailable • Auto-reconnect is OFF",true)
-                return true
-            }
-            val count=(recoveryAttempts[c.url] ?: 0)+1
+        val pinnedUrl=prefs.getString("manual_url_"+key,null)
+            ?:prefs.getString("working_url_"+key,null)
+        val pinnedEngine=prefs.getString("manual_engine_"+key,null)
+            ?:prefs.getString("confirmed_engine_"+key,null)
+        val established=pinnedUrl!=null || pinnedEngine in setOf("Media3","LibVLC","IJKPlayer")
+        if(established){
+            // Only a confirmed failure initiates a background alternative search.
+            // It must not change the active playback or saved preferences.
+            checkFailedChannelAlternatives(index,screen)
+            if(!prefs.getBoolean("auto_reconnect",true))return true
+            val fixedEngine=pinnedEngine?.takeIf{it in setOf("Media3","LibVLC","IJKPlayer")} ?:current
+            val count=(recoveryAttempts[c.url] ?:0)+1
             recoveryAttempts[c.url]=count
-            if(count>6){
-                showBanner("Selected player unavailable after 6 retries • Change player manually",true)
-                return true
-            }
-            fallbackEngineOverride=manualEngine
-            showBanner("Retrying "+c.name+" with "+manualEngine+" ("+count+"/6)")
+            fallbackEngineOverride=fixedEngine
+            // Retry indefinitely but back off to protect decoders and the TV.
+            val delay=(2000L*count.coerceAtMost(10)).coerceAtMost(20000L)
             val generation=playbackGeneration
+            retryTask?.let{handler.removeCallbacks(it)}
             val task=Runnable{
                 if(active==index && videoScreen===screen && playbackGeneration==generation){
-                    fallbackEngineOverride=manualEngine
+                    fallbackEngineOverride=fixedEngine
                     playIndex(index)
                 }
             }
             retryTask=task
-            handler.postDelayed(task,3000L.coerceAtLeast(count*1500L))
+            handler.postDelayed(task,delay)
             return true
         }
-        // Give the selected automatic engine a chance to recover before
-        // probing other decoders. Never change engines on a healthy stream.
-        if(prefs.getBoolean("auto_reconnect",true)){
-            val count=recoveryAttempts[c.url] ?: 0
-            if(count<2){
-                recoveryAttempts[c.url]=count+1
-                fallbackEngineOverride=current
-                val generation=playbackGeneration
-                val task=Runnable{
-                    if(active==index && videoScreen===screen && playbackGeneration==generation){
-                        fallbackEngineOverride=current
-                        playIndex(index)
-                    }
-                }
-                retryTask=task
-                handler.postDelayed(task,2500L)
-                return true
+        // Initial setup only: find a working URL/engine combination and save it
+        // after a real ready/playing event. No background switch once established.
+        val tried=initialTried.getOrPut(key){mutableSetOf()}
+        tried.add(c.url+"|"+current)
+        val candidates=sequenceOf(index)+alternateIndices(index).asSequence().filter{it!=index}
+        val next=candidates.flatMap{i->
+            initialEngines(channels[i]).asSequence().map{engine->Pair(i,engine)}
+        }.firstOrNull{(i,engine)->!tried.contains(channels[i].url+"|"+engine)}
+        if(next!=null){
+            fallbackEngineOverride=next.second
+            val generation=playbackGeneration
+            retryTask?.let{handler.removeCallbacks(it)}
+            val task=Runnable{
+                if(active==index && videoScreen===screen && playbackGeneration==generation)
+                    playIndex(next.first)
             }
-        }
-        // Auto mode must recover when a previously confirmed player stops
-        // working. Try other engines for the SAME URL before touching sources.
-        // Never replace a confirmed URL/engine until a new player succeeds.
-        if(saved && testingAlternativeKey!=key){
-            val tried=initialTried.getOrPut(key){mutableSetOf()}
-            tried.add(c.url+"|"+current)
-            val next=initialEngines(c).firstOrNull{!tried.contains(c.url+"|"+it)}
-            if(next!=null){
-                fallbackEngineOverride=next
-                showBanner("Trying "+next+" for "+c.name)
-                val generation=playbackGeneration
-                val task=Runnable{
-                    if(active==index && videoScreen===screen && playbackGeneration==generation)
-                        playIndex(index)
-                }
-                retryTask=task
-                handler.postDelayed(task,700L)
-                return true
-            }
-        }
-        if(!saved && testingAlternativeKey!=key){
-            // Initial discovery: try each distinct URL with its protocol-aware engine order.
-            // Only a real player-ready/playing event records a successful combination.
-            val tried=initialTried.getOrPut(key){mutableSetOf()}
-            tried.add(c.url+"|"+current)
-            // Exhaust compatible engines for the selected source before probing
-            // unrelated URLs. Keep a manually selected source first.
-            // Stream alternatives can number in the thousands. Avoid
-            // materializing two Pair objects per source on every failure.
-            val candidates=sequenceOf(index)+alternateIndices(index).asSequence().filter{it!=index}
-            val next=candidates.flatMap{i->
-                initialEngines(channels[i]).asSequence().map{engine->Pair(i,engine)}
-            }.firstOrNull{(i,engine)->
-                !tried.contains(channels[i].url+"|"+engine)
-            }
-            if(next!=null){
-                fallbackEngineOverride=next.second
-                showBanner("Finding working source for "+c.name)
-                val failedSessionGeneration=playbackGeneration
-                val task=Runnable{if(active==index && videoScreen===screen && playbackGeneration==failedSessionGeneration)playIndex(next.first)}
-                retryTask=task
-                handler.postDelayed(task,900L)
-                return true
-            }
-            // All URL/player combinations have failed. Auto-skip must be
-            // controlled by its own ON/OFF setting, not by background checking.
-            if(prefs.getBoolean("auto_skip_nonworking",true)){
-                unavailableChannels.add(key)
-                showBanner("No playable source for "+c.name+" • Skipping")
-                moveAfterFailedChannelHidden(index,screen)
-                return true
-            }
-            // With auto-skip OFF, remain on this channel unless the user
-            // explicitly chooses to hide it in the one-time failure prompt.
-            if(!prefs.getBoolean("first_failure_prompted_"+key,false)){
-                promptFailedChannel(index,screen)
-                return true
-            }
-        }
-        // Confirmed sources never probe or switch to alternatives automatically.
-        // Alternative selection is available manually from channel settings.
-        if(!prefs.getBoolean("auto_reconnect",true)){
-            showBanner("Stream unavailable • Auto-reconnect is OFF",true)
+            retryTask=task
+            handler.postDelayed(task,1000L)
             return true
         }
-        fallbackEngineOverride=current
-        val count=(recoveryAttempts[c.url] ?: 0)+1
-        recoveryAttempts[c.url]=count
-        // A broken confirmed stream must not reconnect forever. Preserve its
-        // saved preference and allow the viewer to select another source.
-        if(count>6){
-            showBanner("Stream unavailable after 6 reconnects • Select another source",true)
-            return true
+        if(prefs.getBoolean("auto_skip_nonworking",true)){
+            unavailableChannels.add(key)
+            moveAfterFailedChannelHidden(index,screen)
+        }else if(!prefs.getBoolean("first_failure_prompted_"+key,false)){
+            promptFailedChannel(index,screen)
         }
-        if(count==1 || count%5==0)showBanner("Reconnecting "+c.name+" with "+current)
-        val recoveryGeneration=playbackGeneration
-        val task=Runnable{
-            if(active==index && videoScreen===screen && playbackGeneration==recoveryGeneration){
-                fallbackEngineOverride=current
-                playIndex(index)
-            }
-        }
-        retryTask=task
-        handler.postDelayed(task,5000L)
         return true
     }
     private fun isLocked(c:Channel):Boolean{
@@ -1773,6 +1691,11 @@ class MainActivity: Activity() {
         // Explicit channel choice must win over any stale automatic fallback.
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
             if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
+        }
+        if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
+            prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
+                if(it in setOf("Media3","LibVLC","IJKPlayer"))return it
+            }
         }
         fallbackEngineOverride?.let{return it}
         // Confirmation belongs to a specific URL, not every source of this channel.
