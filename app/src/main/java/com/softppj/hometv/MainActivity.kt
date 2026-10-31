@@ -139,7 +139,7 @@ class MainActivity: Activity() {
         // Only a recently server-verified, non-expired, non-blocked license
         // can start from cache. A clock rollback forces online verification.
         val cachedAllowed=verified>0L && now>=verified && now>=seen &&
-            now-verified<24L*60*60*1000 &&
+            now-verified<7L*24*60*60*1000 &&
             expiryTime!=null && now<expiryTime &&
             prefs.getBoolean("license_last_verified",false) &&
             !prefs.getBoolean("license_validation_blocked",false) &&
@@ -2492,7 +2492,7 @@ class MainActivity: Activity() {
             done()
             return
         }
-        if(forceRebuild)Toast.makeText(this,"Rebuilding playlists from source…",Toast.LENGTH_SHORT).show()
+        Toast.makeText(this,if(forceRebuild)"Rebuilding playlists from source…" else "Checking "+sources.size+" playlists for updates…",Toast.LENGTH_LONG).show()
         val playingBeforeRefresh=channels.getOrNull(active)
         val playingUrlBeforeRefresh=playingBeforeRefresh?.url
         // Take an immutable reference snapshot; grouping thousands of channels
@@ -2569,6 +2569,7 @@ class MainActivity: Activity() {
             }.toMutableList()
             runOnUiThread{
                 if(generation!=refreshGeneration || !licenseReady || isFinishing || isDestroyed)return@runOnUiThread
+                Toast.makeText(this,"Playlist check complete: "+updated+"/"+sources.size+" updated",Toast.LENGTH_LONG).show()
                 if(updated==0 && nextChannels.isEmpty()){
                     Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
                 }else{
@@ -3267,7 +3268,8 @@ class MainActivity: Activity() {
             "Sleep timer",
             "Playback Engine ("+(prefs.getString("manual_engine_"+channelKey(c),null) ?: prefs.getString("engine","Media3"))+")",
             "Channel list",
-            "Volume control"
+            "Volume control",
+            "Channel volume ("+prefs.getInt("channel_volume_"+hash(c.url),100)+"%)"
         )
         val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
@@ -3284,6 +3286,7 @@ class MainActivity: Activity() {
                     9->chooseChannelEngine(active)
                     10->showOverlayList()
                     11->showVolumeControl()
+                    12->configureChannelVolume(active)
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -4072,6 +4075,38 @@ class MainActivity: Activity() {
     }
     // Uses Android's music stream so all playback engines share the same volume.
     // Fixed-volume TV outputs must be controlled using the TV/soundbar remote.
+    private fun applyChannelVolume(){
+        val c=channels.getOrNull(active) ?:return
+        val gain=(prefs.getInt("channel_volume_"+hash(c.url),100).coerceIn(0,100))/100f
+        player?.volume=gain
+        try{vlcPlayer?.volume=(gain*100).toInt()}catch(_:Exception){}
+        try{ijkPlayer?.setVolume(gain,gain)}catch(_:Exception){}
+    }
+    private fun configureChannelVolume(index:Int){
+        val c=channels.getOrNull(index) ?:return
+        val key="channel_volume_"+hash(c.url)
+        val level=SeekBar(this).apply{max=100;progress=prefs.getInt(key,100)}
+        val label=TextView(this).apply{text="Channel volume: "+level.progress+"%";textSize=20f}
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(30,20,30,20)
+            addView(label)
+            addView(level)
+        }
+        level.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+            override fun onProgressChanged(bar:SeekBar?,value:Int,fromUser:Boolean){label.text="Channel volume: "+value+"%"}
+            override fun onStartTrackingTouch(bar:SeekBar?){}
+            override fun onStopTrackingTouch(bar:SeekBar?){}
+        })
+        AlertDialog.Builder(this).setTitle(c.name+" volume").setView(layout)
+            .setPositiveButton("Save"){_,_->
+                prefs.edit().putInt(key,level.progress).apply()
+                if(active==index)applyChannelVolume()
+            }.setNeutralButton("Reset"){_,_->
+                prefs.edit().remove(key).apply()
+                if(active==index)applyChannelVolume()
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun showVolumeControl(){
         val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
         if(audio.isVolumeFixed){
@@ -4908,6 +4943,7 @@ class MainActivity: Activity() {
         retryUrl=c.url
         stopPlayback()
         active=index
+        handler.postDelayed({if(active==index)applyChannelVolume()},400)
         if(unlockedChannel!=id(c)) unlockedChannel=null
         prefs.edit().putString("last_url",c.url).putString("last_url_"+c.source,c.url).apply()
         rememberRecentChannel(c)
