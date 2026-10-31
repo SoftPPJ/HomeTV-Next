@@ -902,7 +902,9 @@ class MainActivity: Activity() {
             if(playlists().any{it.enabled})refresh({channelCollection("All channels",visibleIndices())})
             return
         }
-        channelCollection("All channels",if(prefs.getBoolean("all_playlists_continuous_numbers",false))visibleIndices() else playlistIndices())
+        val combined=prefs.getBoolean("all_playlists_continuous_numbers",false)
+        channelCollection(if(combined)"All channels — Combined" else "All channels — Active playlist",
+            if(combined)visibleIndices() else playlistIndices())
     }
     private val defaultEpgUrl="https://avkb.short.gy/epg.xml.gz"
     private fun configuredEpgUrl():String=prefs.getString("epg_xmltv_url",null)?.trim()?.takeIf{it.isNotEmpty()} ?:defaultEpgUrl
@@ -2379,6 +2381,11 @@ class MainActivity: Activity() {
                 }.show()
             })
         }
+        root.addView(button("All Channels view: "+if(prefs.getBoolean("all_playlists_continuous_numbers",false))"All enabled playlists (continuous numbers)" else "Active playlist only"){
+            val combined=!prefs.getBoolean("all_playlists_continuous_numbers",false)
+            prefs.edit().putBoolean("all_playlists_continuous_numbers",combined).apply()
+            managePlaylists()
+        })
         root.addView(button("↻ Refresh from original source URLs"){refresh({managePlaylists()},true)})
         root.addView(button("Add M3U URL"){editPlaylist(null)})
         root.addView(button("Import M3U file (TV / USB)"){showImportFallback()})
@@ -3221,13 +3228,13 @@ class MainActivity: Activity() {
             if(channels.any{sameChannel(it,c) && favoriteIds.contains(id(it))})"Remove favorite" else "Add favorite",
             if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
             if(isLocked(c))"Unlock channel" else "Lock channel",
-            "Alternative Source",
-            "Aspect Ratio",
-            "Picture Quality",
+            "Alternative Source ("+(alternateIndices(active).size)+" streams)",
+            "Aspect Ratio ("+(prefs.getString("screen_channel_"+hash(c.url),null) ?: prefs.getString("screen_mode","Fit"))+")",
+            "Picture Quality ("+(prefs.getString("quality_channel_"+hash(c.url),null) ?: prefs.getString("quality_global","Auto"))+")",
             "Audio tracks",
             "Subtitles",
             "Sleep timer",
-            "Playback Engine",
+            "Playback Engine ("+(prefs.getString("manual_engine_"+channelKey(c),null) ?: prefs.getString("engine","Media3"))+")",
             "Channel list",
             "Volume control"
         )
