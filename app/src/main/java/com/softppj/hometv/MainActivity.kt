@@ -3536,13 +3536,20 @@ class MainActivity: Activity() {
         previewVideoTask=task
         handler.postDelayed(task,900L)
     }
+    private var lastPreviewNavigationAt=0L
     private fun previewChannel(delta:Int){
+        // Limit rapid remote repeats on large lists to avoid UI/decoder overload.
+        val now=android.os.SystemClock.uptimeMillis()
+        if(now-lastPreviewNavigationAt<130L)return
+        lastPreviewNavigationAt=now
         surfingDirection=if(delta>=0)1 else -1
-        if(channels.isEmpty() || surfingIndices().isEmpty())return
-        previewTask?.let{handler.removeCallbacks(it)}
+        if(channels.isEmpty())return
         val available=surfingIndices()
+        if(available.isEmpty())return
+        previewTask?.let{handler.removeCallbacks(it)}
         val current=if(previewIndex>=0)previewIndex else active
         val next=nextSurfingIndex(current,delta,available)
+        if(next !in channels.indices)return
         previewIndex=next
         showChannelInfo(previewIndex)
         showVideoPreview(previewIndex)
