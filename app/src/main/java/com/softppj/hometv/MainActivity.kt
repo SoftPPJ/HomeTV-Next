@@ -5452,11 +5452,14 @@ class MainActivity: Activity() {
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
                     }
-                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged,
-                    VlcPlayer.Event.Buffering->{
-                        // Buffering is not a playback failure. Give LibVLC time
-                        // to recover without changing engines or tearing it down.
+                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged->{
+                        // Only advancing playback events count as progress.
                         lastHealthy=android.os.SystemClock.elapsedRealtime()
+                    }
+                    VlcPlayer.Event.Buffering->{
+                        // A buffering callback is not proof of progress.
+                        // Leave lastHealthy unchanged so a persistent freeze
+                        // triggers same-engine recovery after the stall timeout.
                     }
                     VlcPlayer.Event.Stopped, VlcPlayer.Event.EndReached->handler.post{
                         if(active==index && vlcPlayer===vlc && !failed){
