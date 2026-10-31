@@ -2182,19 +2182,25 @@ class MainActivity: Activity() {
             }.setNegativeButton("Cancel",null).show()
     }
     private fun saveImportedM3u(body:String,title:String){
-        if(parseM3u(body,title).isEmpty()){
-            Toast.makeText(this,"No valid M3U channels found",Toast.LENGTH_LONG).show()
-            return
-        }
-        try{
-            val file=java.io.File(filesDir,"import_"+System.currentTimeMillis()+".m3u")
-            file.writeText(body)
-            val list=playlists()
-            list.add(Playlist(title,file.toURI().toString()))
-            savePlaylists(list)
-            refresh({managePlaylists()},true)
-        }catch(e:Exception){
-            Toast.makeText(this,"Import failed: "+e.message,Toast.LENGTH_LONG).show()
+        // Large M3U imports must never parse or write files on the Android UI thread.
+        thread(name="HomeTV-playlist-import"){
+            val valid=try{parseM3u(body,title).isNotEmpty()}catch(e:Exception){false}
+            if(!valid){runOnUiThread{Toast.makeText(this,"No valid M3U channels found",Toast.LENGTH_LONG).show()};return@thread}
+            val result=try{
+                val file=java.io.File(filesDir,"import_"+System.currentTimeMillis()+".m3u")
+                file.writeText(body)
+                file.toURI().toString()
+            }catch(e:Exception){
+                runOnUiThread{Toast.makeText(this,"Import failed: "+e.message,Toast.LENGTH_LONG).show()}
+                return@thread
+            }
+            runOnUiThread{
+                if(isFinishing || isDestroyed)return@runOnUiThread
+                val list=playlists()
+                list.add(Playlist(title,result))
+                savePlaylists(list)
+                refresh({managePlaylists()},true)
+            }
         }
     }
     private fun browsePlaylistFiles(directory:java.io.File?){
