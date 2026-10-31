@@ -1770,10 +1770,11 @@ class MainActivity: Activity() {
         else->listOf("Media3","LibVLC","IJKPlayer")
     }
     private fun engineFor(c:Channel):String{
-        fallbackEngineOverride?.let{return it}
+        // Explicit channel choice must win over any stale automatic fallback.
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
             if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
         }
+        fallbackEngineOverride?.let{return it}
         // Confirmation belongs to a specific URL, not every source of this channel.
         if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
             prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
