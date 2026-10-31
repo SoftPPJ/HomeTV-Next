@@ -127,12 +127,34 @@ class MainActivity: Activity() {
             showLicenseScreen()
             return
         }
-        // Fail closed: a previously validated token is not authorization to
-        // play cached streams before this session's server validation succeeds.
-        licenseReady=false
+        val now=System.currentTimeMillis()
+        val verified=prefs.getLong("license_verified_at",0L)
+        val seen=prefs.getLong("license_last_clock",0L)
+        val expiry=prefs.getString("license_expiry",null)
+        val expiryTime=expiry?.let{value->
+            try{java.time.Instant.parse(value).toEpochMilli()}catch(_:Exception){
+                try{java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli()}catch(_:Exception){null}
+            }
+        }
+        // Only a recently server-verified, non-expired, non-blocked license
+        // can start from cache. A clock rollback forces online verification.
+        val cachedAllowed=verified>0L && now>=verified && now>=seen &&
+            now-verified<24L*60*60*1000 &&
+            expiryTime!=null && now<expiryTime &&
+            prefs.getBoolean("license_last_verified",false) &&
+            !prefs.getBoolean("license_validation_blocked",false) &&
+            prefs.getString("license_verified_device",null)==installationId() &&
+            prefs.getString("license_verified_token",null)==token
+        prefs.edit().putLong("license_last_clock",maxOf(now,seen)).apply()
         licenseChecking=true
         val operation=++licenseOperationGeneration
-        showLicenseCheckingScreen()
+        if(cachedAllowed){
+            licenseReady=true
+            startLicensedApp()
+        }else{
+            licenseReady=false
+            showLicenseCheckingScreen()
+        }
         thread{
             val result=try{
                 val response=licenseRequest("/validate",licensePayload())
@@ -144,9 +166,18 @@ class MainActivity: Activity() {
                 licenseChecking=false
                 if(result==null){
                     prefs.edit().putBoolean("license_last_verified",true)
-                        .putBoolean("license_validation_blocked",false).apply()
-                    licenseReady=true
-                    startLicensedApp()
+                        .putBoolean("license_validation_blocked",false)
+                        .putLong("license_verified_at",System.currentTimeMillis())
+                        .putLong("license_last_clock",maxOf(System.currentTimeMillis(),prefs.getLong("license_last_clock",0L)))
+                        .putString("license_verified_device",installationId())
+                        .putString("license_verified_token",token).apply()
+                    if(!licenseReady){licenseReady=true;startLicensedApp()}
+                }else if(cachedAllowed && !result.contains("expired",true) &&
+                    !result.contains("revoked",true) && !result.contains("not active",true) &&
+                    !result.contains("Invalid token",true)){
+                    // Temporary network failure: continue only within the short
+                    // validated cache window. Next startup will retry.
+                    android.util.Log.w("HomeTV","Background license check unavailable: "+result)
                 }else{
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
