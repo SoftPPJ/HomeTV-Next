@@ -1667,7 +1667,11 @@ class MainActivity: Activity() {
         }
         autoBufferRecoveryCount=0
     }
-    private fun bufferProfile()=prefs.getString("buffer_profile","Auto") ?: "Auto"
+    private fun bufferProfile():String{
+        val channel=channels.getOrNull(active)
+        val override=channel?.let{prefs.getString("buffer_channel_"+channelKey(it),null)}
+        return override ?: (prefs.getString("buffer_profile","Auto") ?: "Auto")
+    }
     private fun bufferValues():IntArray=when(bufferProfile()){
         "Auto"->bufferLevelValues(autoBufferLevel)
         "Ultra Fast"->intArrayOf(500,3500,250,500)
@@ -1676,9 +1680,25 @@ class MainActivity: Activity() {
         "Maximum Buffer"->intArrayOf(8000,45000,3000,6500)
         else->intArrayOf(2000,15000,1000,2000)
     }
+    private fun chooseChannelBufferProfile(index:Int){
+        val c=channels.getOrNull(index) ?:return
+        val key="buffer_channel_"+channelKey(c)
+        val options=arrayOf("Use universal default")+bufferProfiles
+        val current=prefs.getString(key,null)
+        val selected=if(current==null)0 else options.indexOf(current).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle(c.name+" — Buffering")
+            .setSingleChoiceItems(options,selected){dialog,choice->
+                prefs.edit().apply{
+                    if(choice==0)remove(key)
+                    else putString(key,bufferProfiles[choice-1])
+                }.apply()
+                dialog.dismiss()
+                showBanner("Buffer setting saved • applies when channel next starts")
+            }.setNegativeButton("Cancel",null).show()
+    }
     private fun chooseBufferProfile(){
         AlertDialog.Builder(this).setTitle("Playback buffer")
-            .setSingleChoiceItems(bufferProfiles,bufferProfiles.indexOf(bufferProfile()).coerceAtLeast(0)){dialog,i->
+            .setSingleChoiceItems(bufferProfiles,bufferProfiles.indexOf(prefs.getString("buffer_profile","Auto")).coerceAtLeast(0)){dialog,i->
                 prefs.edit().putString("buffer_profile",bufferProfiles[i]).apply()
                 dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
@@ -3289,7 +3309,8 @@ class MainActivity: Activity() {
             "Playback Engine ("+(prefs.getString("manual_engine_"+channelKey(c),null) ?: prefs.getString("engine","Media3"))+")",
             "Channel list",
             "Volume control",
-            "Channel volume ("+prefs.getInt("channel_volume_"+hash(c.url),100)+"%)"
+            "Channel volume ("+prefs.getInt("channel_volume_"+hash(c.url),100)+"%)",
+            "Buffering ("+(prefs.getString("buffer_channel_"+channelKey(c),null) ?: "Universal")+")"
         )
         val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
@@ -3307,6 +3328,7 @@ class MainActivity: Activity() {
                     10->showOverlayList()
                     11->showVolumeControl()
                     12->configureChannelVolume(active)
+                    13->chooseChannelBufferProfile(active)
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
