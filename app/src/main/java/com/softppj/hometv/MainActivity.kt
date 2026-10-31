@@ -869,7 +869,7 @@ class MainActivity: Activity() {
             p.setOnCompletionListener{handler.post{finish(false)}}
             watchdog=Runnable{finish(false)}
             handler.postDelayed(watchdog!!,8000L)
-            p.dataSource=target.url
+            p.setDataSource(target.url)
             p.prepareAsync()
         }catch(e:Exception){
             android.util.Log.w("HomeTV","Alternative IJK probe failed",e)
@@ -1810,12 +1810,6 @@ class MainActivity: Activity() {
             }
         }
         fallbackEngineOverride?.let{return it}
-        // Confirmation belongs to a specific URL, not every source of this channel.
-        if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
-            prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
-                if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
-            }
-        }
         val universal=prefs.getString("engine","Auto") ?: "Auto"
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
         if(universal=="Media3" || universal=="LibVLC" || universal=="IJKPlayer")return universal
