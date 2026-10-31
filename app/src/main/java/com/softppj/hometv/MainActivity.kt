@@ -5606,7 +5606,19 @@ class MainActivity: Activity() {
                         }
                     }
                     when(event.keyCode){
-                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT->{
+                            val delta=if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)10_000L else -10_000L
+                            val exo=player
+                            val vlc=vlcPlayer
+                            if(exo!=null && exo.isCurrentMediaItemSeekable){
+                                val target=(exo.currentPosition+delta).coerceAtLeast(0L)
+                                exo.seekTo(if(exo.duration>0)target.coerceAtMost(exo.duration) else target)
+                            }else if(vlc!=null && vlc.isSeekable){
+                                val target=(vlc.time+delta).coerceAtLeast(0L)
+                                vlc.time=if(vlc.length>0)target.coerceAtMost(vlc.length) else target
+                            }else Toast.makeText(this,"Seeking unavailable for this stream",Toast.LENGTH_SHORT).show()
+                            return true
+                        }
                         KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                         KeyEvent.KEYCODE_NUMPAD_ENTER->{mediaPlaybackControls();return true}
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE->{
