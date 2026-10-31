@@ -2334,7 +2334,7 @@ class MainActivity: Activity() {
         root.addView(button("Add Xtream Codes"){addXtream()})
         root.addView(button("Back"){showHome()})
     }
-    private fun editPlaylist(index:Int?){
+    private fun editPlaylist(index:Int?,fromPlaybackDrawer:Boolean=false){
         val old=index?.let{playlists()[it]}
         val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL}
         val name=EditText(this).apply{hint="Playlist name";setSingleLine();setText(old?.name?:"")}
@@ -2347,7 +2347,14 @@ class MainActivity: Activity() {
                 if(index==null)list.add(p) else list[index]=p
                 savePlaylists(list)
                 Toast.makeText(this,"Downloading and saving playlist…",Toast.LENGTH_SHORT).show()
-                refresh({managePlaylists()})
+                refresh({
+                    if(fromPlaybackDrawer){
+                        // Stay in the TV player; show the newly added playlist's channels.
+                        prefs.edit().putString("selected_playlist_source",n).apply()
+                        if(videoScreen!=null && active>=0)showPlaylistDrawer()
+                        else showHome()
+                    }else managePlaylists()
+                })
             } else Toast.makeText(this,"Enter name and HTTP(S) URL",Toast.LENGTH_LONG).show()
         }.setNegativeButton("Cancel",null).show()
     }
@@ -3871,7 +3878,7 @@ class MainActivity: Activity() {
             (resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,position,_->
-            if(position==0){close();editPlaylist(null);return@setOnItemClickListener}
+            if(position==0){close();editPlaylist(null,true);return@setOnItemClickListener}
             if(position==1){close();managePlaylists();return@setOnItemClickListener}
             val selected=if(position==2)null else sources.getOrNull(position-3)
             prefs.edit().apply{
