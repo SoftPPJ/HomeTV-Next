@@ -1,9 +1,7 @@
 name: HomeTV V6 debug test APK
 
 on:
-  push:
-    branches:
-      - my-home-tv-v6-development
+  # Build and publish only when explicitly started after user approval.
   workflow_dispatch:
 
 permissions:
