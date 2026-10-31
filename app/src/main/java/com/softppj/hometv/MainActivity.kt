@@ -5410,6 +5410,23 @@ class MainActivity: Activity() {
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
             media.addOption(":network-caching="+cache)
+            // LibVLC adaptive HLS/DASH quality: do not cap Auto/Best
+            // Available at a low resolution. Fixed presets provide an upper
+            // resolution preference when the stream exposes variants.
+            val quality=qualityMode(index)
+            val height=when(quality){
+                "Data Saver (360p)"->360
+                "Standard (480p)"->480
+                "HD (720p)"->720
+                "Full HD (1080p)"->1080
+                else->0
+            }
+            if(height>0){
+                media.addOption(":adaptive-maxheight="+height)
+                media.addOption(":adaptive-logic=highest")
+            }else if(quality=="Best Available"){
+                media.addOption(":adaptive-logic=highest")
+            }
             vlc.media=media
             media.release()
             vlc.play()
