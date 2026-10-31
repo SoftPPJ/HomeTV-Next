@@ -772,18 +772,57 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         val current=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
-        // Manual engine preference selects the first attempt, not an infinite
-        // retry of the same failed engine. The other engine remains a fallback.
-        // A confirmed engine is only proven for its confirmed URL, not every
-        // alternative URL of the same logical channel.
+        // A selected engine is authoritative: never change it on failure.
+        // Automatic selection retries the current engine before trying others.
+        // A confirmed engine is specific to its working URL.
         val saved=prefs.contains("confirmed_engine_"+key) &&
             prefs.getString("working_url_"+key,null)==c.url
         // If the viewer explicitly chose a player, do not silently switch it.
         // Retry only that engine until the viewer changes the setting.
         val manualEngine=prefs.getString("manual_engine_"+key,null)
         if(manualEngine in setOf("Media3","LibVLC","IJKPlayer")){
-            showBanner("Selected player "+manualEngine+" failed • Choose Auto or another player in channel settings",true)
+            // V5 behavior: same engine, same source, bounded reconnect attempts.
+            if(!prefs.getBoolean("auto_reconnect",true)){
+                showBanner("Selected player unavailable • Auto-reconnect is OFF",true)
+                return true
+            }
+            val count=(recoveryAttempts[c.url] ?: 0)+1
+            recoveryAttempts[c.url]=count
+            if(count>6){
+                showBanner("Selected player unavailable after 6 retries • Change player manually",true)
+                return true
+            }
+            fallbackEngineOverride=manualEngine
+            showBanner("Retrying "+c.name+" with "+manualEngine+" ("+count+"/6)")
+            val generation=playbackGeneration
+            val task=Runnable{
+                if(active==index && videoScreen===screen && playbackGeneration==generation){
+                    fallbackEngineOverride=manualEngine
+                    playIndex(index)
+                }
+            }
+            retryTask=task
+            handler.postDelayed(task,3000L.coerceAtLeast(count*1500L))
             return true
+        }
+        // Give the selected automatic engine a chance to recover before
+        // probing other decoders. Never change engines on a healthy stream.
+        if(prefs.getBoolean("auto_reconnect",true)){
+            val count=recoveryAttempts[c.url] ?: 0
+            if(count<2){
+                recoveryAttempts[c.url]=count+1
+                fallbackEngineOverride=current
+                val generation=playbackGeneration
+                val task=Runnable{
+                    if(active==index && videoScreen===screen && playbackGeneration==generation){
+                        fallbackEngineOverride=current
+                        playIndex(index)
+                    }
+                }
+                retryTask=task
+                handler.postDelayed(task,2500L)
+                return true
+            }
         }
         // Auto mode must recover when a previously confirmed player stops
         // working. Try other engines for the SAME URL before touching sources.
@@ -4220,6 +4259,8 @@ class MainActivity: Activity() {
         }
         val dialog=AlertDialog.Builder(this).setTitle("TV Volume Control")
             .setView(container).setPositiveButton("Close",null).create()
+        // The native dialog is intentionally user-dismissible; Back/Close
+        // restores unobstructed playback without restarting the stream.
         dialog.setOnShowListener{refresh();slider.requestFocus()}
         dialog.show()
     }
