@@ -175,7 +175,14 @@ class MainActivity: Activity() {
                 checkEpgTune()
                 // Startup uses saved playlist data immediately. Never block opening
                 // the app on network refreshes of every configured playlist.
-                if(channels.isNotEmpty())openStartupDestination() else showHome()
+                if(channels.isNotEmpty())openStartupDestination() else {
+                    // A changed playlist URL has a new cache key. Fetch it on first
+                    // launch instead of silently opening an empty Home screen.
+                    refresh({
+                        if(channels.isNotEmpty())openStartupDestination()
+                        else showHome()
+                    })
+                }
             }
         }
     }
