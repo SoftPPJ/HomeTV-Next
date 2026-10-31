@@ -765,7 +765,8 @@ class MainActivity: Activity() {
                 watchdog?.let{handler.removeCallbacks(it)}
                 try{probe?.release()}catch(_:Exception){}
                 probe=null
-                if(working)offer(candidate,"Media3") else handler.post{next()}
+                if(working)offer(candidate,"Media3")
+                else handler.post{probeAlternativeVlc(candidate, target, ::offer, ::next)}
             }
             try{
                 val factory=DefaultHttpDataSource.Factory()
@@ -790,6 +791,49 @@ class MainActivity: Activity() {
             }catch(_:Exception){finish(false)}
         }
         handler.post{next()}
+    }
+    // Isolated LibVLC compatibility probe; never borrows the foreground player.
+    private fun probeAlternativeVlc(
+        candidate:Int,target:Channel,
+        offer:(Int,String)->Unit,next:()->Unit
+    ){
+        var core:LibVLC?=null
+        var probe:VlcPlayer?=null
+        var finished=false
+        var watchdog:Runnable?=null
+        fun finish(working:Boolean){
+            if(finished)return
+            finished=true
+            watchdog?.let{handler.removeCallbacks(it)}
+            try{probe?.stop();probe?.release()}catch(_:Exception){}
+            try{core?.release()}catch(_:Exception){}
+            probe=null
+            core=null
+            if(working)offer(candidate,"LibVLC") else handler.post{next()}
+        }
+        try{
+            val vlc=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200"))
+            core=vlc
+            val p=VlcPlayer(vlc)
+            probe=p
+            p.setEventListener{event->
+                when(event.type){
+                    VlcPlayer.Event.Playing->handler.post{finish(true)}
+                    VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->
+                        handler.post{finish(false)}
+                }
+            }
+            val media=VlcMedia(vlc,Uri.parse(target.url))
+            media.addOption(":no-audio")
+            media.addOption(":no-video")
+            target.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
+            target.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+            p.media=media
+            media.release()
+            watchdog=Runnable{finish(false)}
+            handler.postDelayed(watchdog!!,7000L)
+            p.play()
+        }catch(e:Exception){android.util.Log.w("HomeTV","Alternative VLC probe failed",e);finish(false)}
     }
     private var testingAlternativeKey:String?=null
     // Once a channel has played successfully, the URL and engine are pinned.
