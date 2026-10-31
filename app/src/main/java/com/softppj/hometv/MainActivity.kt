@@ -3347,7 +3347,6 @@ class MainActivity: Activity() {
             "Sleep timer",
             "Playback Engine ("+(prefs.getString("manual_engine_"+channelKey(c),null) ?: prefs.getString("engine","Media3"))+")",
             "Channel list",
-            "Volume control",
             "Channel volume ("+prefs.getInt("channel_volume_"+hash(c.url),100)+"%)",
             "Buffering ("+(prefs.getString("buffer_channel_"+channelKey(c),null) ?: "Universal")+")"
         )
@@ -3365,9 +3364,8 @@ class MainActivity: Activity() {
                     8->sleepTimer()
                     9->chooseChannelEngine(active)
                     10->showOverlayList()
-                    11->showVolumeControl()
-                    12->configureChannelVolume(active)
-                    13->chooseChannelBufferProfile(active)
+                    11->configureChannelVolume(active)
+                    12->chooseChannelBufferProfile(active)
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -4175,7 +4173,15 @@ class MainActivity: Activity() {
             addView(level)
         }
         level.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
-            override fun onProgressChanged(bar:SeekBar?,value:Int,fromUser:Boolean){label.text="Channel volume: "+value+"%"}
+            override fun onProgressChanged(bar:SeekBar?,value:Int,fromUser:Boolean){
+                label.text="Channel volume: "+value+"%"
+                if(fromUser && active==index){
+                    val gain=value.coerceIn(0,100)/100f
+                    player?.volume=gain
+                    try{vlcPlayer?.volume=value}catch(_:Exception){}
+                    try{ijkPlayer?.setVolume(gain,gain)}catch(_:Exception){}
+                }
+            }
             override fun onStartTrackingTouch(bar:SeekBar?){}
             override fun onStopTrackingTouch(bar:SeekBar?){}
         })
@@ -4186,7 +4192,7 @@ class MainActivity: Activity() {
             }.setNeutralButton("Reset"){_,_->
                 prefs.edit().remove(key).apply()
                 if(active==index)applyChannelVolume()
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel"){_,_->if(active==index)applyChannelVolume()}.show()
     }
     private fun showVolumeControl(){
         val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
@@ -4273,7 +4279,7 @@ class MainActivity: Activity() {
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Subtitles","Sleep timer","Playback engine",
-            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Volume control"
+            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Channel volume"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -4308,7 +4314,7 @@ class MainActivity: Activity() {
                 9->selectAlternative(active)
                 10->showHome()
                 11->liveSettings()
-                12->showVolumeControl()
+                12->if(active>=0)configureChannelVolume(active)
             }
         }
         list.setOnKeyListener{_,code,event->
