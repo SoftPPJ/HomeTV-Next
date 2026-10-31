@@ -3839,7 +3839,7 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("left_navigation")?.let{screen.removeView(it)}
         val sources=playlists().filter{it.enabled && channels.any{c->c.source==it.name}}
             .map{it.name}.distinct()
-        val names=listOf("☰  All Playlists")+sources.map{"▸  "+it}
+        val names=listOf("＋  Add Playlist","⚙  Manage Playlists","☰  All Playlists")+sources.map{"▸  "+it}
         val drawer=LinearLayout(this).apply{
             tag="left_navigation"
             orientation=LinearLayout.VERTICAL
@@ -3859,13 +3859,30 @@ class MainActivity: Activity() {
             (resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,position,_->
-            val selected=if(position==0)null else sources.getOrNull(position-1)
+            if(position==0){close();editPlaylist(null);return@setOnItemClickListener}
+            if(position==1){close();managePlaylists();return@setOnItemClickListener}
+            val selected=if(position==2)null else sources.getOrNull(position-3)
             prefs.edit().apply{
                 if(selected==null)remove("selected_playlist_source")
                 else putString("selected_playlist_source",selected)
             }.apply()
             close()
             showOverlayList()
+        }
+        list.setOnItemLongClickListener{_,_,position,_->
+            val source=sources.getOrNull(position-3)
+            if(source==null)return@setOnItemLongClickListener false
+            val entry=playlists().indexOfFirst{it.name==source}
+            val choices=arrayOf("Edit playlist","Disable playlist","Delete playlist","Manage playlists")
+            AlertDialog.Builder(this).setTitle(source).setItems(choices){_,action->
+                when(action){
+                    0->if(entry>=0)editPlaylist(entry)
+                    1->{val items=playlists();if(entry>=0){items[entry]=items[entry].copy(enabled=false);savePlaylists(items);Toast.makeText(this,"Playlist disabled",Toast.LENGTH_SHORT).show()};close();showOverlayList()}
+                    2->if(entry>=0)AlertDialog.Builder(this).setTitle("Delete "+source+"?").setPositiveButton("Delete"){_,_->val items=playlists();if(entry<items.size){items.removeAt(entry);savePlaylists(items)};close();showOverlayList()}.setNegativeButton("Cancel",null).show()
+                    3->{close();managePlaylists()}
+                }
+            }.show()
+            true
         }
         list.setOnKeyListener{_,code,event->
             if(event.action==KeyEvent.ACTION_DOWN &&
@@ -3874,7 +3891,7 @@ class MainActivity: Activity() {
             }else false
         }
         val selected=selectedPlaylistSource()
-        list.setSelection(if(selected==null)0 else (sources.indexOf(selected)+1).coerceAtLeast(0))
+        list.setSelection(if(selected==null)2 else (sources.indexOf(selected)+3).coerceAtLeast(2))
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
