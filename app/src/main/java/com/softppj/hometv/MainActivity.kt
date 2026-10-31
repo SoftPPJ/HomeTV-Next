@@ -309,8 +309,13 @@ class MainActivity: Activity() {
         liveChannelRepresentatives=channelRepresentatives.filter{channels[it].mediaType=="live"}
         // Channel numbers refer to live logical channels only, never VOD
         // entries or additional URLs for the same channel.
-        channelPosition=liveChannelRepresentatives.withIndex().associate{(position,index)->
-            channelKey(channels[index]) to position+1
+        // Each playlist starts at channel 1. Alternate URLs share one logical number.
+        val perPlaylist=mutableMapOf<String,Int>()
+        channelPosition=liveChannelRepresentatives.associate{index->
+            val source=channels[index].source
+            val next=(perPlaylist[source] ?: 0)+1
+            perPlaylist[source]=next
+            channelKey(channels[index]) to next
         }
         channelIndexOwner=channels
         channelIndexSize=channels.size
@@ -3412,13 +3417,20 @@ class MainActivity: Activity() {
         view.text=if(channel!=null) channelDigits+". "+channel.name else "Channel "+channelDigits
         view.bringToFront()
     }
+    // Numeric tuning is scoped to the selected playlist, or the currently playing
+    // playlist when All Playlists is selected. Avoid ambiguous duplicate numbers.
+    private fun numericChannelIndices():List<Int>{
+        val source=selectedPlaylistSource() ?:channels.getOrNull(active)?.source
+        return if(source==null)channelNumbers().filter{channels[it].source==playlists().firstOrNull{p->p.enabled}?.name}
+            else channelNumbers().filter{channels[it].source==source}
+    }
     private fun enterChannelDigit(digit:Int){
         channelDigitTask?.let{handler.removeCallbacks(it)}
         channelDigits=(channelDigits+digit).takeLast(5)
         val typed=channelDigits.toIntOrNull()
         // Lightweight number display; do not rebuild EPG or video while typing.
         showNumericOverlay()
-        if(typed==null || typed !in 1..channelNumbers().size)
+        if(typed==null || typed !in 1..numericChannelIndices().size)
             showBanner("Channel "+channelDigits+" is not available")
         val task=Runnable{tuneTypedChannel()}
         channelDigitTask=task
@@ -3431,7 +3443,7 @@ class MainActivity: Activity() {
         channelDigits=""
         clearNumericOverlay()
         if(number==null)return
-        if(number in 1..channelNumbers().size)playIndex(preferredChannel(channelNumbers()[number-1]))
+        if(number in 1..numericChannelIndices().size)playIndex(preferredChannel(numericChannelIndices()[number-1]))
         else showBanner("Channel "+number+" is not available",true)
     }
     private var previewIndex=-1
