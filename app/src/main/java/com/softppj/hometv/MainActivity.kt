@@ -5447,6 +5447,33 @@ class MainActivity: Activity() {
     private var settingsFocusedIndex=-1
     private var settingsScrollY=0
     private var settingsScreenVisible=false
+    // Clear disposable app caches only. Never modify license preferences,
+    // installation ID, playlist configuration, PIN, or server activation.
+    private fun confirmClearCache(){
+        AlertDialog.Builder(this).setTitle("Clear HomeTV cache")
+            .setMessage("Delete downloaded playlist caches, temporary files and image cache? Your license, activation, playlists, PIN and settings will be kept. Playlists may need to download again.")
+            .setPositiveButton("Clear cache"){_,_->
+                // Do not invalidate a playing stream or reset channel selection.
+                val files=filesDir.listFiles()?.filter{it.isFile && it.name.startsWith("playlist_") && it.name.endsWith(".m3u")} ?:emptyList()
+                thread(name="HomeTV-clear-cache"){
+                    var deleted=0
+                    files.forEach{if(it.delete())deleted++}
+                    fun clean(dir:java.io.File?){
+                        dir?.listFiles()?.forEach{entry->
+                            if(entry.isDirectory)clean(entry)
+                            if(entry.delete())deleted++
+                        }
+                    }
+                    clean(cacheDir)
+                    externalCacheDir?.let{clean(it)}
+                    runOnUiThread{
+                        posterCache.evictAll()
+                        Toast.makeText(this,"Cache cleared ("+deleted+" files). License remains active.",Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.setNegativeButton("Cancel",null).show()
+    }
+
     private fun settings(){
         // Capture the focused setting before rebuilding the menu after a toggle.
         if(settingsScreenVisible){
@@ -5468,6 +5495,7 @@ class MainActivity: Activity() {
         root.addView(tvSection("ACCOUNT & LIBRARY"))
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
+        root.addView(button("Clear cache (keep license active)"){confirmClearCache()})
         root.addView(button("Export settings backup"){exportSettings()})
         root.addView(button("Restore settings backup"){importSettings()})
         root.addView(tvSection("DIAGNOSTICS"))
