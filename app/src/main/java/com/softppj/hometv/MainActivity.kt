@@ -714,55 +714,82 @@ class MainActivity: Activity() {
         }
         dialog.show()
     }
+    // Probe alternative streams in isolation. The foreground player is never
+    // released or changed by this search. Only a playable decoder result may
+    // trigger a user confirmation; HTTP 200 alone is insufficient.
     private fun checkFailedChannelAlternatives(index:Int,screen:FrameLayout){
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
         val c=channels[index]
         val key=channelKey(c)
         if(!failureSearches.add(key))return
-        val searchGeneration=playbackGeneration
-        val candidates=alternateIndices(index).filter{it!=index}.take(12)
-        if(candidates.isEmpty()){
-            failureSearches.remove(key)
-            return
+        val candidates=alternateIndices(index).filter{
+            it!=index && channels[it].url!=c.url
+        }.take(12)
+        if(candidates.isEmpty()){failureSearches.remove(key);return}
+        val sourceUrl=c.url
+        var position=0
+        fun stillCurrent():Boolean=
+            active in channels.indices && channelKey(channels[active])==key &&
+            channels[active].url==sourceUrl && licenseReady && !isFinishing
+        fun done(){failureSearches.remove(key)}
+        fun offer(candidate:Int,engine:String){
+            done()
+            if(!stillCurrent())return
+            AlertDialog.Builder(this).setTitle("Working alternative found")
+                .setMessage(c.name+" has another stream that responded to "+engine+
+                    ". Switch to this URL and engine? Your current selection stays unchanged unless you confirm.")
+                .setPositiveButton("Switch"){_,_->
+                    if(!stillCurrent())return@setPositiveButton
+                    val target=channels[candidate]
+                    prefs.edit().putString("manual_url_"+key,target.url)
+                        .putString("manual_engine_"+key,engine)
+                        .remove("working_url_"+key).remove("confirmed_engine_"+key).apply()
+                    fallbackEngineOverride=null
+                    recoveryAttempts.remove(sourceUrl)
+                    playIndex(candidate)
+                }
+                .setNegativeButton("Keep current",null).show()
         }
-        thread(name="HomeTV-recovery-probe"){
-            var found:Int?=null
-            for(candidate in candidates){
-                val entry=channels[candidate]
-                try{
-                    val connection=URL(entry.url).openConnection() as java.net.HttpURLConnection
-                    try{
-                        connection.connectTimeout=3500
-                        connection.readTimeout=3500
-                        connection.instanceFollowRedirects=true
-                        entry.headers.forEach{(k,v)->connection.setRequestProperty(k,v)}
-                        if(connection.responseCode in 200..299 &&
-                            !(connection.contentType ?: "").contains("text/html",true)){
-                            found=candidate
-                            break
-                        }
-                    }finally{connection.disconnect()}
-                }catch(_:Exception){}
+        fun next(){
+            if(!stillCurrent()){done();return}
+            if(position>=candidates.size){done();return}
+            val candidate=candidates[position++]
+            val target=channels[candidate]
+            // Use a separate, muted Media3 instance: do not touch the live player.
+            var probe:ExoPlayer?=null
+            var finished=false
+            var watchdog:Runnable?=null
+            fun finish(working:Boolean){
+                if(finished)return
+                finished=true
+                watchdog?.let{handler.removeCallbacks(it)}
+                try{probe?.release()}catch(_:Exception){}
+                probe=null
+                if(working)offer(candidate,"Media3") else handler.post{next()}
             }
-            handler.post{
-                failureSearches.remove(key)
-                if(active!=index || videoScreen!==screen || playbackGeneration!=searchGeneration)return@post
-                val alternative=found
-                if(alternative!=null){
-                    AlertDialog.Builder(this).setTitle("Alternative source available")
-                        .setMessage("A different URL for "+c.name+" responded successfully. This does not guarantee playback. Test it and save it only if it plays?")
-                        .setPositiveButton("Test alternative"){_,_->
-                            if(active==index && videoScreen===screen && playbackGeneration==searchGeneration){
-                                // Test without overwriting the confirmed source.
-                                testingAlternativeKey=key
-                                fallbackEngineOverride=null
-                                playIndex(alternative)
-                            }
-                        }
-                        .setNegativeButton("Keep current",null).show()
-                } // No candidate: keep retrying the saved stream silently.
-            }
+            try{
+                val factory=DefaultHttpDataSource.Factory()
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
+                    .setDefaultRequestProperties(target.headers)
+                val exo=ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+                probe=exo
+                exo.volume=0f
+                exo.addListener(object:Player.Listener{
+                    override fun onPlaybackStateChanged(state:Int){
+                        if(state==Player.STATE_READY)finish(true)
+                        else if(state==Player.STATE_ENDED)finish(false)
+                    }
+                    override fun onPlayerError(error:PlaybackException){finish(false)}
+                })
+                watchdog=Runnable{finish(false)}
+                handler.postDelayed(watchdog!!,7000L)
+                exo.setMediaItem(mediaItemForStream(target.url))
+                exo.prepare()
+            }catch(_:Exception){finish(false)}
         }
+        handler.post{next()}
     }
     private var testingAlternativeKey:String?=null
     // Once a channel has played successfully, the URL and engine are pinned.
