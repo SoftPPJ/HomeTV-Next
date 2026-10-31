@@ -5737,11 +5737,9 @@ class MainActivity: Activity() {
                 screen.requestFocus()
                 return
             }
-            // BACK from playback returns to the selection screen.
-            // The explicit Exit action remains available from Home.
-            val mediaType=channels.getOrNull(active)?.mediaType
-            if(mediaType in setOf("movie","series","music","web"))mediaLibrary(mediaType!!)
-            else showOverlayList()
+            // Full-screen playback Back confirms exiting the app.
+            // Open navigation drawers are closed by the branch above.
+            confirmExit()
         }else{
             // BACK from Home offers exit; nested menus still return Home.
             if(homeScreenVisible)confirmExit() else showHome()
