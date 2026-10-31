@@ -173,10 +173,9 @@ class MainActivity: Activity() {
                 if(operation!=licenseOperationGeneration || !licenseReady || isFinishing || isDestroyed)return@runOnUiThread
                 channels=cached
                 checkEpgTune()
-                refresh({
-                    if(!licenseReady)return@refresh
-                    if(channels.isNotEmpty())openStartupDestination() else showHome()
-                })
+                // Startup uses saved playlist data immediately. Never block opening
+                // the app on network refreshes of every configured playlist.
+                if(channels.isNotEmpty())openStartupDestination() else showHome()
             }
         }
     }
