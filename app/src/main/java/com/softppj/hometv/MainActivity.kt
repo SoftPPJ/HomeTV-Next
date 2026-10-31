@@ -5741,7 +5741,7 @@ class MainActivity: Activity() {
             // The explicit Exit action remains available from Home.
             val mediaType=channels.getOrNull(active)?.mediaType
             if(mediaType in setOf("movie","series","music","web"))mediaLibrary(mediaType!!)
-            else showHome()
+            else showOverlayList()
         }else{
             // BACK from Home offers exit; nested menus still return Home.
             if(homeScreenVisible)confirmExit() else showHome()
