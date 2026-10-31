@@ -828,7 +828,15 @@ class MainActivity: Activity() {
     private fun channelNumbers():List<Int>{ensureChannelIndex();return liveChannelRepresentatives}
     // Count logical channels, not multiple stream URLs belonging to the same channel.
     private fun actualChannelCount():Int=channelNumbers().size
-    private fun numberFor(index:Int):Int{ensureChannelIndex();return channels.getOrNull(index)?.let{channelPosition[channelKey(it)]} ?:0}
+    private fun numberFor(index:Int):Int{
+        ensureChannelIndex()
+        val c=channels.getOrNull(index) ?:return 0
+        if(prefs.getBoolean("all_playlists_continuous_numbers",false)){
+            val key=channelKey(c)
+            return liveChannelRepresentatives.indexOfFirst{channelKey(channels[it])==key}+1
+        }
+        return channelPosition[channelKey(c)] ?:0
+    }
     private val manuallyHiddenGroups get()=prefs.getStringSet("manually_hidden_groups",emptySet()) ?: emptySet()
     private fun isGroupHidden(group:String)=manuallyHiddenGroups.contains(group)
     private fun toggleGroupHidden(group:String){
@@ -894,7 +902,7 @@ class MainActivity: Activity() {
             if(playlists().any{it.enabled})refresh({channelCollection("All channels",visibleIndices())})
             return
         }
-        channelCollection("All channels",visibleIndices())
+        channelCollection("All channels",if(prefs.getBoolean("all_playlists_continuous_numbers",false))visibleIndices() else playlistIndices())
     }
     private val defaultEpgUrl="https://avkb.short.gy/epg.xml.gz"
     private fun configuredEpgUrl():String=prefs.getString("epg_xmltv_url",null)?.trim()?.takeIf{it.isNotEmpty()} ?:defaultEpgUrl
@@ -2345,7 +2353,28 @@ class MainActivity: Activity() {
                     when(which){
                         0->{list[index]=p.copy(enabled=!p.enabled);savePlaylists(list);managePlaylists()}
                         1->editPlaylist(index)
-                        2->AlertDialog.Builder(this).setMessage("Delete playlist?").setPositiveButton("Delete"){_,_->list.removeAt(index);savePlaylists(list);managePlaylists()}.setNegativeButton("Cancel",null).show()
+                        2->AlertDialog.Builder(this).setMessage("Delete playlist?").setPositiveButton("Delete"){_,_->
+                            val removed=list.removeAt(index)
+                            savePlaylists(list)
+                            val wasPlaying=channels.getOrNull(active)?.source==removed.name
+                            if(wasPlaying)stopPlayback()
+                            channels=channels.filter{it.source!=removed.name}.toMutableList()
+                            channelIndexOwner=null
+                            channelIndexSize=-1
+                            val currentSource=prefs.getString("selected_playlist_source",null)
+                            if(currentSource==removed.name || wasPlaying){
+                                val next=list.firstOrNull{it.enabled && channels.any{c->c.source==it.name}}?.name
+                                prefs.edit().apply{if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)}.apply()
+                                if(wasPlaying){
+                                    active=-1
+                                    val last=next?.let{prefs.getString("last_url_"+it,null)}
+                                    val target=channels.indexOfFirst{it.source==next && it.url==last}
+                                    val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
+                                    if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback)
+                                }
+                            }
+                            if(!wasPlaying || active<0)managePlaylists()
+                        }.setNegativeButton("Cancel",null).show()
                     }
                 }.show()
             })
@@ -4842,7 +4871,7 @@ class MainActivity: Activity() {
         stopPlayback()
         active=index
         if(unlockedChannel!=id(c)) unlockedChannel=null
-        prefs.edit().putString("last_url",c.url).apply()
+        prefs.edit().putString("last_url",c.url).putString("last_url_"+c.source,c.url).apply()
         rememberRecentChannel(c)
         screenInfoOnStart(index)
         window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
