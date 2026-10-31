@@ -3929,7 +3929,23 @@ class MainActivity: Activity() {
             setPadding(16,16,8,12)
         })
         val list=ListView(this)
-        list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,indices.map{channelLabel(it)})
+        // Virtualize channel labels: do not allocate one string/view per channel.
+        list.adapter=object:android.widget.BaseAdapter(){
+            override fun getCount()=indices.size
+            override fun getItem(position:Int):Any=channels[indices[position]]
+            override fun getItemId(position:Int)=indices[position].toLong()
+            override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
+                val row=(convertView as? TextView) ?: TextView(this@MainActivity).apply{
+                    textSize=18f
+                    setTextColor(android.graphics.Color.WHITE)
+                    setPadding(16,16,12,16)
+                    isSingleLine=true
+                    ellipsize=android.text.TextUtils.TruncateAt.END
+                }
+                row.text=channelLabel(indices[position])
+                return row
+            }
+        }
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         screen.addView(drawer,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.43f).toInt().coerceAtLeast(260),-1,Gravity.START))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
