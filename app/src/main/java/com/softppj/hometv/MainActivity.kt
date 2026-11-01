@@ -3257,6 +3257,7 @@ class MainActivity: Activity() {
         savePlaylists(items.filterNot{it.name==name})
         if(items.none{it.name!=name && it.url==removed.url})
             try{cacheFile(removed).delete()}catch(_:Exception){}
+        clearPlaylistLocalHistory(name)
         channels=channels.filter{it.source!=name}.toMutableList()
         channelIndexOwner=null;channelIndexSize=-1
         val selected=prefs.getString("selected_playlist_source",null)
@@ -3264,7 +3265,6 @@ class MainActivity: Activity() {
         val edit=prefs.edit()
         if(selected==name){if(next==null)edit.remove("selected_playlist_source") else edit.putString("selected_playlist_source",next)}
         edit.apply()
-        clearPlaylistLocalHistory(name)
         if(wasPlaying){
             active=-1
             val last=next?.let{prefs.getString("last_url_"+it,null)}
