@@ -205,7 +205,11 @@ class MainActivity: Activity() {
                 checkEpgTune()
                 // Startup uses saved playlist data immediately. Never block opening
                 // the app on network refreshes of every configured playlist.
-                if(channels.isNotEmpty())openStartupDestination() else {
+                if(channels.isNotEmpty()){
+                    openStartupDestination()
+                    // Show cached channels immediately; refresh the active playlist in the background.
+                    refresh({})
+                } else {
                     // A changed playlist URL has a new cache key. Fetch it on first
                     // launch instead of silently opening an empty Home screen.
                     refresh({
@@ -330,6 +334,7 @@ class MainActivity: Activity() {
     private var liveChannelRepresentatives=emptyList<Int>()
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
+    private var continuousChannelPosition=emptyMap<String,Int>()
     private fun channelKey(c:Channel)=c.mediaType+"|"+c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
         c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
     private fun ensureChannelIndex(){
@@ -349,6 +354,9 @@ class MainActivity: Activity() {
             perPlaylist[source]=next
             channelKey(channels[index]) to next
         }
+        continuousChannelPosition=liveChannelRepresentatives.mapIndexed{position,index->
+            channelKey(channels[index]) to (position+1)
+        }.toMap()
         channelIndexOwner=channels
         channelIndexSize=channels.size
     }
@@ -942,8 +950,7 @@ class MainActivity: Activity() {
         ensureChannelIndex()
         val c=channels.getOrNull(index) ?:return 0
         if(prefs.getBoolean("all_playlists_continuous_numbers",false)){
-            val key=channelKey(c)
-            return liveChannelRepresentatives.indexOfFirst{channelKey(channels[it])==key}+1
+            return continuousChannelPosition[channelKey(c)] ?:0
         }
         return channelPosition[channelKey(c)] ?:0
     }
@@ -2994,7 +3001,8 @@ class MainActivity: Activity() {
             val line=raw.trim()
             when{
                 line.startsWith("#EXTINF",true)->{
-                    name=line.substringAfterLast(",","").trim()
+                    // EXTINF display names may themselves contain commas.
+                    name=line.substringAfter(",","").trim()
                     group=attr(line,"group-title").ifBlank{"Other"}
                     logo=attr(line,"tvg-logo")
                     epgId=attr(line,"tvg-id")
