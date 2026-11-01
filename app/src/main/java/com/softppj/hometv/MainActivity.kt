@@ -181,7 +181,7 @@ class MainActivity: Activity() {
                     !result.contains("Invalid token",true)){
                     // Temporary network failure: continue only within the short
                     // validated cache window. Next startup will retry.
-                    android.util.Log.w("HomeTV","Background license check unavailable: "+result)
+                    HomeTvDiagnostics.w("HomeTV","Background license check unavailable: "+result)
                 }else{
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
@@ -201,7 +201,7 @@ class MainActivity: Activity() {
         showLicenseCheckingScreen()
         thread{
             val cached=try{cachedChannels()}catch(e:Exception){
-                android.util.Log.w("HomeTV","Cached playlist parse failed",e)
+                HomeTvDiagnostics.w("HomeTV","Cached playlist parse failed",e)
                 mutableListOf<Channel>()
             }
             runOnUiThread{
@@ -876,7 +876,7 @@ class MainActivity: Activity() {
             watchdog=Runnable{finish(false)}
             handler.postDelayed(watchdog!!,7000L)
             p.play()
-        }catch(e:Exception){android.util.Log.w("HomeTV","Alternative VLC probe failed",e);finish(false)}
+        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Alternative VLC probe failed",e);finish(false)}
     }
     private var testingAlternativeKey:String?=null
     // Once a channel has played successfully, the URL and engine are pinned.
@@ -1313,7 +1313,7 @@ class MainActivity: Activity() {
                     }
                     loaded++
                 }catch(e:Exception){
-                    android.util.Log.w("HomeTV","EPG source failed: "+url,e)
+                    HomeTvDiagnostics.w("HomeTV","EPG source failed: "+url,e)
                 }
             }
             if(loaded>0){
@@ -1724,7 +1724,7 @@ class MainActivity: Activity() {
             autoBufferLevel++
             autoBufferLastChange=now
             autoBufferRecoveryCount=0
-            android.util.Log.i("HomeTV","Adaptive buffer increased to level "+autoBufferLevel)
+            HomeTvDiagnostics.i("HomeTV","Adaptive buffer increased to level "+autoBufferLevel)
         }
     }
     private fun autoBufferHealthy(){
@@ -1949,6 +1949,7 @@ class MainActivity: Activity() {
     }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
+        HomeTvDiagnostics.initialize(this)
         migrateLegacyIJKPreferences()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
@@ -2644,7 +2645,7 @@ class MainActivity: Activity() {
                         val file=cacheFile(p)
                         if(file.exists())results[index]=parseM3u(readPlaylistCache(file),p.name)
                     }catch(e:Exception){
-                        android.util.Log.w("HomeTV","Playlist cache read failed: "+p.name,e)
+                        HomeTvDiagnostics.w("HomeTV","Playlist cache read failed: "+p.name,e)
                     }
                 }
             }
@@ -2711,12 +2712,12 @@ class MainActivity: Activity() {
                                 temp.delete()
                             }
                         }catch(e:Exception){
-                            android.util.Log.w("HomeTV","Playlist rebuild failed: "+p.name,e)
+                            HomeTvDiagnostics.w("HomeTV","Playlist rebuild failed: "+p.name,e)
                             if(!forceRebuild){
                                 try{
                                     val file=cacheFile(p)
                                     if(file.exists())results[index]=parseM3u(readPlaylistCache(file),p.name)
-                                }catch(e:Exception){android.util.Log.w("HomeTV","Cache fallback failed",e)}
+                                }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Cache fallback failed",e)}
                             }
                         }
                     }
@@ -3800,7 +3801,7 @@ class MainActivity: Activity() {
                     }
                 })
             }catch(e:Exception){
-                android.util.Log.w("HomeTV","Preview unavailable",e)
+                HomeTvDiagnostics.w("HomeTV","Preview unavailable",e)
                 closeVideoPreview()
             }
         }
@@ -4701,7 +4702,7 @@ class MainActivity: Activity() {
                     else->0f
                 }
                 if(scale>0f)vlc.setScale(scale)
-            }catch(e:Exception){android.util.Log.w("HomeTV","Video size adjustment",e)}
+            }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Video size adjustment",e)}
         }
     }
     private fun selectScreenMode(channelIndex:Int?=null){
@@ -5233,7 +5234,7 @@ class MainActivity: Activity() {
                 }
                 override fun onReceivedError(view:WebView,request:WebResourceRequest,error:WebResourceError){
                     if(request.isForMainFrame && web===view){
-                        android.util.Log.w("HomeTV","YouTube page error: "+error.description)
+                        HomeTvDiagnostics.w("HomeTV","YouTube page error: "+error.description)
                         showBanner("YouTube connection issue. Remote and channel controls remain available.",true)
                     }
                 }
@@ -5333,7 +5334,7 @@ class MainActivity: Activity() {
             val startupTimeout=Runnable{
                 if(active==index && videoScreen===screen && player===exo &&
                     exo.playbackState!=Player.STATE_READY){
-                    android.util.Log.w("HomeTV","Stream startup timeout: "+c.name)
+                    HomeTvDiagnostics.w("HomeTV","Stream startup timeout: "+c.name)
                     handleEngineFailure(index,screen)
                 }
             }
@@ -5382,7 +5383,7 @@ class MainActivity: Activity() {
                 }
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
-                    android.util.Log.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
+                    HomeTvDiagnostics.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
                     handleEngineFailure(index,screen)
                 }
             })
@@ -5438,7 +5439,7 @@ class MainActivity: Activity() {
                         android.os.SystemClock.elapsedRealtime()-lastHealthy>30000L){
                         failed=true
                         autoBufferStalled()
-                        android.util.Log.w("HomeTV","LibVLC stalled for "+c.name)
+                        HomeTvDiagnostics.w("HomeTV","LibVLC stalled for "+c.name)
                         handleEngineFailure(index,screen)
                         return
                     }
@@ -5449,7 +5450,7 @@ class MainActivity: Activity() {
             val watchdog=Runnable{
                 if(!started && !failed && active==index && vlcPlayer===vlc){
                     failed=true
-                    android.util.Log.w("HomeTV","LibVLC startup timeout for "+c.name)
+                    HomeTvDiagnostics.w("HomeTV","LibVLC startup timeout for "+c.name)
                     showBanner(c.name+" did not start. Trying another stream.",true)
                     handleEngineFailure(index,screen)
                 }
@@ -5525,7 +5526,7 @@ class MainActivity: Activity() {
             vlc.play()
             handler.postDelayed({if(vlcPlayer===vlc)applyVideoSize()},1000)
         }catch(e:Exception){
-            android.util.Log.e("HomeTV","LibVLC startup failed",e)
+            HomeTvDiagnostics.e("HomeTV","LibVLC startup failed",e)
             showBanner("LibVLC error: "+(e.message?:"unknown"),true)
             handleEngineFailure(index,screen)
         }
@@ -5728,6 +5729,26 @@ class MainActivity: Activity() {
                 }
             }.setNegativeButton("Cancel",null).show()
     }
+    private fun showDiagnosticLogs(){
+        val report=HomeTvDiagnostics.readReport()
+        AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
+            .setMessage(if(report.isBlank())"No diagnostic logs have been recorded yet." else report)
+            .setPositiveButton("Export report"){_,_->exportDiagnosticReport()}
+            .setNegativeButton("Close",null).show()
+    }
+    private fun exportDiagnosticReport(){
+        val report=HomeTvDiagnostics.readReport()
+        if(report.isBlank()){
+            Toast.makeText(this,"No diagnostic logs are available yet.",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val intent=Intent(Intent.ACTION_SEND).apply{
+            type="text/plain"
+            putExtra(Intent.EXTRA_SUBJECT,"HomeTV diagnostic report")
+            putExtra(Intent.EXTRA_TEXT,report.takeLast(200_000))
+        }
+        startActivity(Intent.createChooser(intent,"Share HomeTV diagnostic report"))
+    }
     private fun showPlaybackDiagnostics(){
         val current=channels.getOrNull(active)
         val lines=listOf(
@@ -5817,6 +5838,8 @@ class MainActivity: Activity() {
         root.addView(button("Restore settings backup"){importSettings()})
         root.addView(tvSection("DIAGNOSTICS"))
         root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
+        root.addView(button("View diagnostic logs (30 days)"){showDiagnosticLogs()})
+        root.addView(button("Export diagnostic report"){exportDiagnosticReport()})
         root.addView(button("Test network download speed"){runNetworkDiagnostics()})
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
