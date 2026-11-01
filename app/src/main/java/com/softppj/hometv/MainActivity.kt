@@ -6140,6 +6140,18 @@ class MainActivity: Activity() {
         root.addView(button("Date & time overlay"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
+        // Number actionable rows (including toggles) so TV-remote users can
+        // identify menu entries consistently while scrolling the settings page.
+        var settingsActionNumber=0
+        for(position in 0 until root.childCount){
+            val item=root.getChildAt(position)
+            if(item is Button){
+                settingsActionNumber++
+                item.text="%02d   %s".format(
+                    java.util.Locale.ROOT,settingsActionNumber,item.text.toString()
+                )
+            }
+        }
         val focusIndex=settingsFocusedIndex
         val savedScroll=settingsScrollY
         root.post{
