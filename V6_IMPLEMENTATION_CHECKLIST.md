@@ -106,3 +106,7 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - Commit 6e58368: channel collection rows now generate display text lazily as ListView requests/recycles visible rows, instead of allocating a second full list of channel-name strings. This reduces peak memory when opening 10k+ channel lists.
 - Remote channel surfing now reuses a short-lived (900 ms) filtered/sorted channel-index snapshot during rapid DPAD/CH key repeats, avoiding a full filter/sort/allocation for every repeat event. The cache is invalidated when the channel index is rebuilt and keyed by playlist/favorites mode.
 - This is a targeted memory/CPU reduction, not proof that 10k+ playlists are crash-free. Large-playlist import, navigation, playback and device memory tests remain mandatory.
+
+## Playlist deletion consistency update — 1 November 2026
+- Commits ab55641 / eb6300a: Playlist Manager and the in-player playlist drawer now use one deletion path. Deleting from the drawer removes the playlist's channels from memory immediately, clears its local lock/history state and cache when no other playlist shares the URL, and updates the selected playlist.
+- If the deleted playlist was playing, playback moves to the next enabled playlist's saved last channel, or its first live channel; if neither exists, Home opens. This source change still requires compile and Android TV tests.
