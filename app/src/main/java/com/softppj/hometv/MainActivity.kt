@@ -3845,6 +3845,7 @@ class MainActivity: Activity() {
                 if(next!=null)append("\nNext: ").append(next.title)
                     .append(" (").append(programmeTime(next.start)).append(" – ")
                     .append(programmeTime(next.end)).append(")")
+                if(extra.isNotBlank())append("\n").append(extra)
             }
             textSize=18f
             setTextColor(android.graphics.Color.WHITE)
