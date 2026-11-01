@@ -1624,7 +1624,7 @@ class MainActivity: Activity() {
                 when(selection){
                     0->{toggleManualHide(c);refresh()}
                     1->{favorite(c);refresh()}
-                    2->requirePin {
+                    2->withPinSetup {
                         val locked=(prefs.getStringSet("locked_channels",emptySet())?:emptySet()).toMutableSet()
                         val related=channelByKey[channelKey(c)] ?: listOf(index)
                         if(isLocked(c)){
@@ -2579,7 +2579,7 @@ class MainActivity: Activity() {
                     Toast.makeText(this,if(p.name in current)"Playlist locked" else "Playlist unlocked",Toast.LENGTH_SHORT).show()
                     managePlaylists()
                 }
-                requirePin{changeLock()}
+                withPinSetup{changeLock()}
                 true
             }
             root.addView(row)
@@ -3282,7 +3282,7 @@ class MainActivity: Activity() {
         }
     }
     private fun toggleLock(value:String,group:Boolean){
-        requirePin {
+        withPinSetup {
             val key=if(group)"locked_groups" else "locked_channels"
             val set=(prefs.getStringSet(key,emptySet())?:emptySet()).toMutableSet()
             if(!set.add(value))set.remove(value)
@@ -3291,6 +3291,56 @@ class MainActivity: Activity() {
             else if(active>=0)showBanner("Channel lock updated")
             else allChannels()
         }
+    }
+    // First use of any lock action offers PIN creation instead of silently refusing.
+    // Existing PINs continue to require authentication before lock changes.
+    private fun withPinSetup(action:()->Unit){
+        if(prefs.getString("pin",null)!=null){
+            requirePin(action)
+            return
+        }
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(24,12,24,4)
+        }
+        val first=EditText(this).apply{
+            hint="Create PIN"
+            inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            isSingleLine=true
+        }
+        val confirm=EditText(this).apply{
+            hint="Confirm PIN"
+            inputType=android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            isSingleLine=true
+        }
+        layout.addView(first)
+        layout.addView(confirm)
+        val dialog=AlertDialog.Builder(this)
+            .setTitle("Create parental PIN")
+            .setMessage("Set a PIN to protect locked playlists, groups and channels.")
+            .setView(layout)
+            .setPositiveButton("Save PIN",null)
+            .setNegativeButton("Cancel",null)
+            .create()
+        dialog.setOnShowListener{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+                val value=first.text.toString()
+                if(value.isBlank()){
+                    first.error="Enter a PIN"
+                    first.requestFocus()
+                }else if(value!=confirm.text.toString()){
+                    confirm.error="PINs do not match"
+                    confirm.requestFocus()
+                }else{
+                    prefs.edit().putString("pin",hash(value)).apply()
+                    dialog.dismiss()
+                    Toast.makeText(this,"PIN saved",Toast.LENGTH_SHORT).show()
+                    action()
+                }
+            }
+        }
+        showSideDialog(dialog)
+        first.requestFocus()
     }
     private fun hash(pin:String)=MessageDigest.getInstance("SHA-256").digest(pin.toByteArray()).joinToString(""){"%02x".format(it)}
     private fun requirePin(action:()->Unit){
