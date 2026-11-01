@@ -4290,8 +4290,12 @@ class MainActivity: Activity() {
             setPadding(20,18,12,16)
         })
         val groups=playlistIndicesIncludingLocked().map{channels[it].group}.distinct()
-        val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels","▦  Playlists")+
-            groups.map{"▸  "+it}
+        // Prefix every remote-selectable navigation item with a stable, visible number.
+        // Group entries continue the numbering after the fixed navigation actions.
+        val fixedOptions=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels","▦  Playlists")
+        val options=(fixedOptions+groups.map{"▸  "+it}).mapIndexed{index,label->
+            "%02d".format(java.util.Locale.ROOT,index+1)+"   "+label
+        }
         val list=ListView(this)
         list.adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,options)
         drawer.addView(list,LinearLayout.LayoutParams(-1,0,1f))
@@ -4339,7 +4343,8 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("left_navigation")?.let{screen.removeView(it)}
         val sources=playlists().filter{it.enabled && channels.any{c->c.source==it.name}}
             .map{it.name}.distinct()
-        val names=listOf("＋  Add Playlist","⚙  Manage Playlists","☰  All Playlists")+sources.map{"▸  "+it}
+        val names=(listOf("＋  Add Playlist","⚙  Manage Playlists","☰  All Playlists")+sources.map{"▸  "+it})
+            .mapIndexed{index,label->"%02d".format(java.util.Locale.ROOT,index+1)+"   "+label}
         val drawer=LinearLayout(this).apply{
             tag="left_navigation"
             orientation=LinearLayout.VERTICAL
