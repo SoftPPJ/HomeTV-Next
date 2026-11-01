@@ -213,7 +213,7 @@ class MainActivity: Activity() {
                 if(channels.isNotEmpty()){
                     openStartupDestination()
                     // Show cached channels immediately; refresh the active playlist in the background.
-                    refresh({})
+                    refresh({},activeOnly=true)
                 } else {
                     // A changed playlist URL has a new cache key. Fetch it on first
                     // launch instead of silently opening an empty Home screen.
@@ -2634,9 +2634,13 @@ class MainActivity: Activity() {
             .distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
             .toMutableList()
     }
-    private fun refresh(done:()->Unit,forceRebuild:Boolean=false){
+    private fun refresh(done:()->Unit,forceRebuild:Boolean=false,activeOnly:Boolean=false){
         if(!licenseReady){showLicenseScreen("Please activate your license");return}
-        val sources=playlists().filter{it.enabled}
+        val configured=playlists().filter{it.enabled}
+        val activeSource=selectedPlaylistSource()
+            ?:channels.getOrNull(active)?.source
+            ?:configured.firstOrNull()?.name
+        val sources=configured.filter{!activeOnly || it.name==activeSource}
         if(sources.isEmpty()){
             Toast.makeText(this,"No enabled playlists. Existing channels preserved.",Toast.LENGTH_LONG).show()
             done()
