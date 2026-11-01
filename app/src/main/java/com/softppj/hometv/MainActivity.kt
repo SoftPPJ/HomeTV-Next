@@ -7,7 +7,6 @@ import android.view.*
 import android.widget.*
 import android.webkit.*
 import android.net.Uri
-import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media as VlcMedia
 import org.videolan.libvlc.MediaPlayer as VlcPlayer
@@ -307,10 +306,6 @@ class MainActivity: Activity() {
     }
 
     private var player:ExoPlayer?=null
-    private var ijkPlayer:IjkMediaPlayer?=null
-    private var ijkSurface:SurfaceView?=null
-    private var ijkVideoWidth=0
-    private var ijkVideoHeight=0
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
@@ -427,7 +422,7 @@ class MainActivity: Activity() {
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
         // Record the player that actually reached playback, not a pending fallback hint.
-        val engine=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
+        val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
         // Keep the confirmed engine paired with the URL that actually played.
         // A manually pinned URL must not be silently replaced by a tested alternative.
         val confirmedKey=channelKey(c)
@@ -844,7 +839,7 @@ class MainActivity: Activity() {
             probe=null
             core=null
             if(working)offer(candidate,"LibVLC")
-            else handler.post{probeAlternativeIjk(candidate,target,offer,next)}
+            else handler.post{next()}
         }
         try{
             val vlc=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200"))
@@ -870,46 +865,6 @@ class MainActivity: Activity() {
             p.play()
         }catch(e:Exception){android.util.Log.w("HomeTV","Alternative VLC probe failed",e);finish(false)}
     }
-    // Last fallback: headless, muted IJK probe, separate from foreground.
-    private fun probeAlternativeIjk(
-        candidate:Int,target:Channel,offer:(Int,String)->Unit,next:()->Unit
-    ){
-        var probe:IjkMediaPlayer?=null
-        var finished=false
-        var watchdog:Runnable?=null
-        fun finish(working:Boolean){
-            if(finished)return
-            finished=true
-            watchdog?.let{handler.removeCallbacks(it)}
-            try{probe?.stop();probe?.release()}catch(_:Exception){}
-            probe=null
-            if(working)offer(candidate,"IJKPlayer") else handler.post{next()}
-        }
-        try{
-            val p=IjkMediaPlayer()
-            probe=p
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",0L)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"start-on-prepared",0L)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",7000000L)
-            p.setVolume(0f,0f)
-            p.setOnPreparedListener{handler.post{
-                if(!finished)try{p.start()}catch(_:Exception){finish(false)}
-            }}
-            p.setOnInfoListener{_,what,_->
-                if(what==3 || what==10002)handler.post{finish(true)}
-                false
-            }
-            p.setOnErrorListener{_,_,_->handler.post{finish(false)};true}
-            p.setOnCompletionListener{handler.post{finish(false)}}
-            watchdog=Runnable{finish(false)}
-            handler.postDelayed(watchdog!!,8000L)
-            p.setDataSource(target.url)
-            p.prepareAsync()
-        }catch(e:Exception){
-            android.util.Log.w("HomeTV","Alternative IJK probe failed",e)
-            finish(false)
-        }
-    }
     private var testingAlternativeKey:String?=null
     // Once a channel has played successfully, the URL and engine are pinned.
     // Recovery never changes either; only a viewer action may replace them.
@@ -917,19 +872,19 @@ class MainActivity: Activity() {
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
         val c=channels[index]
         val key=channelKey(c)
-        val current=when{ijkPlayer!=null->"IJKPlayer";vlcPlayer!=null->"LibVLC";else->"Media3"}
+        val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
         val pinnedUrl=prefs.getString("manual_url_"+key,null)
             ?:prefs.getString("working_url_"+key,null)
         val pinnedEngine=prefs.getString("manual_engine_"+key,null)
             ?:prefs.getString("confirmed_engine_"+key,null)
-        val established=pinnedUrl!=null || pinnedEngine in setOf("Media3","LibVLC","IJKPlayer")
+        val established=pinnedUrl!=null || pinnedEngine in setOf("Media3","LibVLC")
         if(established){
             recoveryPending.add(key)
             // Only a confirmed failure initiates a background alternative search.
             // It must not change the active playback or saved preferences.
             checkFailedChannelAlternatives(index,screen)
             if(!prefs.getBoolean("auto_reconnect",true))return true
-            val fixedEngine=pinnedEngine?.takeIf{it in setOf("Media3","LibVLC","IJKPlayer")} ?:current
+            val fixedEngine=pinnedEngine?.takeIf{it in setOf("Media3","LibVLC")} ?:current
             val count=(recoveryAttempts[c.url] ?:0)+1
             recoveryAttempts[c.url]=count
             fallbackEngineOverride=fixedEngine
@@ -1830,35 +1785,36 @@ class MainActivity: Activity() {
             else->"http"
         }
     }
+    // Media3 is the normal engine; LibVLC remains first for RTMP/VLC-only protocols.
     private fun initialEngines(c:Channel):List<String> = when(streamKind(c.url)){
-        "rtmp","vlc"->listOf("LibVLC","IJKPlayer","Media3")
-        else->listOf("Media3","LibVLC","IJKPlayer")
+        "rtmp","vlc"->listOf("LibVLC","Media3")
+        else->listOf("Media3","LibVLC")
     }
     private fun engineFor(c:Channel):String{
         // Explicit channel choice must win over any stale automatic fallback.
         prefs.getString("manual_engine_"+channelKey(c),null)?.let{
-            if(it=="Media3" || it=="LibVLC" || it=="IJKPlayer")return it
+            if(it=="Media3" || it=="LibVLC")return it
         }
         if(prefs.getString("working_url_"+channelKey(c),null)==c.url){
             prefs.getString("confirmed_engine_"+channelKey(c),null)?.let{
-                if(it in setOf("Media3","LibVLC","IJKPlayer"))return it
+                if(it in setOf("Media3","LibVLC"))return it
             }
         }
         fallbackEngineOverride?.let{return it}
         val universal=prefs.getString("engine","Auto") ?: "Auto"
         if(prefs.getBoolean("libvlc_only_"+hash(c.url),false))return "LibVLC"
-        if(universal=="Media3" || universal=="LibVLC" || universal=="IJKPlayer")return universal
+        if(universal=="Media3" || universal=="LibVLC")return universal
         return initialEngines(c).first()
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
         val c=channels[i]
-        val universal=prefs.getString("engine","Media3") ?: "Media3"
-        val choices=arrayOf("Auto (Universal: "+universal+")","Media3","LibVLC","IJKPlayer")
+        val universal=(prefs.getString("engine","Media3") ?: "Media3")
+            .takeIf{it=="Media3" || it=="LibVLC"} ?: "Auto"
+        val choices=arrayOf("Auto (Universal: "+universal+")","Media3","LibVLC")
         val selected=when(prefs.getString("manual_engine_"+channelKey(c),null)){
             "Media3"->1
             "LibVLC"->2
-            "IJKPlayer"->3
             else->0
         }
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
@@ -1961,8 +1917,27 @@ class MainActivity: Activity() {
         }
         super.onPause()
     }
+    private fun migrateLegacyIJKPreferences(){
+        val editor=prefs.edit()
+        var changed=false
+        prefs.all.forEach{(key,value)->
+            if(key=="engine" && value=="IJKPlayer"){
+                editor.putString("engine","Auto")
+                changed=true
+            }else if(value=="IJKPlayer" && key.startsWith("manual_engine_")){
+                editor.remove(key)
+                changed=true
+            }else if(value=="IJKPlayer" && key.startsWith("confirmed_engine_")){
+                editor.remove(key)
+                editor.remove("working_url_"+key.removePrefix("confirmed_engine_"))
+                changed=true
+            }
+        }
+        if(changed)editor.apply()
+    }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
+        migrateLegacyIJKPreferences()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
         root.setBackgroundColor(0xFF101E31.toInt())
@@ -2619,14 +2594,30 @@ class MainActivity: Activity() {
     @Volatile private var refreshGeneration=0
     private fun cachedChannels():MutableList<Channel>{
         if(!licenseReady)return mutableListOf()
-        val found=mutableListOf<Channel>()
-        playlists().filter{it.enabled}.forEach{p->
-            try{
-                val file=cacheFile(p)
-                if(file.exists())found.addAll(parseM3u(readPlaylistCache(file),p.name))
-            }catch(e:Exception){android.util.Log.w("HomeTV","Playlist cache read failed",e)}
+        val sources=playlists().filter{it.enabled}
+        if(sources.isEmpty())return mutableListOf()
+        // Parse cached playlists concurrently on a small bounded pool. The TV
+        // UI stays free, and startup never waits for network playlist refreshes.
+        val results=Array(sources.size){emptyList<Channel>()}
+        val pool=java.util.concurrent.Executors.newFixedThreadPool(minOf(3,sources.size))
+        try{
+            val tasks=sources.mapIndexed{index,p->
+                pool.submit{
+                    try{
+                        val file=cacheFile(p)
+                        if(file.exists())results[index]=parseM3u(readPlaylistCache(file),p.name)
+                    }catch(e:Exception){
+                        android.util.Log.w("HomeTV","Playlist cache read failed: "+p.name,e)
+                    }
+                }
+            }
+            tasks.forEach{it.get()}
+        }finally{
+            pool.shutdown()
         }
-        return found.distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}.toMutableList()
+        return results.asSequence().flatten()
+            .distinctBy{it.source.lowercase()+"|"+it.name.lowercase()+"|"+it.url}
+            .toMutableList()
     }
     private fun refresh(done:()->Unit,forceRebuild:Boolean=false){
         if(!licenseReady){showLicenseScreen("Please activate your license");return}
@@ -4248,7 +4239,7 @@ class MainActivity: Activity() {
         val gain=(prefs.getInt("channel_volume_"+hash(c.url),100).coerceIn(0,100))/100f
         player?.volume=gain
         try{vlcPlayer?.volume=(gain*100).toInt()}catch(_:Exception){}
-        try{ijkPlayer?.setVolume(gain,gain)}catch(_:Exception){}
+        
     }
     private fun configureChannelVolume(index:Int){
         val c=channels.getOrNull(index) ?:return
@@ -4268,7 +4259,7 @@ class MainActivity: Activity() {
                     val gain=value.coerceIn(0,100)/100f
                     player?.volume=gain
                     try{vlcPlayer?.volume=value}catch(_:Exception){}
-                    try{ijkPlayer?.setVolume(gain,gain)}catch(_:Exception){}
+                    
                 }
             }
             override fun onStartTrackingTouch(bar:SeekBar?){}
@@ -4800,21 +4791,34 @@ class MainActivity: Activity() {
     private fun routeHttpChannel(index:Int){
         val c=channels.getOrNull(index) ?:return
         val url=c.url
-        val cached=urlRouteCache[url]
         val now=android.os.SystemClock.elapsedRealtime()
+        val cached=urlRouteCache[url]
         if(cached!=null && now-cached.second<3600000L){
             playIndexResolved(index,cached.first=="web")
             return
         }
+        // Persist URL classification so restarts do not repeat a network sniff
+        // before the last-watched channel can begin playing.
+        val routeKey="http_route_"+hash(url)
+        val persistedRoute=prefs.getString(routeKey,"") ?: ""
+        val persistedAt=prefs.getLong(routeKey+"_time",0L)
+        val wallNow=System.currentTimeMillis()
+        if((persistedRoute=="native" || persistedRoute=="web") &&
+            persistedAt>0L && wallNow>=persistedAt &&
+            wallNow-persistedAt<24L*60L*60L*1000L){
+            urlRouteCache[url]=Pair(persistedRoute,now)
+            playIndexResolved(index,persistedRoute=="web")
+            return
+        }
         val requestedGeneration=++httpRouteGeneration
         thread(name="HomeTV-URL-Classifier"){
-            var route="web" // Unknown HTTP pages are safer in WebView than a native decoder.
+            var route="web"
             try{
                 val connection=(URL(url).openConnection() as java.net.HttpURLConnection)
                 try{
                     connection.instanceFollowRedirects=true
-                    connection.connectTimeout=3500
-                    connection.readTimeout=3500
+                    connection.connectTimeout=1800
+                    connection.readTimeout=1800
                     connection.requestMethod="GET"
                     connection.setRequestProperty("Range","bytes=0-511")
                     c.headers.forEach{(k,v)->
@@ -4848,6 +4852,8 @@ class MainActivity: Activity() {
                 if(requestedGeneration!=httpRouteGeneration || !licenseReady)return@post
                 if(index !in channels.indices || channels[index].url!=url)return@post
                 urlRouteCache[url]=Pair(route,android.os.SystemClock.elapsedRealtime())
+                prefs.edit().putString(routeKey,route)
+                    .putLong(routeKey+"_time",System.currentTimeMillis()).apply()
                 playIndexResolved(index,route=="web")
             }
         }
@@ -5297,8 +5303,6 @@ class MainActivity: Activity() {
                     viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("t",seconds.toString()+"s").appendQueryParameter("autoplay","1").build().toString())
                 }
             }
-        }else if(engineFor(c)=="IJKPlayer"){
-            startIjk(c,index,screen)
         }else if(engineFor(c)=="LibVLC"){
             startVlc(c,index,screen)
         }else{
@@ -5403,78 +5407,6 @@ class MainActivity: Activity() {
             retryTask=task
             handler.postDelayed(task,2000L*retryCount)
         }else showBanner("Stream stopped. Try another source or channel.",true)
-    }
-    private fun startIjk(c:Channel,index:Int,screen:FrameLayout){
-        try{
-            val ijk=IjkMediaPlayer()
-            ijkPlayer=ijk
-            val surface=SurfaceView(this)
-            ijkSurface=surface
-            screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
-            ijk.setDisplay(surface.holder)
-            ijk.setOnVideoSizeChangedListener{_,width,height,_,_->
-                handler.post{if(ijkPlayer===ijk){ijkVideoWidth=width;ijkVideoHeight=height;applyVideoSize()}}
-            }
-            surface.post{if(ijkPlayer===ijk)applyVideoSize()}
-            ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER,"mediacodec",1L)
-            ijk.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT,"timeout",10000000L)
-            var failed=false
-            var firstFrame=false
-            val watchdog=Runnable{
-                if(!firstFrame && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
-                    failed=true
-                    android.util.Log.w("HomeTV","IJKPlayer first-frame timeout for "+c.name)
-                    handleEngineFailure(index,screen)
-                }
-            }
-            ijk.setOnInfoListener{_,what,_->
-                // First video frame (3) or first audio rendering (10002).
-                // Prepared alone does not establish that media actually rendered.
-                if(what==3 || what==10002){
-                    handler.post{
-                        if(!firstFrame && !failed && ijkPlayer===ijk && active==index && videoScreen===screen){
-                            firstFrame=true
-                            handler.removeCallbacks(watchdog)
-                            rememberWorking(c)
-                            autoBufferHealthy()
-                        }
-                    }
-                }
-                false
-            }
-            ijk.setOnPreparedListener{
-                handler.post{
-                    if(!failed && ijkPlayer===ijk && active==index && videoScreen===screen){
-                        try{ijk.start()}
-                        catch(e:Exception){failed=true;handler.removeCallbacks(watchdog);android.util.Log.w("HomeTV","IJK start failed",e);handleEngineFailure(index,screen)}
-                    }
-                }
-            }
-            ijk.setOnErrorListener{_,_,_->
-                handler.post{
-                    if(ijkPlayer===ijk && active==index && videoScreen===screen && !failed){
-                        failed=true
-                        handler.removeCallbacks(watchdog)
-                        handleEngineFailure(index,screen)
-                    }
-                }
-                true
-            }
-            ijk.setOnCompletionListener{
-                handler.post{
-                    if(ijkPlayer===ijk && active==index && videoScreen===screen && !failed){
-                        failed=true
-                        handleEngineFailure(index,screen)
-                    }
-                }
-            }
-            ijk.setDataSource(this,Uri.parse(c.url),c.headers)
-            ijk.prepareAsync()
-            handler.postDelayed(watchdog,15000L)
-        }catch(e:Exception){
-            android.util.Log.w("HomeTV","IJKPlayer startup failed",e)
-            handleEngineFailure(index,screen)
-        }
     }
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
@@ -5637,9 +5569,14 @@ class MainActivity: Activity() {
         if(channels.isEmpty()){showHome();return}
         val url=prefs.getString("last_url",null)
         val index=channels.indexOfFirst{it.url==url}
+        // Avoid building and sorting the full surfing list on the common
+        // startup path when the saved channel is already present and unlocked.
+        if(index>=0 && !isLocked(channels[index])){
+            playIndex(index)
+            return
+        }
         val available=surfingIndices()
-        if(index>=0 && !isLocked(channels[index]))playIndex(index)
-        else if(available.isNotEmpty())playIndex(preferredChannel(available.first()))
+        if(available.isNotEmpty())playIndex(preferredChannel(available.first()))
         else allChannels()
     }
     private fun liveSettings(){
@@ -6131,8 +6068,6 @@ class MainActivity: Activity() {
         qualityUpgradeTask?.let{handler.removeCallbacks(it)}
         qualityUpgradeTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
-        ijkPlayer?.let{try{it.stop();it.release()}catch(_:Exception){}};ijkPlayer=null
-        ijkSurface=null;ijkVideoWidth=0;ijkVideoHeight=0
         player?.release();player=null
         vlcPlayer?.let{v->
             try{v.stop();v.vlcVout.detachViews();v.release()}catch(_:Exception){}
@@ -6144,5 +6079,33 @@ class MainActivity: Activity() {
         webTvDirectoryEntries=emptyList()
         active=-1
     }
-    override fun onDestroy(){epgTuneTask?.let{handler.removeCallbacks(it)};epgTuneTask=null;sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null;stopVlcProbe();backgroundProbeGeneration++;periodicProbeTask?.let{handler.removeCallbacks(it)};probePlayers.toList().forEach{it.release()};probePlayers.clear();stopPlayback();super.onDestroy()}
+    override fun onTrimMemory(level:Int){
+        super.onTrimMemory(level)
+        if(level>=ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)posterCache.evictAll()
+    }
+    override fun onDestroy(){
+        epgTuneTask?.let{handler.removeCallbacks(it)};epgTuneTask=null
+        sleepTimerTask?.let{handler.removeCallbacks(it)};sleepTimerTask=null
+        stopVlcProbe()
+        backgroundProbeGeneration++
+        refreshGeneration++
+        periodicProbeTask?.let{handler.removeCallbacks(it)}
+        probePlayers.toList().forEach{try{it.release()}catch(_:Exception){}}
+        probePlayers.clear()
+        stopPlayback()
+        // Drop in-memory caches and queued UI work on final exit. Keep the
+        // persistent playlist files, preferences and validated license cache.
+        handler.removeCallbacksAndMessages(null)
+        posterCache.evictAll()
+        posterLoading.clear()
+        urlRouteCache.clear()
+        engineAttempts.clear()
+        recoveryAttempts.clear()
+        unavailableChannels.clear()
+        playedThisSession.clear()
+        failedUrlsThisSession.clear()
+        initialTried.clear()
+        alternativeAttempted.clear()
+        super.onDestroy()
+    }
 }
