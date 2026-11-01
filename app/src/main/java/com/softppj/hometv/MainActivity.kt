@@ -3143,7 +3143,9 @@ class MainActivity: Activity() {
         root.addView(button("Home"){showHome()})
     }
     private fun showGroup(group:String){
-        openLockedGroup(group){showGroupContents(group)}
+        val source=selectedPlaylistSource() ?: channels.firstOrNull{it.group==group}?.source
+        val open={openLockedGroup(group){showGroupContents(group)}}
+        if(source!=null)openLockedPlaylist(source,open) else open()
     }
     private fun showGroupContents(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
@@ -4322,7 +4324,9 @@ class MainActivity: Activity() {
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
-        openLockedGroup(group){showGroupDrawerContents(group)}
+        val source=selectedPlaylistSource() ?: channels.firstOrNull{it.group==group}?.source
+        val open={openLockedGroup(group){showGroupDrawerContents(group)}}
+        if(source!=null)openLockedPlaylist(source,open) else open()
     }
     private fun showGroupDrawerContents(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
