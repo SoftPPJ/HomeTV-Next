@@ -32,8 +32,4 @@ dependencies {
     // Jellyfin 1.5.0+1 matches the existing Media3 1.5.x API; GPLv3 applies.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("org.videolan.android:libvlc-all:3.5.1")
-    // IJKPlayer is opt-in per channel; retain Media3 and LibVLC as defaults.
-    implementation("tv.danmaku.ijk.media:ijkplayer-java:0.8.8")
-    implementation("tv.danmaku.ijk.media:ijkplayer-armv7a:0.8.8")
-    implementation("tv.danmaku.ijk.media:ijkplayer-arm64:0.8.8")
 }
