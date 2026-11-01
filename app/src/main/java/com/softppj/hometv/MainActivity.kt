@@ -5655,16 +5655,14 @@ class MainActivity: Activity() {
             minLines=6;maxLines=12;setSingleLine(false)
         }
         AlertDialog.Builder(this).setTitle("Restore settings (not license or PIN)")
-            .setView(input).setPositiveButton("Restore"){_,_->
+            .setView(input).setPositiveButton("Continue"){_,_->
                 try{
                     val backup=JSONObject(input.text.toString())
                     require(backup.optString("format")=="HomeTV-settings-v1")
                     val values=backup.getJSONObject("settings")
-                    // Validate every entry before modifying preferences.
-                    // A malformed item must not leave a half-restored profile.
+                    // Validate the complete backup before offering either restore mode.
                     val staged=mutableListOf<Pair<String,Any>>()
                     val iterator=values.keys()
-                    var count=0
                     while(iterator.hasNext()){
                         val key=iterator.next()
                         if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
@@ -5684,21 +5682,47 @@ class MainActivity: Activity() {
                             else->throw IllegalArgumentException("Unsupported setting type for "+key)
                         }
                         staged.add(key to value)
-                        count++
                     }
-                    val edit=prefs.edit()
-                    staged.forEach{(key,value)->
-                        when(value){
-                            is String->edit.putString(key,value)
-                            is Boolean->edit.putBoolean(key,value)
-                            is Int->edit.putInt(key,value)
-                            is Long->edit.putLong(key,value)
-                            is Float->edit.putFloat(key,value)
-                            is Set<*>->edit.putStringSet(key,value.filterIsInstance<String>().toSet())
-                        }
-                    }
-                    edit.apply()
-                    Toast.makeText(this,"Restored "+count+" settings. Restart HomeTV to apply all changes.",Toast.LENGTH_LONG).show()
+                    val incomingKeys=staged.map{it.first}.toSet()
+                    AlertDialog.Builder(this).setTitle("Choose restore method")
+                        .setItems(arrayOf("Merge with existing settings","Replace existing settings")){_,mode->
+                            try{
+                                val edit=prefs.edit()
+                                if(mode==1){
+                                    // Replace only restorable app settings. Never remove
+                                    // activation, installation identity, parental PIN or credentials.
+                                    prefs.all.keys.filter{key->
+                                        key !in incomingKeys && key!="pin" && key!="last_url" &&
+                                            !key.startsWith("license_") &&
+                                            !key.contains("password",ignoreCase=true) &&
+                                            !key.contains("secret",ignoreCase=true) &&
+                                            !key.contains("token",ignoreCase=true) &&
+                                            !key.contains("credential",ignoreCase=true)
+                                    }.forEach{edit.remove(it)}
+                                }
+                                staged.forEach{(key,incoming)->
+                                    val value:Any=if(mode==0 && incoming is Set<*>){
+                                        (prefs.getStringSet(key,emptySet()) ?: emptySet()) +
+                                            incoming.filterIsInstance<String>()
+                                    }else incoming
+                                    when(value){
+                                        is String->edit.putString(key,value)
+                                        is Boolean->edit.putBoolean(key,value)
+                                        is Int->edit.putInt(key,value)
+                                        is Long->edit.putLong(key,value)
+                                        is Float->edit.putFloat(key,value)
+                                        is Set<*>->edit.putStringSet(key,value.filterIsInstance<String>().toSet())
+                                    }
+                                }
+                                edit.apply()
+                                Toast.makeText(this,
+                                    (if(mode==0)"Merged " else "Replaced with ")+staged.size+
+                                        " settings. License and parental PIN were kept.",
+                                    Toast.LENGTH_LONG).show()
+                            }catch(e:Exception){
+                                Toast.makeText(this,"Restore failed: "+e.message,Toast.LENGTH_LONG).show()
+                            }
+                        }.setNegativeButton("Cancel",null).show()
                 }catch(e:Exception){
                     Toast.makeText(this,"Invalid backup: "+e.message,Toast.LENGTH_LONG).show()
                 }
