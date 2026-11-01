@@ -465,6 +465,9 @@ class MainActivity: Activity() {
     private lateinit var root:LinearLayout
     private val lockIds get() = prefs.getStringSet("locked_channels", emptySet()) ?: emptySet()
     private val lockGroups get() = prefs.getStringSet("locked_groups", emptySet()) ?: emptySet()
+    // PIN approval unlocks a protected playlist/group for this app session only.
+    private val unlockedPlaylistsThisSession=mutableSetOf<String>()
+    private val unlockedGroupsThisSession=mutableSetOf<String>()
     private var unlockedChannel:String?=null
     private var videoScreen:FrameLayout?=null
     private var currentPlayerView:PlayerView?=null
@@ -541,6 +544,10 @@ class MainActivity: Activity() {
     private fun playlistIndices():List<Int>{
         val selected=selectedPlaylistSource()
         return visibleIndices().filter{selected==null || channels[it].source==selected}
+    }
+    private fun playlistIndicesIncludingLocked():List<Int>{
+        val selected=selectedPlaylistSource()
+        return channelNumbers().filter{selected==null || channels[it].source==selected}
     }
     private fun surfingIndices():List<Int>{
         val base=playlistIndices().filter{
@@ -944,7 +951,7 @@ class MainActivity: Activity() {
         return true
     }
     private fun isLocked(c:Channel):Boolean{
-        if(lockGroups.contains(c.group))return true
+        if(lockGroups.contains(c.group) && c.group !in unlockedGroupsThisSession)return true
         ensureChannelIndex()
         return (channelByKey[channelKey(c)] ?:emptyList()).any{lockIds.contains(id(channels[it]))}
     }
@@ -978,7 +985,15 @@ class MainActivity: Activity() {
     }
     // Keep hidden channels visible in lists for manual playback and long-press unhide.
     // Normal CH+/CH- surfing still excludes hidden channels via surfingIndices().
-    private fun visibleIndices()=channelNumbers()
+    private fun visibleIndices():List<Int>{
+        val lockedSources=lockedPlaylistNames()
+        val lockedGroupsNow=lockedGroupNames()
+        return channelNumbers().filter{index->
+            val channel=channels[index]
+            (channel.source !in lockedSources || channel.source in unlockedPlaylistsThisSession) &&
+                (channel.group !in lockedGroupsNow || channel.group in unlockedGroupsThisSession)
+        }
+    }
     private fun channelLabel(index:Int):String{
         val c=channels[index]
         val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if((channelByKey[channelKey(c)] ?:emptyList()).any{favoriteIds.contains(id(channels[it]))})"★ " else "")
@@ -3097,7 +3112,7 @@ class MainActivity: Activity() {
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset("Channels (${visibleIndices().size})")
         root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
-        val groups=visibleIndices().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
+        val groups=playlistIndicesIncludingLocked().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         // Virtualize groups too: do not create a Button for every playlist group.
         val list=ListView(this).apply{
             dividerHeight=1
@@ -3202,13 +3217,15 @@ class MainActivity: Activity() {
         prefs.getStringSet("locked_groups",emptySet()) ?: emptySet()
 
     private fun openLockedPlaylist(source:String,action:()->Unit){
-        if(source in lockedPlaylistNames()){
-            requirePin(action,"playlist:"+source){deletePlaylistAfterPinFailures(source)}
+        if(source in lockedPlaylistNames() && source !in unlockedPlaylistsThisSession){
+            requirePin({unlockedPlaylistsThisSession.add(source);action()},
+                "playlist:"+source){deletePlaylistAfterPinFailures(source)}
         }else action()
     }
     private fun openLockedGroup(group:String,action:()->Unit){
-        if(group in lockedGroupNames()){
-            requirePin(action,"group:"+group){deleteGroupAfterPinFailures(group)}
+        if(group in lockedGroupNames() && group !in unlockedGroupsThisSession){
+            requirePin({unlockedGroupsThisSession.add(group);action()},
+                "group:"+group){deleteGroupAfterPinFailures(group)}
         }else action()
     }
     private fun deletePlaylistAfterPinFailures(name:String){
@@ -4196,7 +4213,7 @@ class MainActivity: Activity() {
             setTextColor(android.graphics.Color.WHITE)
             setPadding(20,18,12,16)
         })
-        val groups=playlistIndices().map{channels[it].group}.distinct()
+        val groups=playlistIndicesIncludingLocked().map{channels[it].group}.distinct()
         val options=listOf("⚙  Settings","⌂  Home","★  Favorites","🙈  Hidden channels","✓  Check hidden channels","▤  EPG / TV Guide","↻  Refresh from source","☰  All channels","▦  Playlists")+
             groups.map{"▸  "+it}
         val list=ListView(this)
@@ -5180,6 +5197,14 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        if(c.source in lockedPlaylistNames() && c.source !in unlockedPlaylistsThisSession){
+            openLockedPlaylist(c.source){playIndex(index)}
+            return
+        }
+        if(c.group in lockedGroupNames() && c.group !in unlockedGroupsThisSession){
+            openLockedGroup(c.group){playIndex(index)}
+            return
+        }
         // Do not contact or classify a locked channel before PIN approval.
         if(unlockedChannel!=id(c) && isLocked(c)){
             requirePin {unlockedChannel=id(c);playIndex(index)}
