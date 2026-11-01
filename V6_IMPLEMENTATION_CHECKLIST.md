@@ -77,3 +77,10 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 | Persistence | Favorites, profiles, manual URL/engine, backup/restore | PENDING DEVICE |
 
 Release rule: do not describe the app as fully implemented or production-ready until these gates pass. Avoid uploading or publishing an APK without explicit approval.
+
+## Remote channel preview update — 1 November 2026
+- Commit 4a4208d: UP/DOWN now move a channel highlight/preview only; the currently playing stream is not replaced.
+- OK confirms and plays the highlighted channel. BACK cancels the preview and leaves the current stream playing.
+- CH+/CH− remain immediate channel-switch controls and clear any pending preview.
+- The preview remains visible until confirmed, cancelled, or another channel is previewed. Drawer/menu navigation is unchanged.
+- Source change only. Kotlin compilation and Android TV remote/device regression tests are still pending; do not mark the remote release gate passed yet.
