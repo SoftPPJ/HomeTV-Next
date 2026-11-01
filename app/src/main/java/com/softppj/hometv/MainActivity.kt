@@ -3074,7 +3074,9 @@ class MainActivity: Activity() {
                     val scheme=url.substringBefore("://","").lowercase(java.util.Locale.ROOT)
                     if("://" in url && scheme in setOf(
                             "http","https","rtmp","rtmps","rtsp","rtp","udp","mmsh","mms")){
-                        out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel,mediaType,year,genre,artist,album,season,episode,description))
+                        val deletedGroups=prefs.getStringSet("deleted_groups",emptySet()) ?: emptySet()
+                        if(source+"|"+group !in deletedGroups)
+                            out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel,mediaType,year,genre,artist,album,season,episode,description))
                     }
                 }
             }
@@ -3191,6 +3193,72 @@ class MainActivity: Activity() {
         }
     }
     private fun id(c:Channel)=c.source+"|"+c.name+"|"+c.url
+    private fun lockedPlaylistNames():Set<String> =
+        prefs.getStringSet("locked_playlists",emptySet()) ?: emptySet()
+    private fun lockedGroupNames():Set<String> =
+        prefs.getStringSet("locked_groups",emptySet()) ?: emptySet()
+
+    private fun openLockedPlaylist(source:String,action:()->Unit){
+        if(source in lockedPlaylistNames()){
+            requirePin(action,"playlist:"+source){deletePlaylistAfterPinFailures(source)}
+        }else action()
+    }
+    private fun openLockedGroup(group:String,action:()->Unit){
+        if(group in lockedGroupNames()){
+            requirePin(action,"group:"+group){deleteGroupAfterPinFailures(group)}
+        }else action()
+    }
+    private fun deletePlaylistAfterPinFailures(name:String){
+        val items=playlists().toMutableList()
+        val removed=items.firstOrNull{it.name==name}
+        if(removed==null)return
+        val wasPlaying=channels.getOrNull(active)?.source==name
+        if(wasPlaying)stopPlayback()
+        savePlaylists(items.filterNot{it.name==name})
+        if(items.none{it.name!=name && it.url==removed.url})
+            try{cacheFile(removed).delete()}catch(_:Exception){}
+        channels=channels.filter{it.source!=name}.toMutableList()
+        channelIndexOwner=null;channelIndexSize=-1
+        val selected=prefs.getString("selected_playlist_source",null)
+        val next=items.firstOrNull{it.name!=name && it.enabled && channels.any{c->c.source==it.name}}?.name
+        val edit=prefs.edit()
+        if(selected==name){if(next==null)edit.remove("selected_playlist_source") else edit.putString("selected_playlist_source",next)}
+        val locks=lockedPlaylistNames().toMutableSet();locks.remove(name)
+        edit.putStringSet("locked_playlists",locks)
+        edit.remove("pin_failures_playlist:"+name)
+        edit.apply()
+        if(wasPlaying){
+            active=-1
+            val last=next?.let{prefs.getString("last_url_"+it,null)}
+            val target=channels.indexOfFirst{it.source==next && it.url==last}
+            val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
+            if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback) else showHome()
+        }else{
+            Toast.makeText(this,"Playlist deleted after 3 incorrect PIN attempts",Toast.LENGTH_LONG).show()
+            showPlaylistDrawer()
+        }
+    }
+    private fun deleteGroupAfterPinFailures(group:String){
+        val sources=channels.filter{it.group==group}.map{it.source}.toSet()
+        val deleted=prefs.getStringSet("deleted_groups",emptySet())?.toMutableSet() ?: mutableSetOf()
+        sources.forEach{deleted.add(it+"|"+group)}
+        prefs.edit().putStringSet("deleted_groups",deleted)
+            .remove("pin_failures_group:"+group).apply()
+        val wasPlaying=channels.getOrNull(active)?.group==group
+        if(wasPlaying)stopPlayback()
+        channels=channels.filter{it.group!=group}.toMutableList()
+        channelIndexOwner=null;channelIndexSize=-1
+        val locks=lockedGroupNames().toMutableSet();locks.remove(group)
+        prefs.edit().putStringSet("locked_groups",locks).apply()
+        if(wasPlaying){
+            active=-1
+            val next=channels.indexOfFirst{it.mediaType=="live"}
+            if(next>=0)playIndex(next) else showHome()
+        }else{
+            Toast.makeText(this,"Group deleted after 3 incorrect PIN attempts",Toast.LENGTH_LONG).show()
+            if(active<0)showChannels()
+        }
+    }
     private fun toggleLock(value:String,group:Boolean){
         requirePin {
             val key=if(group)"locked_groups" else "locked_channels"
@@ -3203,12 +3271,26 @@ class MainActivity: Activity() {
         }
     }
     private fun hash(pin:String)=MessageDigest.getInstance("SHA-256").digest(pin.toByteArray()).joinToString(""){"%02x".format(it)}
-    private fun requirePin(action:()->Unit){
+    private fun requirePin(action:()->Unit,failureKey:String?=null,onThirdFailure:(()->Unit)?=null){
         val saved=prefs.getString("pin",null)
         if(saved==null){Toast.makeText(this,"Set a PIN in Settings first",Toast.LENGTH_LONG).show();return}
         val field=EditText(this).apply{inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;hint="Password"}
         showSideDialog(AlertDialog.Builder(this).setTitle("Enter password").setView(field).setPositiveButton("Unlock"){_,_->
-            if(hash(field.text.toString())==saved)action() else Toast.makeText(this,"Incorrect password",Toast.LENGTH_SHORT).show()
+            if(hash(field.text.toString())==saved){
+                if(failureKey!=null)prefs.edit().remove("pin_failures_"+failureKey).apply()
+                action()
+            }else if(failureKey!=null && onThirdFailure!=null){
+                val key="pin_failures_"+failureKey
+                val attempts=prefs.getInt(key,0)+1
+                if(attempts>=3){
+                    prefs.edit().remove(key).apply()
+                    Toast.makeText(this,"3 incorrect PIN attempts. The locked "+failureKey.substringBefore(":")+" will be deleted.",Toast.LENGTH_LONG).show()
+                    onThirdFailure()
+                }else{
+                    prefs.edit().putInt(key,attempts).apply()
+                    Toast.makeText(this,"Incorrect PIN. "+(3-attempts)+" attempt(s) remaining before deletion.",Toast.LENGTH_LONG).show()
+                }
+            }else Toast.makeText(this,"Incorrect password",Toast.LENGTH_SHORT).show()
         }.setNegativeButton("Cancel",null).create())
     }
     private fun showBanner(message:String, error:Boolean=false){
