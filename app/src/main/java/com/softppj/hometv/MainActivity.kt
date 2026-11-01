@@ -3867,17 +3867,21 @@ class MainActivity: Activity() {
         if(!isPreview)handler.postDelayed(task,4000)
     }
     private fun clearChannelPreview(){
+        val hadPreview=previewIndex>=0
+        if(!hadPreview && previewPlayer==null && previewPanel==null)return
         previewIndex=-1
         previewTask?.let{handler.removeCallbacks(it)}
         previewTask=null
         closeVideoPreview()
-        previewInfoPanel?.let{panel->
-            (panel.parent as? android.view.ViewGroup)?.removeView(panel)
-            if(banner===panel)banner=null
+        if(hadPreview){
+            previewInfoPanel?.let{panel->
+                (panel.parent as? android.view.ViewGroup)?.removeView(panel)
+                if(banner===panel)banner=null
+            }
+            previewInfoPanel=null
+            bannerTask?.let{handler.removeCallbacks(it)}
+            bannerTask=null
         }
-        previewInfoPanel=null
-        bannerTask?.let{handler.removeCallbacks(it)}
-        bannerTask=null
     }
     private fun confirmPreview(){
         val target=previewIndex
