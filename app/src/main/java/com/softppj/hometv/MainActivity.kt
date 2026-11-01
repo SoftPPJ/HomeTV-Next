@@ -2513,38 +2513,60 @@ class MainActivity: Activity() {
     private fun managePlaylists(){
         reset("Playlists")
         val list=playlists()
+        val locked=prefs.getStringSet("locked_playlists",emptySet())?.toMutableSet() ?: mutableSetOf()
         list.forEachIndexed { index,p ->
-            root.addView(button((if(p.enabled)"✓ " else "○ ")+p.name+" — "+(if(p.url.contains("/get.php?"))"Xtream Codes" else if(p.url.startsWith("file:"))"Local M3U" else p.url.take(40))){
-                val opts=arrayOf("Enable / Disable","Edit","Delete")
-                AlertDialog.Builder(this).setTitle(p.name).setItems(opts){_,which->
-                    when(which){
-                        0->{list[index]=p.copy(enabled=!p.enabled);savePlaylists(list);managePlaylists()}
-                        1->editPlaylist(index)
-                        2->AlertDialog.Builder(this).setMessage("Delete playlist?").setPositiveButton("Delete"){_,_->
-                            val removed=list.removeAt(index)
-                            savePlaylists(list)
-                            val wasPlaying=channels.getOrNull(active)?.source==removed.name
-                            if(wasPlaying)stopPlayback()
-                            channels=channels.filter{it.source!=removed.name}.toMutableList()
-                            channelIndexOwner=null
-                            channelIndexSize=-1
-                            val currentSource=prefs.getString("selected_playlist_source",null)
-                            if(currentSource==removed.name || wasPlaying){
-                                val next=list.firstOrNull{it.enabled && channels.any{c->c.source==it.name}}?.name
-                                prefs.edit().apply{if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)}.apply()
-                                if(wasPlaying){
-                                    active=-1
-                                    val last=next?.let{prefs.getString("last_url_"+it,null)}
-                                    val target=channels.indexOfFirst{it.source==next && it.url==last}
-                                    val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
-                                    if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback)
+            val isLocked=p.name in locked
+            val row=button((if(isLocked)"🔒 " else if(p.enabled)"✓ " else "○ ")+p.name+" — "+(if(p.url.contains("/get.php?"))"Xtream Codes" else if(p.url.startsWith("file:"))"Local M3U" else p.url.take(40))){
+                val openOptions={
+                    val opts=arrayOf("Enable / Disable","Edit","Delete")
+                    AlertDialog.Builder(this).setTitle(p.name).setItems(opts){_,which->
+                        when(which){
+                            0->{list[index]=p.copy(enabled=!p.enabled);savePlaylists(list);managePlaylists()}
+                            1->editPlaylist(index)
+                            2->AlertDialog.Builder(this).setMessage("Delete playlist?").setPositiveButton("Delete"){_,_->
+                                val removed=list.removeAt(index)
+                                savePlaylists(list)
+                                val remainingSameUrl=list.any{it.url==removed.url}
+                                if(!remainingSameUrl)try{cacheFile(removed).delete()}catch(_:Exception){}
+                                val currentLocks=prefs.getStringSet("locked_playlists",emptySet())?.toMutableSet() ?: mutableSetOf()
+                                currentLocks.remove(removed.name)
+                                prefs.edit().putStringSet("locked_playlists",currentLocks).apply()
+                                val wasPlaying=channels.getOrNull(active)?.source==removed.name
+                                if(wasPlaying)stopPlayback()
+                                channels=channels.filter{it.source!=removed.name}.toMutableList()
+                                channelIndexOwner=null
+                                channelIndexSize=-1
+                                val currentSource=prefs.getString("selected_playlist_source",null)
+                                if(currentSource==removed.name || wasPlaying){
+                                    val next=list.firstOrNull{it.enabled && channels.any{c->c.source==it.name}}?.name
+                                    prefs.edit().apply{if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)}.apply()
+                                    if(wasPlaying){
+                                        active=-1
+                                        val last=next?.let{prefs.getString("last_url_"+it,null)}
+                                        val target=channels.indexOfFirst{it.source==next && it.url==last}
+                                        val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
+                                        if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback)
+                                    }
                                 }
-                            }
-                            if(!wasPlaying || active<0)managePlaylists()
-                        }.setNegativeButton("Cancel",null).show()
-                    }
-                }.show()
-            })
+                                if(!wasPlaying || active<0)managePlaylists()
+                            }.setNegativeButton("Cancel",null).show()
+                        }
+                    }.show()
+                }
+                if(isLocked)requirePin{openOptions()} else openOptions()
+            }
+            row.setOnLongClickListener{
+                val changeLock={
+                    val current=prefs.getStringSet("locked_playlists",emptySet())?.toMutableSet() ?: mutableSetOf()
+                    if(p.name in current)current.remove(p.name) else current.add(p.name)
+                    prefs.edit().putStringSet("locked_playlists",current).apply()
+                    Toast.makeText(this,if(p.name in current)"Playlist locked" else "Playlist unlocked",Toast.LENGTH_SHORT).show()
+                    managePlaylists()
+                }
+                requirePin{changeLock()}
+                true
+            }
+            root.addView(row)
         }
         root.addView(button("All Channels view: "+if(prefs.getBoolean("all_playlists_continuous_numbers",false))"All enabled playlists (continuous numbers)" else "Active playlist only"){
             val combined=!prefs.getBoolean("all_playlists_continuous_numbers",false)
