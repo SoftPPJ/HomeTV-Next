@@ -100,3 +100,9 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - Remote playback key audit: `KEYCODE_CHANNEL_UP` / `KEYCODE_CHANNEL_DOWN` (plus media-next/previous aliases) perform immediate channel changes. DPAD Up/Down currently preview a channel; OK confirms the preview and BACK cancels it. This is not the same as immediate CH+/CH− surfing and needs a device test against the user's remote. No claim of device verification.
 - Still pending: cinematic home redesign, full numbered settings/menu audit, 10k+ playlist stability, playlist lifecycle/numbering regressions, backup/restore, licence offline verification, playback/EPG/YouTube regression and Android TV install/device tests.
 - This branch is work in progress. No release or APK publication is authorized by this change.
+
+
+## Large-playlist performance update — 1 November 2026
+- Commit 6e58368: channel collection rows now generate display text lazily as ListView requests/recycles visible rows, instead of allocating a second full list of channel-name strings. This reduces peak memory when opening 10k+ channel lists.
+- Remote channel surfing now reuses a short-lived (900 ms) filtered/sorted channel-index snapshot during rapid DPAD/CH key repeats, avoiding a full filter/sort/allocation for every repeat event. The cache is invalidated when the channel index is rebuilt and keyed by playlist/favorites mode.
+- This is a targeted memory/CPU reduction, not proof that 10k+ playlists are crash-free. Large-playlist import, navigation, playback and device memory tests remain mandatory.
