@@ -3293,7 +3293,10 @@ class MainActivity: Activity() {
         }
     }
     private fun hash(pin:String)=MessageDigest.getInstance("SHA-256").digest(pin.toByteArray()).joinToString(""){"%02x".format(it)}
-    private fun requirePin(action:()->Unit,failureKey:String?=null,onThirdFailure:(()->Unit)?=null){
+    private fun requirePin(action:()->Unit){
+        requirePin(action,null,null)
+    }
+    private fun requirePin(action:()->Unit,failureKey:String?,onThirdFailure:(()->Unit)?){
         val saved=prefs.getString("pin",null)
         if(saved==null){Toast.makeText(this,"Set a PIN in Settings first",Toast.LENGTH_LONG).show();return}
         val field=EditText(this).apply{inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;hint="Password"}
