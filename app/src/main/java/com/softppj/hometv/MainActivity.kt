@@ -131,8 +131,13 @@ class MainActivity: Activity() {
         val seen=prefs.getLong("license_last_clock",0L)
         val expiry=prefs.getString("license_expiry",null)
         val expiryTime=expiry?.let{value->
-            try{java.time.Instant.parse(value).toEpochMilli()}catch(_:Exception){
-                try{java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli()}catch(_:Exception){null}
+            when{
+                value.equals("unlimited",true)->Long.MAX_VALUE
+                else->try{java.time.Instant.parse(value).toEpochMilli()}catch(_:Exception){
+                    try{java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli()}catch(_:Exception){
+                        try{java.time.LocalDate.parse(value).plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()}catch(_:Exception){null}
+                    }
+                }
             }
         }
         // Only a recently server-verified, non-expired, non-blocked license
@@ -4823,7 +4828,8 @@ class MainActivity: Activity() {
         }
         val requestedGeneration=++httpRouteGeneration
         thread(name="HomeTV-URL-Classifier"){
-            var route="web"
+            var route="native"
+            var classificationConfirmed=false
             try{
                 val connection=(URL(url).openConnection() as java.net.HttpURLConnection)
                 try{
@@ -4835,9 +4841,11 @@ class MainActivity: Activity() {
                     c.headers.forEach{(k,v)->
                         if(!k.equals("Host",true) && !k.equals("Range",true))connection.setRequestProperty(k,v)
                     }
+                    val responseCode=connection.responseCode
+                    classificationConfirmed=responseCode in 200..299
                     val mime=connection.contentType.orEmpty().substringBefore(';').trim().lowercase(java.util.Locale.ROOT)
                     val finalPath=connection.url.path.lowercase(java.util.Locale.ROOT)
-                    val sample=if(connection.responseCode in 200..299){
+                    val sample=if(classificationConfirmed){
                         connection.inputStream.use{input->
                             val buffer=ByteArray(512)
                             val count=input.read(buffer)
@@ -4858,14 +4866,16 @@ class MainActivity: Activity() {
                         else->"web"
                     }
                 }finally{connection.disconnect()}
-            }catch(_:Exception){route="web"}
+            }catch(_:Exception){classificationConfirmed=false}
             handler.post{
                 if(requestedGeneration!=httpRouteGeneration || !licenseReady)return@post
                 if(index !in channels.indices || channels[index].url!=url)return@post
-                urlRouteCache[url]=Pair(route,android.os.SystemClock.elapsedRealtime())
-                prefs.edit().putString(routeKey,route)
-                    .putLong(routeKey+"_time",System.currentTimeMillis()).apply()
-                playIndexResolved(index,route=="web")
+                if(classificationConfirmed){
+                    urlRouteCache[url]=Pair(route,android.os.SystemClock.elapsedRealtime())
+                    prefs.edit().putString(routeKey,route)
+                        .putLong(routeKey+"_time",System.currentTimeMillis()).apply()
+                }
+                playIndexResolved(index,classificationConfirmed && route=="web")
             }
         }
     }
@@ -5355,6 +5365,9 @@ class MainActivity: Activity() {
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
             exo.addListener(object:Player.Listener{
+                override fun onIsPlayingChanged(isPlaying:Boolean){
+                    if(isPlaying && player===exo && active==index)rememberWorking(c)
+                }
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_BUFFERING){
                         autoBufferStableSince=0L
@@ -5382,7 +5395,6 @@ class MainActivity: Activity() {
                             if(player===exo && active==index && exo.playbackState==Player.STATE_READY)
                                 recoveryAttempts.remove(c.url)
                         },60000L)
-                        rememberWorking(c)
                         startupWatchdog?.let{handler.removeCallbacks(it)}
                         startupWatchdog=null
                         applyVideoSize()
