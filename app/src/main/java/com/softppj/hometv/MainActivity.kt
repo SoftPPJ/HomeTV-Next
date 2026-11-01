@@ -2031,9 +2031,12 @@ class MainActivity: Activity() {
             try{
                 val conn=URL(url).openConnection().apply{connectTimeout=5000;readTimeout=5000}
                 val bmp=conn.getInputStream().use{android.graphics.BitmapFactory.decodeStream(it)}
-                if(bmp!=null){
+                if(bmp!=null && !isFinishing && !isDestroyed){
                     posterCache.put(url,bmp)
-                    runOnUiThread{if(image.tag==url)image.setImageBitmap(bmp)}
+                    runOnUiThread{
+                        if(!isFinishing && !isDestroyed && image.tag==url)
+                            image.setImageBitmap(bmp)
+                    }
                 }
             }catch(_:Exception){}finally{posterLoading.remove(url)}
         }
