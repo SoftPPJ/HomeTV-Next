@@ -364,6 +364,7 @@ class MainActivity: Activity() {
         }.toMap()
         channelIndexOwner=channels
         channelIndexSize=channels.size
+        invalidateSurfingCache()
     }
     // Parallel, bounded URL reachability checks; no extra video decoders or player switches.
     private fun checkChannelAlternativesInParallel(index:Int){
@@ -549,7 +550,28 @@ class MainActivity: Activity() {
         val selected=selectedPlaylistSource()
         return channelNumbers().filter{selected==null || channels[it].source==selected}
     }
+    // Cache the remote-surfing sequence briefly. DPAD repeat events can arrive
+    // several times per second; rebuilding and sorting a 10k+ list on every key
+    // press caused avoidable allocations and UI stalls on Android TV devices.
+    private var surfingCache:List<Int>?=null
+    private var surfingCacheAt=0L
+    private var surfingCacheOwner:MutableList<Channel>?=null
+    private var surfingCacheSize=-1
+    private var surfingCacheSource:String?=null
+    private var surfingCacheFavorites=false
+    private fun invalidateSurfingCache(){
+        surfingCache=null
+        surfingCacheOwner=null
+        surfingCacheSize=-1
+    }
     private fun surfingIndices():List<Int>{
+        val now=android.os.SystemClock.uptimeMillis()
+        val favoritesOnly=prefs.getBoolean("favorites_surfing",false)
+        val source=selectedPlaylistSource()
+        val cached=surfingCache
+        if(cached!=null && surfingCacheOwner===channels && surfingCacheSize==channels.size &&
+            surfingCacheSource==source && surfingCacheFavorites==favoritesOnly &&
+            now-surfingCacheAt<900L)return cached
         val base=playlistIndices().filter{
             !isSkipped(channels[it]) &&
             !isLocked(channels[it]) &&
@@ -558,9 +580,15 @@ class MainActivity: Activity() {
             !temporaryFailureHidden.contains(channelKey(channels[it])) &&
             !unavailableChannels.contains(channelKey(channels[it]))
         }
-        val favoritesOnly=prefs.getBoolean("favorites_surfing",false)
         val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
-        return orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
+        val result=orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
+        surfingCache=result
+        surfingCacheAt=now
+        surfingCacheOwner=channels
+        surfingCacheSize=channels.size
+        surfingCacheSource=source
+        surfingCacheFavorites=favoritesOnly
+        return result
     }
     private fun toggleChannelSkip(c:Channel){
         val values=skippedIds.toMutableSet()
@@ -1651,13 +1679,11 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
             setBackgroundColor(0xFF0B1B2B.toInt())
         }
-        val names=indices.map{i->
-            val c=channels[i]
-            channelLabel(i)+"  ·  "+c.group
-        }
+        // Build row text only when ListView requests a visible/recycled row.
+        // Do not allocate a second 10k+ String list for large playlists.
         list.adapter=object:android.widget.BaseAdapter(){
-            override fun getCount()=names.size
-            override fun getItem(position:Int):Any=names[position]
+            override fun getCount()=indices.size
+            override fun getItem(position:Int):Any=channels[indices[position]]
             override fun getItemId(position:Int)=indices[position].toLong()
             override fun getView(position:Int,convertView:View?,parent:android.view.ViewGroup):View{
                 val view=(convertView as? TextView) ?: TextView(this@MainActivity).apply{
@@ -1672,7 +1698,8 @@ class MainActivity: Activity() {
                     isSingleLine=true
                     ellipsize=android.text.TextUtils.TruncateAt.END
                 }
-                view.text=names[position]
+                val index=indices[position]
+                view.text=channelLabel(index)+"  ·  "+channels[index].group
                 return view
             }
         }
