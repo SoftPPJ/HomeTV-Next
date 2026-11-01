@@ -212,7 +212,7 @@ class MainActivity: Activity() {
                 // the app on network refreshes of every configured playlist.
                 if(channels.isNotEmpty()){
                     openStartupDestination()
-                    // Show cached channels immediately; refresh the active playlist in the background.
+                    // Show cached channels immediately; refresh only the selected active playlist in the background.
                     refresh({},activeOnly=true)
                 } else {
                     // A changed playlist URL has a new cache key. Fetch it on first
