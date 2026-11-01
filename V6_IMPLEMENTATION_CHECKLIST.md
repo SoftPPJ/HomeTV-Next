@@ -92,3 +92,11 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - Startup: cached playlists are now parsed concurrently with a bounded three-thread pool; resuming a valid saved channel no longer builds/sorts the full surfing list first; ambiguous HTTP URL routing is cached across app restarts for 24 hours and first-time route checks use shorter timeouts.
 - Exit/memory: final Activity destruction clears in-memory poster/route/player-session caches and pending main-thread callbacks; Android memory-pressure callbacks evict poster bitmaps. Persistent playlist files, preferences and validated licence cache are intentionally retained to keep startup fast and offline licensing safe.
 - Source and dependency changes only. Kotlin compilation, APK assembly, and Android TV playback/startup/exit tests have NOT yet been run. Do not mark release gates passed or publish a prerelease.
+
+
+## Feature-completion branch — 1 November 2026
+- Branch: `v6-feature-completion`, based on `fix/v6-stability-corrections`.
+- Commit 09be520: visible two-digit numbering added to the left-side navigation menu and playlist selector. Group and playlist entries continue the numbering sequence. Existing channel-list numbering remains per playlist unless the continuous-number preference is enabled.
+- Remote playback key audit: `KEYCODE_CHANNEL_UP` / `KEYCODE_CHANNEL_DOWN` (plus media-next/previous aliases) perform immediate channel changes. DPAD Up/Down currently preview a channel; OK confirms the preview and BACK cancels it. This is not the same as immediate CH+/CH− surfing and needs a device test against the user's remote. No claim of device verification.
+- Still pending: cinematic home redesign, full numbered settings/menu audit, 10k+ playlist stability, playlist lifecycle/numbering regressions, backup/restore, licence offline verification, playback/EPG/YouTube regression and Android TV install/device tests.
+- This branch is work in progress. No release or APK publication is authorized by this change.
