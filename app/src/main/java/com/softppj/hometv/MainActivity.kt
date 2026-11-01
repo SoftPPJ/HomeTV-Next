@@ -827,9 +827,11 @@ class MainActivity: Activity() {
                 probe=exo
                 exo.volume=0f
                 exo.addListener(object:Player.Listener{
+                    override fun onIsPlayingChanged(isPlaying:Boolean){
+                        if(isPlaying)finish(true)
+                    }
                     override fun onPlaybackStateChanged(state:Int){
-                        if(state==Player.STATE_READY)finish(true)
-                        else if(state==Player.STATE_ENDED)finish(false)
+                        if(state==Player.STATE_ENDED)finish(false)
                     }
                     override fun onPlayerError(error:PlaybackException){finish(false)}
                 })
@@ -837,6 +839,7 @@ class MainActivity: Activity() {
                 handler.postDelayed(watchdog!!,7000L)
                 exo.setMediaItem(mediaItemForStream(target.url))
                 exo.prepare()
+                exo.play()
             }catch(_:Exception){finish(false)}
         }
         handler.post{next()}
@@ -5524,18 +5527,25 @@ class MainActivity: Activity() {
             applyVideoSize()
             val startupTimeout=Runnable{
                 if(active==index && videoScreen===screen && player===exo &&
-                    exo.playbackState!=Player.STATE_READY){
-                    HomeTvDiagnostics.w("HomeTV","Stream startup timeout: "+c.name)
+                    !exo.isPlaying){
+                    HomeTvDiagnostics.w("HomeTV","Stream did not start playing before startup timeout: "+c.name+
+                        " state="+exo.playbackState+" error="+exo.playerError?.errorCodeName)
                     handleEngineFailure(index,screen)
                 }
             }
             startupWatchdog=startupTimeout
-            handler.postDelayed(startupTimeout,6000L)
+            // HLS sources can take longer to open their first segment.
+            val startupLimit=if(streamKind(c.url)=="hls")12000L else 8000L
+            handler.postDelayed(startupTimeout,startupLimit)
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
             exo.addListener(object:Player.Listener{
                 override fun onIsPlayingChanged(isPlaying:Boolean){
-                    if(isPlaying && player===exo && active==index)rememberWorking(c)
+                    if(isPlaying && player===exo && active==index){
+                        startupWatchdog?.let{handler.removeCallbacks(it)}
+                        startupWatchdog=null
+                        rememberWorking(c)
+                    }
                 }
                 override fun onPlaybackStateChanged(state:Int){
                     if(state==Player.STATE_BUFFERING){
@@ -5564,8 +5574,8 @@ class MainActivity: Activity() {
                             if(player===exo && active==index && exo.playbackState==Player.STATE_READY)
                                 recoveryAttempts.remove(c.url)
                         },60000L)
-                        startupWatchdog?.let{handler.removeCallbacks(it)}
-                        startupWatchdog=null
+                        // STATE_READY means prepared, not necessarily playing.
+                        // Keep the startup watchdog active until isPlaying becomes true.
                         applyVideoSize()
                         scheduleQualityUpgrade()
                         retryTask?.let{handler.removeCallbacks(it)}
@@ -5690,7 +5700,8 @@ class MainActivity: Activity() {
                     }
                 }
             }
-            handler.postDelayed(watchdog,6000L)
+            val startupLimit=if(streamKind(c.url)=="hls")12000L else 8000L
+            handler.postDelayed(watchdog,startupLimit)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
