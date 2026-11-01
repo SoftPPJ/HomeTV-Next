@@ -418,6 +418,10 @@ class MainActivity: Activity() {
         return savedMatch ?:reachableMatch ?:vlcMatch ?:firstUsable ?:group.first()
     }
     private fun rememberWorking(c:Channel){
+        // Recovery succeeded: any delayed offer is now obsolete.
+        recoveryPending.remove(channelKey(c))
+        dismissAlternativePrompt(channelKey(c))
+        recoveryAttempts.remove(c.url)
         playedThisSession.add(channelKey(c))
         recoveryPrompted.remove(channelKey(c))
         failedUrlsThisSession.remove(c.url)
@@ -717,6 +721,16 @@ class MainActivity: Activity() {
     // Probe alternative streams in isolation. The foreground player is never
     // released or changed by this search. Only a playable decoder result may
     // trigger a user confirmation; HTTP 200 alone is insufficient.
+    private val recoveryPending=mutableSetOf<String>()
+    private var alternativePrompt:AlertDialog?=null
+    private var alternativePromptKey:String?=null
+    private fun dismissAlternativePrompt(key:String){
+        if(alternativePromptKey!=key)return
+        val dialog=alternativePrompt
+        alternativePrompt=null
+        alternativePromptKey=null
+        try{dialog?.dismiss()}catch(_:Exception){}
+    }
     private fun checkFailedChannelAlternatives(index:Int,screen:FrameLayout){
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
         val c=channels[index]
@@ -734,13 +748,15 @@ class MainActivity: Activity() {
         fun done(){failureSearches.remove(key)}
         fun offer(candidate:Int,engine:String){
             done()
-            if(!stillCurrent())return
-            AlertDialog.Builder(this).setTitle("Working alternative found")
-                .setMessage(c.name+" has another stream that responded to "+engine+
-                    ". Switch to this URL and engine? Your current selection stays unchanged unless you confirm.")
+            if(!stillCurrent() || key !in recoveryPending)return
+            dismissAlternativePrompt(key)
+            val dialog=AlertDialog.Builder(this)
+                .setTitle("Alternative stream available")
+                .setMessage(c.name+" — "+engine+". Switch stream?")
                 .setPositiveButton("Switch"){_,_->
-                    if(!stillCurrent())return@setPositiveButton
+                    if(!stillCurrent() || key !in recoveryPending)return@setPositiveButton
                     val target=channels[candidate]
+                    recoveryPending.remove(key)
                     prefs.edit().putString("manual_url_"+key,target.url)
                         .putString("manual_engine_"+key,engine)
                         .remove("working_url_"+key).remove("confirmed_engine_"+key).apply()
@@ -748,7 +764,25 @@ class MainActivity: Activity() {
                     recoveryAttempts.remove(sourceUrl)
                     playIndex(candidate)
                 }
-                .setNegativeButton("Keep current",null).show()
+                .setNegativeButton("Keep current",null)
+                .create()
+            alternativePrompt=dialog
+            alternativePromptKey=key
+            dialog.setOnDismissListener{
+                if(alternativePrompt===dialog){
+                    alternativePrompt=null
+                    alternativePromptKey=null
+                }
+            }
+            dialog.show()
+            dialog.window?.apply{
+                setGravity(android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL)
+                setDimAmount(0f)
+                addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+            }
+            handler.postDelayed({
+                if(alternativePrompt===dialog) dismissAlternativePrompt(key)
+            },8000L)
         }
         fun next(){
             if(!stillCurrent()){done();return}
@@ -890,6 +924,7 @@ class MainActivity: Activity() {
             ?:prefs.getString("confirmed_engine_"+key,null)
         val established=pinnedUrl!=null || pinnedEngine in setOf("Media3","LibVLC","IJKPlayer")
         if(established){
+            recoveryPending.add(key)
             // Only a confirmed failure initiates a background alternative search.
             // It must not change the active playback or saved preferences.
             checkFailedChannelAlternatives(index,screen)
