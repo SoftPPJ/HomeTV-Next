@@ -3691,6 +3691,7 @@ class MainActivity: Activity() {
     }
     private var previewIndex=-1
     private var previewTask:Runnable?=null
+    private var previewInfoPanel:View?=null
     private var previewVideoTask:Runnable?=null
     private var previewPlayer:ExoPlayer?=null
     private var previewPanel:FrameLayout?=null
@@ -3784,17 +3785,14 @@ class MainActivity: Activity() {
         val available=surfingIndices()
         if(available.isEmpty())return
         previewTask?.let{handler.removeCallbacks(it)}
+        previewTask=null
         val current=if(previewIndex>=0)previewIndex else active
         val next=nextSurfingIndex(current,delta,available)
         if(next !in channels.indices)return
         previewIndex=next
-        // Remote UP/DOWN must not create a second video decoder. On low-memory
-        // Android TVs this can terminate the entire process immediately.
-        // Keep current playback untouched; OK confirms the highlighted channel.
-        showChannelInfo(previewIndex)
-        val task=Runnable{previewIndex=-1;closeVideoPreview()}
-        previewTask=task
-        handler.postDelayed(task,8000)
+        // UP/DOWN only moves the highlighted channel. The current stream and
+        // decoder remain untouched until OK is pressed.
+        showChannelInfo(previewIndex,"Press OK to play")
     }
     private fun screenInfoOnStart(index:Int){
         handler.postDelayed({if(active==index)showChannelInfo(index)},500)
@@ -3818,6 +3816,7 @@ class MainActivity: Activity() {
         val channel=channels.getOrNull(index) ?:return
         bannerTask?.let{handler.removeCallbacks(it)}
         banner?.let{screen.removeView(it)}
+        if(previewInfoPanel===banner)previewInfoPanel=null
         val panel=LinearLayout(this).apply{
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER_VERTICAL
@@ -3852,18 +3851,38 @@ class MainActivity: Activity() {
             setPadding(18,4,8,4)
         })
         banner=panel
+        val isPreview=previewIndex==index && index!=active
+        previewInfoPanel=if(isPreview)panel else null
         screen.addView(panel,FrameLayout.LayoutParams((resources.displayMetrics.widthPixels*0.62f).toInt(),-2,Gravity.BOTTOM or Gravity.LEFT))
-        val task=Runnable{if(banner===panel){screen.removeView(panel);banner=null}}
+        // A preview stays visible until OK, BACK, another channel preview, or
+        // immediate CH+/CH- tuning. Ordinary channel information still fades.
+        val task=Runnable{
+            if(banner===panel && previewInfoPanel!==panel){
+                screen.removeView(panel)
+                banner=null
+            }
+        }
         bannerTask=task
-        handler.postDelayed(task,4000)
+        if(!isPreview)handler.postDelayed(task,4000)
+    }
+    private fun clearChannelPreview(){
+        previewIndex=-1
+        previewTask?.let{handler.removeCallbacks(it)}
+        previewTask=null
+        closeVideoPreview()
+        previewInfoPanel?.let{panel->
+            (panel.parent as? android.view.ViewGroup)?.removeView(panel)
+            if(banner===panel)banner=null
+        }
+        previewInfoPanel=null
+        bannerTask?.let{handler.removeCallbacks(it)}
+        bannerTask=null
     }
     private fun confirmPreview(){
         val target=previewIndex
-        previewIndex=-1
-        closeVideoPreview()
-        previewTask?.let{handler.removeCallbacks(it)}
-        previewTask=null
-        if(target in channels.indices)playIndex(preferredChannel(target)) else showBanner("Use ▲ / ▼ to change channels")
+        clearChannelPreview()
+        if(target in channels.indices)playIndex(preferredChannel(target))
+        else showBanner("Use ▲ / ▼ to preview a channel, then press OK to play")
     }
     private val logoCache=object:android.util.LruCache<String,android.graphics.Bitmap>(6*1024*1024){
         override fun sizeOf(key:String,value:android.graphics.Bitmap)=value.byteCount
@@ -5602,6 +5621,7 @@ class MainActivity: Activity() {
             else if(backwardIndex>=0)backwardIndex else lastIndex
     }
     private fun switchChannel(delta:Int){
+        clearChannelPreview()
         surfingDirection=if(delta>=0)1 else -1
         val available=surfingIndices()
         if(available.isEmpty())return
@@ -6025,8 +6045,8 @@ class MainActivity: Activity() {
                 }
                 when(event.keyCode){
                     KeyEvent.KEYCODE_LAST_CHANNEL->{returnToPreviousChannel();return true}
-                    KeyEvent.KEYCODE_DPAD_UP->{switchChannel(1);return true}
-                    KeyEvent.KEYCODE_DPAD_DOWN->{switchChannel(-1);return true}
+                    KeyEvent.KEYCODE_DPAD_UP->{previewChannel(1);return true}
+                    KeyEvent.KEYCODE_DPAD_DOWN->{previewChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_DOWN,KeyEvent.KEYCODE_MEDIA_PREVIOUS,
                     KeyEvent.KEYCODE_BUTTON_L1->{switchChannel(-1);return true}
                     KeyEvent.KEYCODE_CHANNEL_UP,KeyEvent.KEYCODE_MEDIA_NEXT,
@@ -6036,7 +6056,7 @@ class MainActivity: Activity() {
                     KeyEvent.KEYCODE_DPAD_LEFT->{showOverlayList();return true}
                     KeyEvent.KEYCODE_DPAD_RIGHT->{showChannelOptions();return true}
                     KeyEvent.KEYCODE_MENU->{showPlaybackSettings();return true}
-                    KeyEvent.KEYCODE_BACK->{if(previewIndex>=0){previewIndex=-1;closeVideoPreview();return true};onBackPressed();return true}
+                    KeyEvent.KEYCODE_BACK->{if(previewIndex>=0){clearChannelPreview();return true};onBackPressed();return true}
                 }
             }
         }
