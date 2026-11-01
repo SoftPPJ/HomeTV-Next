@@ -3231,22 +3231,24 @@ class MainActivity: Activity() {
     }
     private fun clearPlaylistLocalHistory(name:String){
         val groupNames=channels.filter{it.source==name}.map{it.group}.toSet()
+        val groupsUsedElsewhere=channels.filter{it.source!=name && it.group in groupNames}.map{it.group}.toSet()
+        val groupsToClear=groupNames-groupsUsedElsewhere
         val deleted=prefs.getStringSet("deleted_groups",emptySet())?.toMutableSet() ?: mutableSetOf()
         deleted.removeAll{it.startsWith(name+"|")}
         val playlistLocks=lockedPlaylistNames().toMutableSet()
         playlistLocks.remove(name)
         val groupLocks=lockedGroupNames().toMutableSet()
-        groupLocks.removeAll(groupNames)
+        groupLocks.removeAll(groupsToClear)
         val edit=prefs.edit()
             .putStringSet("deleted_groups",deleted)
             .putStringSet("locked_playlists",playlistLocks)
             .putStringSet("locked_groups",groupLocks)
             .remove("pin_failures_playlist:"+name)
             .remove("last_url_"+name)
-        groupNames.forEach{edit.remove("pin_failures_group:"+it)}
+        groupsToClear.forEach{edit.remove("pin_failures_group:"+it)}
         edit.apply()
         unlockedPlaylistsThisSession.remove(name)
-        unlockedGroupsThisSession.removeAll(groupNames)
+        unlockedGroupsThisSession.removeAll(groupsToClear)
     }
     private fun deletePlaylistAfterPinFailures(name:String){
         val items=playlists().toMutableList()
