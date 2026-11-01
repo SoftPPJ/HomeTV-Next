@@ -2571,29 +2571,7 @@ class MainActivity: Activity() {
                             1->editPlaylist(index)
                             2->AlertDialog.Builder(this).setMessage("Delete playlist?").setPositiveButton("Delete"){_,_->
                                 val removed=list.removeAt(index)
-                                savePlaylists(list)
-                                val remainingSameUrl=list.any{it.url==removed.url}
-                                if(!remainingSameUrl)try{cacheFile(removed).delete()}catch(_:Exception){}
-                                clearPlaylistLocalHistory(removed.name)
-
-                                val wasPlaying=channels.getOrNull(active)?.source==removed.name
-                                if(wasPlaying)stopPlayback()
-                                channels=channels.filter{it.source!=removed.name}.toMutableList()
-                                channelIndexOwner=null
-                                channelIndexSize=-1
-                                val currentSource=prefs.getString("selected_playlist_source",null)
-                                if(currentSource==removed.name || wasPlaying){
-                                    val next=list.firstOrNull{it.enabled && channels.any{c->c.source==it.name}}?.name
-                                    prefs.edit().apply{if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)}.apply()
-                                    if(wasPlaying){
-                                        active=-1
-                                        val last=next?.let{prefs.getString("last_url_"+it,null)}
-                                        val target=channels.indexOfFirst{it.source==next && it.url==last}
-                                        val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
-                                        if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback)
-                                    }
-                                }
-                                if(!wasPlaying || active<0)managePlaylists()
+                                deletePlaylistSource(removed.name)
                             }.setNegativeButton("Cancel",null).show()
                         }
                     }.show()
@@ -3258,6 +3236,38 @@ class MainActivity: Activity() {
             requirePin({unlockedGroupsThisSession.add(group);action()},
                 "group:"+group){deleteGroupAfterPinFailures(group)}
         }else action()
+    }
+    // Shared deletion path for Playlist Manager and the in-player playlist drawer.
+    // Remove a source's channels from memory immediately, not only after refresh.
+    private fun deletePlaylistSource(name:String){
+        val items=playlists()
+        val removed=items.firstOrNull{it.name==name} ?:return
+        val wasPlaying=channels.getOrNull(active)?.source==name
+        if(wasPlaying)stopPlayback()
+        savePlaylists(items.filterNot{it.name==name})
+        if(items.none{it.name!=name && it.url==removed.url})
+            try{cacheFile(removed).delete()}catch(_:Exception){}
+        clearPlaylistLocalHistory(name)
+        channels=channels.filter{it.source!=name}.toMutableList()
+        channelIndexOwner=null
+        channelIndexSize=-1
+        invalidateSurfingCache()
+        val selected=prefs.getString("selected_playlist_source",null)
+        val next=items.firstOrNull{it.name!=name && it.enabled && channels.any{c->c.source==it.name}}?.name
+        if(selected==name || wasPlaying){
+            prefs.edit().apply{
+                if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)
+            }.apply()
+        }
+        if(wasPlaying){
+            active=-1
+            val last=next?.let{prefs.getString("last_url_"+it,null)}
+            val target=channels.indexOfFirst{it.source==next && it.url==last}
+            val fallback=channels.indexOfFirst{it.source==next && it.mediaType=="live"}
+            if(target>=0)playIndex(target) else if(fallback>=0)playIndex(fallback) else showHome()
+        }else{
+            if(videoScreen!=null && active>=0)showOverlayList() else managePlaylists()
+        }
     }
     private fun clearPlaylistLocalHistory(name:String){
         val groupNames=channels.filter{it.source==name}.map{it.group}.toSet()
@@ -4413,7 +4423,7 @@ class MainActivity: Activity() {
                 when(action){
                     0->if(entry>=0)editPlaylist(entry)
                     1->{val items=playlists();if(entry>=0){items[entry]=items[entry].copy(enabled=false);savePlaylists(items);Toast.makeText(this,"Playlist disabled",Toast.LENGTH_SHORT).show()};close();showOverlayList()}
-                    2->if(entry>=0)AlertDialog.Builder(this).setTitle("Delete "+source+"?").setPositiveButton("Delete"){_,_->val items=playlists();if(entry<items.size){items.removeAt(entry);savePlaylists(items)};close();showOverlayList()}.setNegativeButton("Cancel",null).show()
+                    2->if(entry>=0)AlertDialog.Builder(this).setTitle("Delete "+source+"?").setMessage("Remove this playlist and its channels from HomeTV?").setPositiveButton("Delete"){_,_->close();deletePlaylistSource(source)}.setNegativeButton("Cancel",null).show()
                     3->{close();managePlaylists()}
                 }
             }.show()
