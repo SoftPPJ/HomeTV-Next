@@ -1579,7 +1579,7 @@ class MainActivity: Activity() {
     }
     private fun favorites(){
         prefs.edit().putBoolean("favorites_surfing",true).apply()
-        channelCollection("Favorites",channels.indices.filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && favoriteIds.contains(id(channels[it]))})
+        channelCollection("Favorites",visibleIndices().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && favoriteIds.contains(id(channels[it]))})
     }
     // User-defined ordering is stored independently for Favorites and each channel list.
     // The stable source + channel + URL identifier avoids mixing different playlists.
@@ -2045,7 +2045,7 @@ class MainActivity: Activity() {
     }
 
     // My Home TV media library. Unmarked EXTINF entries are always Live TV.
-    private fun mediaItems(type:String)=channels.indices.filter{channels[it].mediaType==type}
+    private fun mediaItems(type:String)=visibleIndices().filter{channels[it].mediaType==type}
     // Bounded image cache: do not start a network thread on every recycled list row.
     private val posterCache=object:android.util.LruCache<String,android.graphics.Bitmap>(48){}
     private val posterLoading=java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -2145,7 +2145,7 @@ class MainActivity: Activity() {
         if(seconds>0L)prefs.edit().putLong(mediaKey(c),seconds).apply()
     }
     private fun continueMedia(){
-        val indices=channels.indices.filter{channels[it].mediaType in setOf("movie","series") && mediaResumeSeconds(channels[it])>0}
+        val indices=visibleIndices().filter{channels[it].mediaType in setOf("movie","series") && mediaResumeSeconds(channels[it])>0}
         mediaRows("Continue Watching",indices)
     }
     private fun mediaLibrary(type:String){
