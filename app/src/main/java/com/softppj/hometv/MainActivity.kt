@@ -5650,6 +5650,33 @@ class MainActivity: Activity() {
         }
         startActivity(Intent.createChooser(intent,"Export HomeTV settings"))
     }
+    private fun mergePlaylistBackup(incoming:String):String{
+        val merged=linkedMapOf<String,JSONObject>()
+        fun add(array:JSONArray){
+            for(i in 0 until array.length()){
+                val item=array.optJSONObject(i) ?: continue
+                val url=item.optString("url").trim()
+                if(url.isBlank())continue
+                merged[url.lowercase(java.util.Locale.ROOT)]=JSONObject(item.toString())
+            }
+        }
+        add(JSONArray(prefs.getString("playlists","[]")))
+        add(JSONArray(incoming))
+        return JSONArray().apply{merged.values.forEach{put(it)}}.toString()
+    }
+    private fun mergeStringArrayBackup(key:String,incoming:String):String{
+        val values=linkedSetOf<String>()
+        fun add(raw:String){
+            val array=JSONArray(raw)
+            for(i in 0 until array.length()){
+                val value=array.optString(i)
+                if(value.isNotBlank())values.add(value)
+            }
+        }
+        add(prefs.getString(key,"[]") ?: "[]")
+        add(incoming)
+        return JSONArray().apply{values.forEach{put(it)}}.toString()
+    }
     private fun importSettings(){
         val input=EditText(this).apply{
             hint="Paste HomeTV-settings-v1 JSON backup"
@@ -5702,10 +5729,17 @@ class MainActivity: Activity() {
                                     }.forEach{edit.remove(it)}
                                 }
                                 staged.forEach{(key,incoming)->
-                                    val value:Any=if(mode==0 && incoming is Set<*>){
-                                        (prefs.getStringSet(key,emptySet()) ?: emptySet()) +
-                                            incoming.filterIsInstance<String>()
-                                    }else incoming
+                                    val value:Any=when{
+                                        mode==0 && key=="playlists" && incoming is String->
+                                            mergePlaylistBackup(incoming)
+                                        mode==0 && (key=="viewer_profiles" || key=="recent_channels" ||
+                                            (key.startsWith("viewer_") && key.endsWith("_recent_channels"))) &&
+                                            incoming is String->mergeStringArrayBackup(key,incoming)
+                                        mode==0 && incoming is Set<*>->
+                                            (prefs.getStringSet(key,emptySet()) ?: emptySet()) +
+                                                incoming.filterIsInstance<String>()
+                                        else->incoming
+                                    }
                                     when(value){
                                         is String->edit.putString(key,value)
                                         is Boolean->edit.putBoolean(key,value)
