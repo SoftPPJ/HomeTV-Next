@@ -24,7 +24,7 @@ Build V6 only after feature review, compilation and regression tests.
 - [ ] Viewer profiles with shared playlist storage and separate history/favorites
 - [ ] On-demand network speed test and bounded diagnostics
 - [ ] Device capability diagnostics and adaptive cache/rendering limits
-- [ ] IJKPlayer evaluation: maintained fork, security/license review, ABI compatibility, measured benefit before bundling
+- [ ] Verify Media3 + LibVLC engine routing, RTMP/VLC handling, and fallback on supported Android TV devices
 - [ ] Surya Comedy picture-quality comparison (same URL): variant, resolution, bitrate, deinterlacing, scaling, dropped frames, memory
 - [ ] Backup/restore and licensing regression
 - [ ] Movie/series resume and next-episode behaviors
@@ -69,7 +69,7 @@ Do not trigger V6 workflow or claim full feature completion until all release-cr
 | YouTube | Live video, automatic unmute, no remote-control overlap | PENDING DEVICE |
 | Media3 | HLS, MPEG-TS, RTSP if supported, normal audio/video | PENDING DEVICE |
 | LibVLC | Fallback on Media3 failure, remember confirmed URL+engine | PENDING DEVICE |
-| IJKPlayer | Manual selection, playback, fallback, ARM32/ARM64, aspect modes | PENDING DEVICE |
+| Two-engine routing | Media3 default, LibVLC RTMP/VLC priority, remembered engine, legacy IJK preference migration | PENDING DEVICE |
 | Licensing | New activation, expired token, surrender, offline/invalid response | PENDING INTEGRATION |
 | Playlists | 1k/5k/10k import, logical counts, memory, rapid channel switching | PENDING DEVICE |
 | Remote | DPAD, OK, BACK, HOME, aspect preview rollback | PENDING DEVICE |
@@ -84,3 +84,11 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - CH+/CH− remain immediate channel-switch controls and clear any pending preview.
 - The preview remains visible until confirmed, cancelled, or another channel is previewed. Drawer/menu navigation is unchanged.
 - Source change only. Kotlin compilation and Android TV remote/device regression tests are still pending; do not mark the remote release gate passed yet.
+
+
+## Engine, startup and memory cleanup update — 1 November 2026
+- Commit 56722f2: removed IJKPlayer foreground playback, background probing, engine-picker option, volume hooks, and native player cleanup code. Media3 remains the normal engine; LibVLC remains first for RTMP/VLC-only protocols and the fallback for other streams.
+- Removed the three IJKPlayer Gradle dependencies. Old saved IJK engine selections are migrated to Auto; saved IJK-confirmed engine/URL pairs are cleared so the app can establish a supported engine again.
+- Startup: cached playlists are now parsed concurrently with a bounded three-thread pool; resuming a valid saved channel no longer builds/sorts the full surfing list first; ambiguous HTTP URL routing is cached across app restarts for 24 hours and first-time route checks use shorter timeouts.
+- Exit/memory: final Activity destruction clears in-memory poster/route/player-session caches and pending main-thread callbacks; Android memory-pressure callbacks evict poster bitmaps. Persistent playlist files, preferences and validated licence cache are intentionally retained to keep startup fast and offline licensing safe.
+- Source and dependency changes only. Kotlin compilation, APK assembly, and Android TV playback/startup/exit tests have NOT yet been run. Do not mark release gates passed or publish a prerelease.
