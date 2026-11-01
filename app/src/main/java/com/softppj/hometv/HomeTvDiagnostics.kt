@@ -17,10 +17,23 @@ internal object HomeTvDiagnostics {
     private const val MAX_DAILY_BYTES = 512L * 1024L
     private const val MAX_REPORT_CHARS = 1_000_000
     @Volatile private var appContext: Context? = null
+    @Volatile private var crashHandlerInstalled = false
 
     @Synchronized fun initialize(context: Context) {
         appContext = context.applicationContext
         prune()
+        if (!crashHandlerInstalled) {
+            val previous = Thread.getDefaultUncaughtExceptionHandler()
+            Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+                e("HomeTV", "Uncaught crash on thread " + thread.name, error)
+                if (previous != null) previous.uncaughtException(thread, error)
+                else {
+                    android.os.Process.killProcess(android.os.Process.myPid())
+                    kotlin.system.exitProcess(10)
+                }
+            }
+            crashHandlerInstalled = true
+        }
     }
 
     fun w(tag: String, message: String, error: Throwable? = null) {
