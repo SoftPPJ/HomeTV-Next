@@ -2554,7 +2554,7 @@ class MainActivity: Activity() {
                         }
                     }.show()
                 }
-                if(isLocked)requirePin{openOptions()} else openOptions()
+                if(isLocked)requirePin({openOptions()},"playlist:"+p.name){deletePlaylistAfterPinFailures(p.name)} else openOptions()
             }
             row.setOnLongClickListener{
                 val changeLock={
@@ -3128,6 +3128,9 @@ class MainActivity: Activity() {
         root.addView(button("Home"){showHome()})
     }
     private fun showGroup(group:String){
+        openLockedGroup(group){showGroupContents(group)}
+    }
+    private fun showGroupContents(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset(group)
         root.addView(button("Lock group"){toggleLock(group,true)})
@@ -4266,12 +4269,15 @@ class MainActivity: Activity() {
             if(position==0){close();editPlaylist(null,true);return@setOnItemClickListener}
             if(position==1){close();managePlaylists();return@setOnItemClickListener}
             val selected=if(position==2)null else sources.getOrNull(position-3)
-            prefs.edit().apply{
-                if(selected==null)remove("selected_playlist_source")
-                else putString("selected_playlist_source",selected)
-            }.apply()
             close()
-            showOverlayList()
+            val open={
+                prefs.edit().apply{
+                    if(selected==null)remove("selected_playlist_source")
+                    else putString("selected_playlist_source",selected)
+                }.apply()
+                showOverlayList()
+            }
+            if(selected!=null)openLockedPlaylist(selected,open) else open()
         }
         list.setOnItemLongClickListener{_,_,position,_->
             val source=sources.getOrNull(position-3)
@@ -4299,6 +4305,9 @@ class MainActivity: Activity() {
         list.requestFocus()
     }
     private fun showGroupDrawer(group:String){
+        openLockedGroup(group){showGroupDrawerContents(group)}
+    }
+    private fun showGroupDrawerContents(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
