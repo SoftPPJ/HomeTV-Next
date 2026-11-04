@@ -4004,7 +4004,10 @@ class MainActivity: Activity() {
         clockTask=null
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("clock_overlay")?.let{screen.removeView(it)}
-        if(!prefs.getBoolean("clock_enabled",false) || (!prefs.getBoolean("clock_show_date",true) && !prefs.getBoolean("clock_show_time",true)))return
+        if(!prefs.getBoolean("clock_enabled",false) ||
+            (!prefs.getBoolean("clock_show_date",true) &&
+             !prefs.getBoolean("clock_show_time",true) &&
+             !prefs.getBoolean("clock_show_day",true)))return
         val clock=TextView(this).apply{
             tag="clock_overlay"
             setTextColor(android.graphics.Color.WHITE)
@@ -4015,6 +4018,7 @@ class MainActivity: Activity() {
             setPadding(12,8,12,8)
             isFocusable=false
             isClickable=false
+            alpha=1f
         }
         val position=prefs.getString("clock_position","Top right") ?: "Top right"
         val gravity=when(position){
@@ -4029,26 +4033,55 @@ class MainActivity: Activity() {
             setMargins(16,16,16,16)
         }
         screen.addView(clock,params)
-        fun render(){
+        val pages=mutableListOf<String>()
+        if(prefs.getBoolean("clock_show_date",true))
+            pages.add(java.text.SimpleDateFormat("dd MMM yyyy",java.util.Locale.getDefault()).format(java.util.Date()))
+        if(prefs.getBoolean("clock_show_time",true)){
             val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
-            val date=java.text.SimpleDateFormat("dd MMM yy",java.util.Locale.ENGLISH).format(java.util.Date())
-            val time=java.text.SimpleDateFormat(pattern,java.util.Locale.ENGLISH).format(java.util.Date())
-            clock.text=when{
-                prefs.getBoolean("clock_show_date",true) && prefs.getBoolean("clock_show_time",true)->date+"  •  "+time
-                prefs.getBoolean("clock_show_date",true)->date
-                else->time
+            pages.add(java.text.SimpleDateFormat(pattern,java.util.Locale.getDefault()).format(java.util.Date()))
+        }
+        if(prefs.getBoolean("clock_show_day",true))
+            pages.add(java.text.SimpleDateFormat("EEEE",java.util.Locale.getDefault()).format(java.util.Date()))
+        var pageIndex=0
+        fun render(animate:Boolean){
+            val now=java.util.Date()
+            val values=mutableListOf<String>()
+            if(prefs.getBoolean("clock_show_date",true))
+                values.add(java.text.SimpleDateFormat("dd MMM yyyy",java.util.Locale.getDefault()).format(now))
+            if(prefs.getBoolean("clock_show_time",true)){
+                val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
+                values.add(java.text.SimpleDateFormat(pattern,java.util.Locale.getDefault()).format(now))
+            }
+            if(prefs.getBoolean("clock_show_day",true))
+                values.add(java.text.SimpleDateFormat("EEEE",java.util.Locale.getDefault()).format(now))
+            if(values.isEmpty())return
+            val value=values[pageIndex % values.size]
+            pageIndex=(pageIndex+1) % values.size
+            if(!animate || values.size==1){
+                clock.text=value
+                clock.alpha=1f
+                clock.translationY=0f
+            }else{
+                clock.animate().cancel()
+                clock.animate().alpha(0f).translationY(7f).setDuration(220L).withEndAction{
+                    if(videoScreen===screen && clock.parent===screen){
+                        clock.text=value
+                        clock.translationY=(-7f)
+                        clock.animate().alpha(1f).translationY(0f).setDuration(260L).start()
+                    }
+                }.start()
             }
         }
-        render()
+        render(false)
         val task=object:Runnable{
             override fun run(){
                 if(videoScreen!==screen || clock.parent!==screen)return
-                render()
-                handler.postDelayed(this,15000L)
+                render(true)
+                handler.postDelayed(this,4000L)
             }
         }
         clockTask=task
-        handler.postDelayed(task,15000L)
+        handler.postDelayed(task,4000L)
     }
     private fun unmuteYoutube(viewer:WebView,notify:Boolean=true){
         // Only request sound; do not restart the video or click a mute button
@@ -4149,28 +4182,30 @@ class MainActivity: Activity() {
     }
     private fun clockSettings(){
         val choices=arrayOf(
-            "Date & time overlay: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
+            "Date · time · day overlay: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
             "Show date: "+if(prefs.getBoolean("clock_show_date",true))"ON" else "OFF",
             "Show time: "+if(prefs.getBoolean("clock_show_time",true))"ON" else "OFF",
+            "Show day: "+if(prefs.getBoolean("clock_show_day",true))"ON" else "OFF",
             "Time format: "+if(prefs.getBoolean("clock_24h",true))"24-hour" else "12-hour",
             "Text size: "+prefs.getInt("clock_size",18)+" sp",
             "Position: "+(prefs.getString("clock_position","Top right") ?: "Top right")
         )
-        val clockDialog=AlertDialog.Builder(this).setTitle("Date & time overlay · dd MMM yy")
+        val clockDialog=AlertDialog.Builder(this).setTitle("Date · time · day overlay")
             .setItems(choices){_,which->
                 when(which){
                     0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",false)).apply();updateClock();clockSettings()}
                     1->{prefs.edit().putBoolean("clock_show_date",!prefs.getBoolean("clock_show_date",true)).apply();updateClock();clockSettings()}
                     2->{prefs.edit().putBoolean("clock_show_time",!prefs.getBoolean("clock_show_time",true)).apply();updateClock();clockSettings()}
-                    3->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
-                    4->{
+                    3->{prefs.edit().putBoolean("clock_show_day",!prefs.getBoolean("clock_show_day",true)).apply();updateClock();clockSettings()}
+                    4->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
+                    5->{
                         val sizes=intArrayOf(12,14,16,18,20,24,28,32,36)
                         AlertDialog.Builder(this).setTitle("Clock text size")
                             .setSingleChoiceItems(sizes.map{ it.toString()+" sp" }.toTypedArray(),sizes.indexOf(prefs.getInt("clock_size",18)).coerceAtLeast(0)){dialog,i->
                                 prefs.edit().putInt("clock_size",sizes[i]).apply();dialog.dismiss();updateClock();clockSettings()
                             }.setNegativeButton("Cancel",null).show()
                     }
-                    5->{
+                    6->{
                         val positions=arrayOf("Top left","Top center","Top right","Bottom left","Bottom center","Bottom right")
                         AlertDialog.Builder(this).setTitle("Clock position")
                             .setSingleChoiceItems(positions,positions.indexOf(prefs.getString("clock_position","Top right")).coerceAtLeast(0)){dialog,i->
