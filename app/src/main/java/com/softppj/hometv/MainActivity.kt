@@ -3775,7 +3775,7 @@ class MainActivity: Activity() {
         if(vlc!=null){vlcAudioTracks(vlc);return}
         val exo=player
         if(exo==null){Toast.makeText(this,"Audio track selection is available for IPTV streams",Toast.LENGTH_LONG).show();return}
-        val entries=mutableListOf<Triple<androidx.media3.common.TrackGroup,Int,androidx.media3.common.Format>>()
+        val entries=mutableListOf<Triple<Tracks.Group,Int,androidx.media3.common.Format>>()
         val names=mutableListOf<String>()
         for(group in exo.currentTracks.groups){
             if(group.type!=C.TRACK_TYPE_AUDIO)continue
