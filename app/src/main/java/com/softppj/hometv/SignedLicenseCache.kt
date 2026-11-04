@@ -17,7 +17,9 @@ import kotlin.math.abs
 internal class SignedLicenseCache(
     private val prefs: SharedPreferences,
     private val deviceId: String,
-    private val token: String
+    private val token: String,
+    // Injectable only for deterministic cryptographic tests; production uses the pinned Worker key.
+    private val publicKeyDerBase64: String = PUBLIC_KEY_DER_BASE64
 ) {
     data class Status(
         val allowed: Boolean,
@@ -54,7 +56,7 @@ internal class SignedLicenseCache(
         return try {
             val encodedLease = envelope.getString("lease")
             val signatureBytes = decodeUrl(envelope.getString("signature"))
-            val publicKeyBytes = Base64.decode(PUBLIC_KEY_DER_BASE64, Base64.DEFAULT)
+            val publicKeyBytes = Base64.decode(publicKeyDerBase64, Base64.DEFAULT)
             val publicKey = KeyFactory.getInstance("RSA").generatePublic(
                 X509EncodedKeySpec(publicKeyBytes)
             )
