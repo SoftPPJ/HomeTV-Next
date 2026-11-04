@@ -1611,7 +1611,7 @@ class MainActivity: Activity() {
             handler.post{
                 // Resolve results against the current list, not stale numeric
                 // indexes from before a background refresh or playlist deletion.
-                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct()
+                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct().toMutableList()
                 if(results.isEmpty()){
                     Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
                     return@post
