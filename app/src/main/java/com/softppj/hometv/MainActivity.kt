@@ -223,8 +223,9 @@ class MainActivity: Activity() {
                 // the app on network refreshes of every configured playlist.
                 if(channels.isNotEmpty()){
                     openStartupDestination()
-                    // Safe startup skips automatic refresh and background probes for this session.
-                    if(!safeStartupMode)refresh({},activeOnly=true)
+                    // Automatic playlist checks are optional and never delay first picture.
+                    if(!safeStartupMode && prefs.getBoolean("auto_playlist_check",true))
+                        refresh({},activeOnly=true)
                 } else {
                     // A changed playlist URL has a new cache key. Fetch it on first
                     // launch instead of silently opening an empty Home screen.
@@ -2650,11 +2651,11 @@ class MainActivity: Activity() {
             } else Toast.makeText(this,"Enter name and HTTP(S) URL",Toast.LENGTH_LONG).show()
         }.setNegativeButton("Cancel",null).show()
     }
-    private fun cacheFile(p:Playlist):java.io.File{
-        val digest=MessageDigest.getInstance("SHA-256").digest(p.url.toByteArray())
+    private fun playlistCacheKey(p:Playlist):String =
+        MessageDigest.getInstance("SHA-256").digest(p.url.toByteArray())
             .joinToString(""){"%02x".format(it)}
-        return java.io.File(filesDir,"playlist_"+digest+".m3u")
-    }
+    private fun cacheFile(p:Playlist):java.io.File =
+        java.io.File(filesDir,"playlist_"+playlistCacheKey(p)+".m3u")
     // Limit a malformed/oversized feed before it can exhaust the TV's heap.
     // 32 MiB accommodates large IPTV lists without accepting unbounded input.
     private fun readPlaylistText(stream:java.io.InputStream):String {
@@ -2726,6 +2727,7 @@ class MainActivity: Activity() {
             val previousBySource=previousChannels.groupBy{it.source}
             val results=Array(sources.size){emptyList<Channel>()}
             val refreshed=BooleanArray(sources.size)
+            val checked=BooleanArray(sources.size)
             // A playlist may contain thousands of channels. Do not create a
             // new thread for every configured source or parse caches on the UI.
             val pool=java.util.concurrent.Executors.newFixedThreadPool(minOf(3,sources.size))
@@ -2733,30 +2735,65 @@ class MainActivity: Activity() {
                 val tasks=sources.mapIndexed{index,p->
                     pool.submit {
                         try{
-                            val body=if(p.url==licensedPlaylist)licensedM3u() else {
-                                val connection=URL(p.url).openConnection().apply{
-                                    connectTimeout=12000
-                                    readTimeout=15000
-                                    useCaches=false
-                                    setRequestProperty("Cache-Control","no-cache, no-store, max-age=0")
-                                    setRequestProperty("Pragma","no-cache")
-                                    setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
-                                }
-                                connection.getInputStream().use{readPlaylistText(it)}
+                            val file=cacheFile(p)
+                            val metadataKey="playlist_http_"+playlistCacheKey(p)
+                            val parsed:List<Channel>
+                            if(p.url==licensedPlaylist){
+                                val body=licensedM3u()
+                                parsed=parseM3u(body,p.name)
+                                if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                                val temp=java.io.File(file.absolutePath+".tmp")
+                                temp.writeText(body)
+                                if(!temp.renameTo(file)){temp.copyTo(file,overwrite=true);temp.delete()}
+                                refreshed[index]=true
+                                checked[index]=true
+                            }else{
+                                val connection=URL(p.url).openConnection() as java.net.HttpURLConnection
+                                try{
+                                    connection.connectTimeout=12000
+                                    connection.readTimeout=15000
+                                    connection.useCaches=false
+                                    connection.instanceFollowRedirects=true
+                                    connection.setRequestProperty("Cache-Control","no-cache")
+                                    connection.setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
+                                    val oldTag=prefs.getString(metadataKey+"_etag",null)
+                                    if(!oldTag.isNullOrBlank())connection.setRequestProperty("If-None-Match",oldTag)
+                                    val oldModified=prefs.getLong(metadataKey+"_modified",0L)
+                                    if(oldModified>0L)connection.setIfModifiedSince(oldModified)
+                                    val code=connection.responseCode
+                                    checked[index]=true
+                                    if(code==java.net.HttpURLConnection.HTTP_NOT_MODIFIED && file.exists()){
+                                        parsed=parseM3u(readPlaylistCache(file),p.name)
+                                    }else if(code in 200..299){
+                                        val body=connection.inputStream.use{readPlaylistText(it)}
+                                        val bodyHash=MessageDigest.getInstance("SHA-256").digest(body.toByteArray())
+                                            .joinToString(""){"%02x".format(it)}
+                                        val oldHash=prefs.getString(metadataKey+"_hash",null)
+                                        parsed=if(bodyHash==oldHash && file.exists()){
+                                            parseM3u(readPlaylistCache(file),p.name)
+                                        }else{
+                                            val fresh=parseM3u(body,p.name)
+                                            if(fresh.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                                            val temp=java.io.File(file.absolutePath+".tmp")
+                                            temp.writeText(body)
+                                            if(!temp.renameTo(file)){temp.copyTo(file,overwrite=true);temp.delete()}
+                                            refreshed[index]=true
+                                            fresh
+                                        }
+                                        prefs.edit()
+                                            .putString(metadataKey+"_etag",connection.getHeaderField("ETag"))
+                                            .putLong(metadataKey+"_modified",connection.lastModified)
+                                            .putString(metadataKey+"_hash",bodyHash)
+                                            .apply()
+                                    }else{
+                                        throw java.io.IOException("HTTP "+code+" while checking "+p.name)
+                                    }
+                                    if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                                }finally{connection.disconnect()}
                             }
-                            val parsed=parseM3u(body,p.name)
-                            if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
                             val discovered=parsed.filter{it.mediaType=="web" && it.url.contains("/channel/")}
                                 .flatMap{discoverWebDirectory(it)}
                             results[index]=parsed+discovered
-                            refreshed[index]=true
-                            val file=cacheFile(p)
-                            val temp=java.io.File(file.absolutePath+".tmp")
-                            temp.writeText(body)
-                            if(!temp.renameTo(file)){
-                                temp.copyTo(file,overwrite=true)
-                                temp.delete()
-                            }
                         }catch(e:Exception){
                             HomeTvDiagnostics.w("HomeTV","Playlist rebuild failed: "+p.name,e)
                             if(!forceRebuild){
@@ -2771,6 +2808,7 @@ class MainActivity: Activity() {
                 tasks.forEach{it.get()}
             }finally{pool.shutdownNow()}
             val updated=refreshed.count{it}
+            val checkedCount=checked.count{it}
             val combined=mutableListOf<Channel>()
             if(activeOnly){
                 // Refresh only the active playlist without dropping cached channels
@@ -2798,7 +2836,9 @@ class MainActivity: Activity() {
             }.toMutableList()
             runOnUiThread{
                 if(generation!=refreshGeneration || !licenseReady || isFinishing || isDestroyed)return@runOnUiThread
-                Toast.makeText(this,"Playlist check complete: "+updated+"/"+sources.size+" updated",Toast.LENGTH_LONG).show()
+                Toast.makeText(this,"Playlist check complete: "+updated+" updated • "+
+                    (checkedCount-updated).coerceAtLeast(0)+" unchanged • "+
+                    (sources.size-checkedCount).coerceAtLeast(0)+" failed",Toast.LENGTH_LONG).show()
                 if(updated==0 && nextChannels.isEmpty()){
                     Toast.makeText(this,"Refresh failed. Existing channels preserved.",Toast.LENGTH_LONG).show()
                 }else{
@@ -6326,6 +6366,8 @@ class MainActivity: Activity() {
         root.addView(tvSection("ACCOUNT & LIBRARY"))
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
         root.addView(button("Manage playlists"){managePlaylists()})
+        root.addView(settingsToggle("Automatic Playlist Check & Update","auto_playlist_check",true))
+        root.addView(label("Checks the selected active playlist in the background after startup. Cached channels open first; unchanged playlists are not reparsed."))
         root.addView(button("Clear cache (keep license active)"){confirmClearCache()})
         root.addView(button("Export settings backup"){exportSettings()})
         root.addView(button("Restore settings backup"){importSettings()})
