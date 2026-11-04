@@ -44,4 +44,4 @@ jobs:
           make_latest: false
           overwrite_files: true
           fail_on_unmatched_files: true
-          files: app/build/outputs/apk/debug/MyTV-V1-debug.apk
+          files: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
