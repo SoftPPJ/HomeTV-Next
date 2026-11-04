@@ -118,3 +118,10 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Active deployment: `d855ff6c-93c1-454a-a10e-d6a617aa014d`; version: `0fb63744-9204-4110-aae5-5bb393aa7054`; 100% traffic.
 - Preserved bindings: `ADMIN_TOKEN`, `GITHUB_REPO`, `GITHUB_TOKEN`, `LICENSE_PATH`, `LICENSE_SIGNING_PRIVATE_JWK`, `PLAYLIST_URL`; compatibility date remains `2026-10-19`.
 - Cloudflare accepted the module upload successfully. End-to-end activation and signed validation still need a real test device/licence. The Android public key/private signing key match has not been independently verified from a test signature, so do not declare licence flow release-ready yet.
+
+
+### Activation safety correction — 2026-11-04
+- Fixed an activation-flow issue in `MainActivity.kt`: a successful `/activate` response followed by a failed or invalid signed `/validate` response could previously still open the app because the returned token alone was treated as success.
+- The app now starts only after `SignedLicenseCache.saveVerified()` accepts the signed lease. If activation has bound a token but validation fails, the token is retained for **Retry Existing License**, while `licenseReady` remains false and the app stays on the licence screen.
+- Commit: `880b7fbc284fa5e1b1e7154b1c73328e8b4a3231`.
+- This is a source correction only. The development-branch Kotlin compile, real Worker activation/validation, and Android TV tests remain pending.
