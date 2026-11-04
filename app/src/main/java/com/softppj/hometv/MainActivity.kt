@@ -325,7 +325,7 @@ class MainActivity: Activity() {
                             .putString("license_token",token)
                             .putBoolean("license_last_verified",validationSucceeded)
                             .putBoolean("license_validation_blocked",!validationSucceeded)
-                            .apply()
+                            .commit()
                         if(validationSucceeded){
                             verifiedLease?.let{saveLicenseExpiry(it)}
                             licenseReady=true
