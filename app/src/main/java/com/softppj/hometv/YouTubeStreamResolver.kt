@@ -14,7 +14,8 @@ internal object YouTubeStreamResolver {
     const val TIMEOUT_MS = 8_000
     data class Stream(val url: String, val kind: String)
 
-    fun resolve(videoUrl: String): Stream? {
+    /** Extracts a supported 11-character video ID without making a network request. */
+    internal fun videoId(videoUrl: String): String? {
         val uri = Uri.parse(videoUrl)
         val host = uri.host?.lowercase()?.removePrefix("www.")?.removePrefix("m.") ?: return null
         if (host !in setOf("youtube.com", "youtu.be", "youtube-nocookie.com")) return null
@@ -26,8 +27,49 @@ internal object YouTubeStreamResolver {
                 path.trim('/').substringAfter('/').substringBefore('/')
             else -> null
         } ?: return null
-        if (!id.matches(Regex("[A-Za-z0-9_-]{11}"))) return null
+        return id.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+    }
 
+    /**
+     * Parses only the public player response. Keeping this separate makes the
+     * security-sensitive acceptance rules testable without contacting YouTube.
+     */
+    internal fun extractHlsManifest(html: String): String? {
+        val marker = "ytInitialPlayerResponse"
+        val at = html.indexOf(marker)
+        if (at < 0) return null
+        val open = html.indexOf('{', at + marker.length)
+        if (open < 0) return null
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var close = -1
+        for (i in open until html.length) {
+            val ch = html[i]
+            if (inString) {
+                if (escaped) escaped = false
+                else if (ch == '\\\\') escaped = true
+                else if (ch == '"') inString = false
+            } else {
+                if (ch == '"') inString = true
+                else if (ch == '{') depth++
+                else if (ch == '}' && --depth == 0) { close = i; break }
+            }
+        }
+        if (close < 0) return null
+        return try {
+            val player = JSONObject(html.substring(open, close + 1))
+            val playability = player.optJSONObject("playabilityStatus")?.optString("status")
+            if (playability != "OK") return null
+            val hls = player.optJSONObject("streamingData")?.optString("hlsManifestUrl").orEmpty()
+            hls.takeIf { it.startsWith("https://") }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun resolve(videoUrl: String): Stream? {
+        val id = videoId(videoUrl) ?: return null
         // Public watch-page metadata sometimes exposes HLS for live broadcasts.
         // Do not try to defeat challenges or access controls.
         val connection = (URL("https://www.youtube.com/watch?v=$id").openConnection() as HttpURLConnection)
@@ -38,33 +80,7 @@ internal object YouTubeStreamResolver {
             connection.setRequestProperty("Accept", "text/html")
             if (connection.responseCode !in 200..299) return null
             val html = connection.inputStream.bufferedReader().use { it.readText().take(2_000_000) }
-            val marker = "ytInitialPlayerResponse"
-            val at = html.indexOf(marker)
-            if (at < 0) return null
-            val open = html.indexOf('{', at + marker.length)
-            if (open < 0) return null
-            var depth = 0
-            var inString = false
-            var escaped = false
-            var close = -1
-            for (i in open until html.length) {
-                val ch = html[i]
-                if (inString) {
-                    if (escaped) escaped = false
-                    else if (ch == '\\') escaped = true
-                    else if (ch == '"') inString = false
-                } else {
-                    if (ch == '"') inString = true
-                    else if (ch == '{') depth++
-                    else if (ch == '}' && --depth == 0) { close = i; break }
-                }
-            }
-            if (close < 0) return null
-            val player = JSONObject(html.substring(open, close + 1))
-            val playability = player.optJSONObject("playabilityStatus")?.optString("status")
-            if (playability != "OK") return null
-            val hls = player.optJSONObject("streamingData")?.optString("hlsManifestUrl").orEmpty()
-            if (!hls.startsWith("https://")) return null
+            val hls = extractHlsManifest(html) ?: return null
             return Stream(hls, "hls")
         } catch (_: Exception) {
             return null
