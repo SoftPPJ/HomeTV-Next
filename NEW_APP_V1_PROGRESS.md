@@ -146,3 +146,16 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Added JUnit 4 and Robolectric test dependencies and enabled Android resources for local unit tests.
 - Updated the manual-only GitHub Actions compile workflow to run `:app:testDebugUnitTest` after Kotlin compilation. This does not trigger automatically on every push.
 - **Not yet executed:** the new test suite has been committed but no GitHub Actions run has executed it. Run the manual workflow from Actions to verify it. No APK assembly or device test has been run.
+
+## Additional unit coverage and debug-test build workflow — 2026-11-04
+
+- Refactored YouTube stream resolver URL-ID parsing and public-player HLS extraction into side-effect-free helpers; network fetching remains in `resolve()` and still uses the existing timeout policy.
+- Added Robolectric tests for supported YouTube URL forms, invalid/host-spoofed URLs, HLS extraction only for playable responses, HTTPS-only manifests, and malformed/missing player data.
+- Manual-only Actions workflow now runs Kotlin compilation, unit tests, and then assembles/uploads a **debug test APK** for seven days only if earlier steps pass. It does not publish a Release or prerelease and does not run on every push.
+- The test suite and updated workflow are committed but have **not yet been executed**. There is no verified test result or APK artifact yet. The workflow must be manually started from the repository Actions page.
+
+## Source review notes
+
+- Large-playlist protections found in source include a 32 MiB playlist read cap, bounded three-thread playlist cache/refresh pools, cached playlist parsing off the UI thread, virtualized ListView rows, and cached Up/Down surfing indexes. These are source-level observations only; no 10k/20k stress test has been run.
+- Per-playlist logical channel numbering and optional continuous numbering are present in the indexing code. The runtime numbering and playback navigation still require Android TV verification.
+- Hidden-channel reachability scan explicitly warns that an HTTP response does not verify video playback; auto-unhide is tied to the foreground player Playing callback. Runtime behavior still needs device testing.
