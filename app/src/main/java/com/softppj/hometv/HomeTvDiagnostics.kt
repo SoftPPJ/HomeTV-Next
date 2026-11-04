@@ -19,8 +19,21 @@ internal object HomeTvDiagnostics {
     @Volatile private var appContext: Context? = null
     @Volatile private var crashHandlerInstalled = false
 
-    @Synchronized fun initialize(context: Context) {
+    @Synchronized fun initialize(context: Context): Boolean {
         appContext = context.applicationContext
+        val prefs = appContext!!.getSharedPreferences("hometv", Context.MODE_PRIVATE)
+        val previousStartupWasUnclean = prefs.getBoolean("startup_in_progress", false)
+        val crashCount = if (previousStartupWasUnclean) {
+            prefs.getInt("startup_crash_count", 0) + 1
+        } else {
+            prefs.getInt("startup_crash_count", 0)
+        }
+        val safeMode = prefs.getBoolean("safe_startup_mode", false) || crashCount >= 2
+        prefs.edit()
+            .putBoolean("startup_in_progress", true)
+            .putInt("startup_crash_count", crashCount)
+            .putBoolean("safe_startup_mode", safeMode)
+            .apply()
         prune()
         if (!crashHandlerInstalled) {
             val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -34,6 +47,16 @@ internal object HomeTvDiagnostics {
             }
             crashHandlerInstalled = true
         }
+        return safeMode
+    }
+
+    @Synchronized fun markCleanExit(context: Context) {
+        context.applicationContext.getSharedPreferences("hometv", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("startup_in_progress", false)
+            .putInt("startup_crash_count", 0)
+            .putBoolean("safe_startup_mode", false)
+            .apply()
     }
 
     fun w(tag: String, message: String, error: Throwable? = null) {
