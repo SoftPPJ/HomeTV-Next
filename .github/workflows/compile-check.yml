@@ -1,15 +1,16 @@
-name: HomeTV Next compile check
+name: MyTV V1 compile, test and prerelease
 
-# Deliberately manual-only: source pushes must not consume Actions quota.
-# A manually requested run compiles, tests, and creates a debug-only APK artifact for device testing.
 on:
+  push:
+    branches:
+      - new-app-v1-development
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  compile-debug:
+  build-and-prerelease:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -32,12 +33,15 @@ jobs:
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
-      - name: Assemble debug test APK
+      - name: Assemble debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Upload debug test APK
-        uses: actions/upload-artifact@v4
+      - name: Publish APK as GitHub prerelease
+        uses: softprops/action-gh-release@v2
         with:
-          name: HomeTV-Next-V1-debug-test
-          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
-          if-no-files-found: error
-          retention-days: 7
+          tag_name: mytv-v1.0.0-test
+          name: MyTV V1.0.0 Test
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: app/build/outputs/apk/debug/MyTV-V1-debug.apk
