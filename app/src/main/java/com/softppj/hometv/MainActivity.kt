@@ -161,7 +161,7 @@ class MainActivity: Activity() {
             var failure:String?=null
             var permanentFailure=false
             try{
-                val response=licenseRequest("/validate",licensePayload())
+                val response=licenseRequest("/validate-lease",licensePayload())
                 if(!cache.saveVerified(response))
                     throw IllegalStateException("The licensing server did not provide a valid signed licence lease")
                 saveLicenseExpiry(response)
@@ -310,7 +310,7 @@ class MainActivity: Activity() {
                     if(token==null)throw IllegalStateException("Activation returned an empty token")
                     // Activation alone must never grant access. The signed lease
                     // must be verified and saved before the app can start.
-                    val verified=licenseRequest("/validate",JSONObject()
+                    val verified=licenseRequest("/validate-lease",JSONObject()
                         .put("device",installationId()).put("token",token))
                     if(!licenseCache(token!!).saveVerified(verified))
                         throw IllegalStateException("The licensing server did not provide a valid signed licence lease")
