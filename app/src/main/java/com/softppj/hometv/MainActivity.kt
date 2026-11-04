@@ -24,6 +24,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.ui.PlayerView
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
+import androidx.media3.effect.HslAdjustment
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
@@ -3986,6 +3990,29 @@ class MainActivity: Activity() {
     private fun picturePresetKey(c:Channel)="picture_mode_"+hash(c.url)
     private fun selectedPicturePreset(c:Channel)=
         prefs.getString(picturePresetKey(c),"Standard")?.takeIf{picturePresets.containsKey(it)} ?: "Standard"
+    // Apply the same saved channel preset to Media3 using Media3's optional GL effects.
+    // The empty list is installed before prepare so a preset can also be changed during playback.
+    @UnstableApi
+    private fun media3PictureEffects(c:Channel):List<androidx.media3.common.Effect>{
+        val preset=picturePresets[selectedPicturePreset(c)] ?: picturePresets.getValue("Standard")
+        val brightness=((preset.brightness-1f)*0.5f).coerceIn(-1f,1f)
+        val contrast=((preset.contrast-1f)*0.5f).coerceIn(-1f,1f)
+        val saturation=((preset.saturation-1f)*100f).coerceIn(-100f,100f)
+        return buildList {
+            if(brightness!=0f)add(Brightness(brightness))
+            if(contrast!=0f)add(Contrast(contrast))
+            if(saturation!=0f)add(HslAdjustment.Builder().adjustSaturation(saturation).build())
+        }
+    }
+    @UnstableApi
+    private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
+        try{
+            exo.setVideoEffects(media3PictureEffects(c))
+        }catch(e:Exception){
+            HomeTvDiagnostics.w("HomeTV","Media3 picture preset could not be applied; original video path retained",e)
+            try{exo.setVideoEffects(emptyList())}catch(_:Exception){}
+        }
+    }
     // Keep Media3 on the V6 unprocessed video path; presets use LibVLC only.
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
@@ -4003,18 +4030,22 @@ class MainActivity: Activity() {
         val c=channels.getOrNull(activeIndex)?:return
         val names=picturePresets.keys.toTypedArray()
         val selected=selectedPicturePreset(c)
-        val message=if(player!=null && active==activeIndex)
-            "Media3 remains on Standard for V6-compatible playback stability. Presets apply when this channel uses LibVLC."
-        else "Choose a picture style for this channel. Your selection is saved per stream."
+        val message="Choose a picture style for this channel. The same preset is saved per stream and applied by Media3 or LibVLC. Media3 video effects use GPU processing and may be unavailable with some decoder paths."
         val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode").setMessage(message)
             .setSingleChoiceItems(names,names.indexOf(selected).coerceAtLeast(0)){d,which->
                 val mode=names[which]
                 prefs.edit().putString(picturePresetKey(c),mode).apply()
-                if(active==activeIndex)vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                if(active==activeIndex){
+                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                    player?.let{applyMedia3PicturePreset(it,c)}
+                }
                 showBanner(c.name+" picture mode: "+mode);d.dismiss()
             }.setNeutralButton("Reset to Standard"){_,_->
                 prefs.edit().remove(picturePresetKey(c)).apply()
-                if(active==activeIndex)vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                if(active==activeIndex){
+                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                    player?.let{applyMedia3PicturePreset(it,c)}
+                }
                 showBanner("Picture mode reset to Standard for "+c.name)
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -6050,6 +6081,7 @@ class MainActivity: Activity() {
                 }
             })
             try{
+                applyMedia3PicturePreset(exo,c)
                 exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
                 exo.prepare()
                 exo.play()
