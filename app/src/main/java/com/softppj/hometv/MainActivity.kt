@@ -370,6 +370,11 @@ class MainActivity: Activity() {
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
+    // Native YouTube is attempted once per selected URL; WebView remains the fallback.
+    private var youtubeNativeAttemptedUrl:String?=null
+    private var youtubeNativeStreamUrl:String?=null
+    private var youtubeNativeGeneration=0
+    private var youtubeResolveTimeout:Runnable?=null
     private var active=-1
     private var previousChannelUrl:String?=null
     private var previousChannelIdentity:String?=null
@@ -4366,7 +4371,7 @@ class MainActivity: Activity() {
                     resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
                 panel.addView(view,0,FrameLayout.LayoutParams(-1,-1))
-                exo.setMediaItem(mediaItemForStream(c.url))
+                exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
                 exo.prepare()
                 if(c.mediaType in setOf("movie","series","music")){
                     val resume=mediaResumeSeconds(c)
@@ -5681,6 +5686,13 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        if(youtubeNativeAttemptedUrl!=null && youtubeNativeAttemptedUrl!=c.url){
+            youtubeNativeGeneration++
+            youtubeNativeAttemptedUrl=null
+            youtubeNativeStreamUrl=null
+            youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
+            youtubeResolveTimeout=null
+        }
         if(c.source in lockedPlaylistNames() && c.source !in unlockedPlaylistsThisSession){
             openLockedPlaylist(c.source){playIndex(index)}
             return
@@ -5758,9 +5770,44 @@ class MainActivity: Activity() {
             (u.scheme=="http" || u.scheme=="https") &&
                 (routeWebOverride ?: isWebTv(c))
         }catch(_:Exception){false}
-        // Restore the original WebView watch-page route for YouTube.
-        // Native stream scraping and embed mode are not reliable substitutes here.
-        if(youtubeUri!=null || webPage){
+        // Only individual video URLs are eligible for public live-HLS discovery.
+        // Channel and playlist URLs continue directly to the existing WebView route.
+        val youtubeVideoId=youtubeUri?.getQueryParameter("v")
+            ?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}
+        if(youtubeVideoId!=null && youtubeNativeStreamUrl==null && youtubeNativeAttemptedUrl!=c.url){
+            youtubeNativeAttemptedUrl=c.url
+            val requestGeneration=++youtubeNativeGeneration
+            showBanner("Checking YouTube stream…")
+            val timeout=Runnable{
+                if(requestGeneration==youtubeNativeGeneration && active==index && videoScreen===screen){
+                    youtubeResolveTimeout=null
+                    youtubeNativeGeneration++
+                    showBanner("YouTube stream check timed out. Opening YouTube player…")
+                    playIndexResolved(index,true)
+                }
+            }
+            youtubeResolveTimeout=timeout
+            handler.postDelayed(timeout,YouTubeStreamResolver.TIMEOUT_MS.toLong())
+            thread(name="YouTubeNativeResolve"){
+                val resolved=try{YouTubeStreamResolver.resolve(youtubeUri.toString())}catch(_:Exception){null}
+                handler.post{
+                    if(requestGeneration!=youtubeNativeGeneration || active!=index ||
+                        videoScreen!==screen || channels.getOrNull(index)?.url!=c.url)return@post
+                    youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
+                    youtubeResolveTimeout=null
+                    if(resolved!=null && resolved.kind=="hls" && resolved.url.startsWith("https://")){
+                        youtubeNativeStreamUrl=resolved.url
+                        showBanner("Opening native YouTube stream…")
+                        playIndexResolved(index,false)
+                    }else{
+                        showBanner("Opening YouTube player…")
+                        playIndexResolved(index,true)
+                    }
+                }
+            }
+            return
+        }
+        if((youtubeUri!=null && youtubeNativeStreamUrl==null) || webPage){
             // Use the original YouTube watch page inside WebView.
             // Keep regular IPTV streams on their existing Media3/LibVLC path.
             val viewer=WebView(this)
@@ -5937,6 +5984,7 @@ class MainActivity: Activity() {
             val startupTimeout=Runnable{
                 if(active==index && videoScreen===screen && player===exo &&
                     !exo.isPlaying){
+                    if(youtubeNativeStreamUrl!=null && fallbackYouTubeNativeToWeb(index,screen))return@Runnable
                     HomeTvDiagnostics.w("HomeTV","Stream did not start playing before startup timeout: "+c.name+
                         " state="+exo.playbackState+" error="+exo.playerError?.errorCodeName)
                     handleEngineFailure(index,screen)
@@ -5968,6 +6016,7 @@ class MainActivity: Activity() {
                             val recovery=Runnable{
                                 if(active==index && videoScreen===screen && player===exo &&
                                     exo.playbackState==Player.STATE_BUFFERING){
+                                    if(youtubeNativeStreamUrl!=null && fallbackYouTubeNativeToWeb(index,screen))return@Runnable
                                     handleEngineFailure(index,screen)
                                 }
                             }
@@ -5997,6 +6046,7 @@ class MainActivity: Activity() {
                 override fun onPlayerError(error:PlaybackException){
                     val httpStatus=(error.cause as? HttpDataSource.InvalidResponseCodeException)?.responseCode
                     HomeTvDiagnostics.e("HomeTV", "Playback error for "+c.name+" HTTP="+httpStatus, error)
+                    if(youtubeNativeStreamUrl!=null && fallbackYouTubeNativeToWeb(index,screen))return
                     handleEngineFailure(index,screen)
                 }
             })
@@ -6004,11 +6054,24 @@ class MainActivity: Activity() {
                 exo.setMediaItem(mediaItemForStream(c.url))
                 exo.prepare()
                 exo.play()
-            }catch(e:Exception){showBanner("Cannot play ${c.name}: ${e.message}",true);handleEngineFailure(index,screen)}
+            }catch(e:Exception){
+                if(youtubeNativeStreamUrl!=null && fallbackYouTubeNativeToWeb(index,screen))return
+                showBanner("Cannot play ${c.name}: ${e.message}",true);handleEngineFailure(index,screen)
+            }
         }
         updateClock()
         screen.requestFocus()
         showChannelInfo(index)
+    }
+    private fun fallbackYouTubeNativeToWeb(index:Int,screen:FrameLayout):Boolean{
+        if(youtubeNativeStreamUrl==null || active!=index || videoScreen!==screen)return false
+        youtubeNativeStreamUrl=null
+        youtubeNativeGeneration++
+        youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
+        youtubeResolveTimeout=null
+        showBanner("Native YouTube playback unavailable. Opening YouTube player…")
+        playIndexResolved(index,true)
+        return true
     }
     private fun reconnectCurrentChannel(c:Channel,index:Int,screen:FrameLayout){
         if(active!=index || videoScreen!==screen)return
@@ -6770,6 +6833,8 @@ class MainActivity: Activity() {
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
         previewIndex=-1
+        youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
+        youtubeResolveTimeout=null
         youtubeUnmuteTask?.let{handler.removeCallbacks(it)}
         youtubeUnmuteTask=null
         youtubeProgressTask?.let{handler.removeCallbacks(it)}
