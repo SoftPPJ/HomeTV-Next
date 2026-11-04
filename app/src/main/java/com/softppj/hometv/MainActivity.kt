@@ -1914,6 +1914,7 @@ class MainActivity: Activity() {
             "Aspect ratio",
             "Picture quality",
             "Audio tracks",
+            "Preferred audio language",
             "Subtitles",
             "Sleep timer",
             "Playback engine",
@@ -1934,16 +1935,17 @@ class MainActivity: Activity() {
                     1->selectScreenMode(i)
                     2->selectQuality(i)
                     3->audioTracks()
-                    4->subtitleTracks(i)
-                    5->sleepTimer()
-                    6->chooseChannelEngine(i)
-                    7->selectAlternative(i)
-                    8->{favorite(c);if(active<0)allChannels()}
-                    9->toggleLock(id(c),false)
-                    10->{toggleManualHide(c);if(active<0)allChannels()}
-                    11->allChannels()
-                    12->liveSettings()
-                    13->confirmExit()
+                    4->choosePreferredAudioLanguage()
+                    5->subtitleTracks(i)
+                    6->sleepTimer()
+                    7->chooseChannelEngine(i)
+                    8->selectAlternative(i)
+                    9->{favorite(c);if(active<0)allChannels()}
+                    10->toggleLock(id(c),false)
+                    11->{toggleManualHide(c);if(active<0)allChannels()}
+                    12->allChannels()
+                    13->liveSettings()
+                    14->confirmExit()
                 }
             }
             .setNegativeButton("Back",null).create()
@@ -3532,30 +3534,113 @@ class MainActivity: Activity() {
     private fun preferredAudioLanguage():String =
         prefs.getString("preferred_audio_language","ml")?.takeIf{it.isNotBlank()} ?: "ml"
 
+    private fun normalizeAudioLanguage(value:String?):String?{
+        val raw=value?.trim()?.lowercase(java.util.Locale.ROOT)
+            ?.substringBefore('-')?.substringBefore('_') ?: return null
+        return when(raw){
+            "ml","mal"->"ml"
+            "en","eng"->"en"
+            "hi","hin"->"hi"
+            "ta","tam"->"ta"
+            "ar","ara"->"ar"
+            "und","unknown",""->null
+            else->raw
+        }
+    }
     private fun audioTrackPreferenceKey(c:Channel)="audio_track_"+channelKey(c)
+    private fun audioTrackSignatureKey(c:Channel)="audio_track_signature_"+channelKey(c)
+    private fun vlcAudioTrackPreferenceKey(c:Channel)="audio_track_vlc_"+channelKey(c)
+
+    private fun audioFormatSignature(format:androidx.media3.common.Format):String =
+        listOf(format.id.orEmpty(),normalizeAudioLanguage(format.language).orEmpty(),
+            format.label.orEmpty(),format.sampleMimeType.orEmpty(),
+            format.channelCount.toString(),format.roleFlags.toString()).joinToString("|")
 
     private fun applyAudioTrackPreference(c:Channel,exo:ExoPlayer){
-        val saved=prefs.getString(audioTrackPreferenceKey(c),null)
-        val wanted=saved ?: preferredAudioLanguage()
-        val matching=exo.currentTracks.groups.asSequence()
+        val savedLanguage=prefs.getString(audioTrackPreferenceKey(c),null)
+        val savedSignature=prefs.getString(audioTrackSignatureKey(c),null)
+        val wanted=normalizeAudioLanguage(savedLanguage)
+            ?: if(savedLanguage==null && !prefs.getBoolean("audio_use_stream_default",false))
+                normalizeAudioLanguage(preferredAudioLanguage()) else null
+        if(wanted==null && savedSignature.isNullOrBlank())return
+        val available=exo.currentTracks.groups.asSequence()
             .filter{it.type==C.TRACK_TYPE_AUDIO}
             .flatMap{group->(0 until group.length).asSequence()
                 .filter{index->group.isTrackSupported(index)}
                 .map{index->Triple(group,index,group.getTrackFormat(index))}}
-            .firstOrNull{(_,_,format)->format.language?.equals(wanted,true)==true}
+            .toList()
+        val matching=if(!savedSignature.isNullOrBlank())
+            available.firstOrNull{(_,_,format)->audioFormatSignature(format)==savedSignature}
+                ?: available.firstOrNull{(_,_,format)->normalizeAudioLanguage(format.language)==wanted}
+        else available.firstOrNull{(_,_,format)->normalizeAudioLanguage(format.language)==wanted}
         if(matching!=null){
             val (group,index,_)=matching
-            val already=group.isTrackSelected(index)
-            if(!already){
+            if(!group.isTrackSelected(index)){
                 exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                     .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup,listOf(index)))
                     .build()
             }
-        }else if(saved==null){
+        }else if(savedLanguage==null && wanted!=null){
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage(wanted)
                 .build()
         }
+    }
+
+    private fun vlcTrackLanguage(name:String):String?{
+        val value=name.lowercase(java.util.Locale.ROOT)
+        return when{
+            value.contains("malayalam") || Regex("\\bmal\\b").containsMatchIn(value)->"ml"
+            value.contains("english") || Regex("\\beng?\\b").containsMatchIn(value)->"en"
+            value.contains("hindi") || Regex("\\bhin\\b").containsMatchIn(value)->"hi"
+            value.contains("tamil") || Regex("\\btam\\b").containsMatchIn(value)->"ta"
+            value.contains("arabic") || Regex("\\bara\\b").containsMatchIn(value)->"ar"
+            else->null
+        }
+    }
+
+    private fun applyVlcAudioTrackPreference(c:Channel,vlc:VlcPlayer){
+        val tracks=vlc.audioTracks ?: return
+        if(tracks.isEmpty())return
+        val savedName=prefs.getString(vlcAudioTrackPreferenceKey(c),null)
+        val wanted=if(savedName.isNullOrBlank()){
+            if(prefs.getBoolean("audio_use_stream_default",false))null
+            else normalizeAudioLanguage(preferredAudioLanguage())
+        }else null
+        val match=if(!savedName.isNullOrBlank())
+            tracks.firstOrNull{it.name?.toString()==savedName}
+        else tracks.firstOrNull{track->wanted!=null && vlcTrackLanguage(track.name?.toString().orEmpty())==wanted}
+        if(match!=null && vlc.audioTrack!=match.id){
+            vlc.setAudioTrack(match.id)
+        }
+    }
+
+    private fun vlcAudioTracks(vlc:VlcPlayer){
+        val tracks=vlc.audioTracks?.filter{it.id>=0}.orEmpty()
+        if(tracks.isEmpty()){
+            AlertDialog.Builder(this).setTitle("Audio tracks")
+                .setMessage("LibVLC has not reported any audio tracks yet. Wait for playback to start and try again.")
+                .setPositiveButton("OK",null).show()
+            return
+        }
+        val names=tracks.map{track->
+            val name=track.name?.toString()?.takeIf{it.isNotBlank()} ?: "Audio track "+track.id
+            name+(if(track.id==vlc.audioTrack)" ✓" else "")
+        }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("Select audio track")
+            .setItems(names){_,position->
+                val selected=tracks[position]
+                if(vlc.setAudioTrack(selected.id)){
+                    channels.getOrNull(active)?.let{prefs.edit()
+                        .putString(vlcAudioTrackPreferenceKey(it),selected.name?.toString().orEmpty()).apply()}
+                    showBanner("Audio track: "+names[position])
+                }else showBanner("Could not change the LibVLC audio track",true)
+            }
+            .setNeutralButton("Use stream default next time"){_,_->
+                channels.getOrNull(active)?.let{prefs.edit().remove(vlcAudioTrackPreferenceKey(it)).apply()}
+                showBanner("Audio preference cleared for this channel")
+            }
+            .setNegativeButton("Cancel",null).show()
     }
 
     private fun choosePreferredAudioLanguage(){
@@ -3573,47 +3658,73 @@ class MainActivity: Activity() {
                 }
                 dialog.dismiss()
                 val index=active
-                if(index in channels.indices && player!=null){
-                    prefs.edit().remove(audioTrackPreferenceKey(channels[index])).apply()
-                    val exo=player!!
-                    exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
-                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
-                        .setPreferredAudioLanguage(if(code.isBlank())null else code)
-                        .build()
+                if(index in channels.indices){
+                    val channel=channels[index]
+                    prefs.edit().remove(audioTrackPreferenceKey(channel))
+                        .remove(audioTrackSignatureKey(channel))
+                        .remove(vlcAudioTrackPreferenceKey(channel)).apply()
+                    player?.let{exo->
+                        exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .setPreferredAudioLanguage(if(code.isBlank())null else code)
+                            .build()
+                    }
+                    vlcPlayer?.let{vlc->
+                        if(code.isNotBlank())applyVlcAudioTrackPreference(channel,vlc)
+                    }
                 }
                 showBanner(if(code.isBlank())"Audio: stream default" else "Preferred audio: "+choices[which])
             }.setNegativeButton("Cancel",null).show()
     }
 
     private fun audioTracks(){
+        val vlc=vlcPlayer
+        if(vlc!=null){vlcAudioTracks(vlc);return}
         val exo=player
         if(exo==null){Toast.makeText(this,"Audio track selection is available for IPTV streams",Toast.LENGTH_LONG).show();return}
-        val entries=mutableListOf<Pair<androidx.media3.common.TrackGroup,Int>>()
+        val entries=mutableListOf<Triple<androidx.media3.common.TrackGroup,Int,androidx.media3.common.Format>>()
         val names=mutableListOf<String>()
         for(group in exo.currentTracks.groups){
             if(group.type!=C.TRACK_TYPE_AUDIO)continue
             for(i in 0 until group.length){
                 val fmt=group.getTrackFormat(i)
-                val language=fmt.language ?: "Unknown language"
+                val language=normalizeAudioLanguage(fmt.language) ?: fmt.language ?: "Unknown language"
                 val codec=fmt.sampleMimeType ?: "Unknown codec"
-                names.add(language+" · "+codec+(if(group.isTrackSelected(i))" ✓" else "")+(if(!group.isTrackSupported(i))" (unsupported)" else ""))
-                entries.add(Pair(group.mediaTrackGroup,i))
+                val supported=group.isTrackSupported(i)
+                names.add(language+" · "+codec+(if(group.isTrackSelected(i))" ✓" else "")+(if(!supported)" (unsupported)" else ""))
+                if(supported)entries.add(Triple(group,i,fmt))
             }
         }
-        if(entries.isEmpty()){AlertDialog.Builder(this).setTitle("Audio tracks").setMessage("No audio track was detected for this channel. Try another stream URL.").setPositiveButton("OK",null).show();return}
-        AlertDialog.Builder(this).setTitle("Select audio track").setItems(names.toTypedArray()){_,position->
-            val (group,index)=entries[position]
+        val supportedNames=entries.map{entry->
+            val group=entry.first;val index=entry.second
+            val fmt=entry.third
+            val language=normalizeAudioLanguage(fmt.language) ?: fmt.language ?: "Unknown language"
+            language+" · "+(fmt.sampleMimeType ?: "Unknown codec")+
+                (if(group.isTrackSelected(index))" ✓" else "")
+        }
+        if(entries.isEmpty()){
+            AlertDialog.Builder(this).setTitle("Audio tracks")
+                .setMessage(if(names.isEmpty())"No audio track was detected for this channel. Try another stream URL."
+                    else "Audio tracks were detected, but this device cannot currently decode them.")
+                .setPositiveButton("OK",null).show()
+            return
+        }
+        AlertDialog.Builder(this).setTitle("Select audio track").setItems(supportedNames.toTypedArray()){_,position->
+            val (group,index,format)=entries[position]
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
-                .setOverrideForType(TrackSelectionOverride(group,listOf(index)))
+                .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup,listOf(index)))
                 .build()
-            val channel=channels.getOrNull(active)
-            val language=group.getFormat(index).language
-            if(channel!=null && !language.isNullOrBlank()){
-                prefs.edit().putString(audioTrackPreferenceKey(channel),language).apply()
+            channels.getOrNull(active)?.let{channel->
+                val language=normalizeAudioLanguage(format.language)
+                val edit=prefs.edit().putString(audioTrackSignatureKey(channel),audioFormatSignature(format))
+                if(language!=null)edit.putString(audioTrackPreferenceKey(channel),language)
+                else edit.remove(audioTrackPreferenceKey(channel))
+                edit.remove(vlcAudioTrackPreferenceKey(channel)).apply()
             }
-            showBanner("Audio track: "+names[position])
+            showBanner("Audio track: "+supportedNames[position])
         }.setNeutralButton("Automatic"){_,_->
-            channels.getOrNull(active)?.let{prefs.edit().remove(audioTrackPreferenceKey(it)).apply()}
+            channels.getOrNull(active)?.let{channel->prefs.edit()
+                .remove(audioTrackPreferenceKey(channel)).remove(audioTrackSignatureKey(channel)).apply()}
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                 .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
@@ -5807,6 +5918,10 @@ class MainActivity: Activity() {
                     when(eventType){
                     VlcPlayer.Event.Playing->{
                         started=true
+                        handler.postDelayed({
+                            if(vlcPlayer===vlc && active==index && !failed)
+                                applyVlcAudioTrackPreference(c,vlc)
+                        },700L)
                         handler.postDelayed({
                             if(vlcPlayer===vlc && active==index && !failed &&
                                 android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
