@@ -3539,11 +3539,10 @@ class MainActivity: Activity() {
         val wanted=saved ?: preferredAudioLanguage()
         val matching=exo.currentTracks.groups.asSequence()
             .filter{it.type==C.TRACK_TYPE_AUDIO}
-            .flatMap{group->(0 until group.length).asSequence().map{index->Triple(group,index,group.getTrackFormat(index))}}
-            .firstOrNull{(_,index,format)->
-                format.language?.equals(wanted,true)==true &&
-                    exo.currentTracks.groups.any{g->g.type==C.TRACK_TYPE_AUDIO && index<g.length && g.isTrackSupported(index)}
-            }
+            .flatMap{group->(0 until group.length).asSequence()
+                .filter{index->group.isTrackSupported(index)}
+                .map{index->Triple(group,index,group.getTrackFormat(index))}}
+            .firstOrNull{(_,_,format)->format.language?.equals(wanted,true)==true}
         if(matching!=null){
             val (group,index,_)=matching
             val already=group.isTrackSelected(index)
@@ -3562,7 +3561,7 @@ class MainActivity: Activity() {
     private fun choosePreferredAudioLanguage(){
         val choices=arrayOf("Malayalam (ml)","English (en)","Hindi (hi)","Tamil (ta)","Arabic (ar)","Use stream default")
         val codes=arrayOf("ml","en","hi","ta","ar","")
-        val current=preferredAudioLanguage()
+        val current=if(prefs.getBoolean("audio_use_stream_default",false)) "" else preferredAudioLanguage()
         val selected=codes.indexOf(current).let{if(it<0)0 else it}
         AlertDialog.Builder(this).setTitle("Preferred audio language")
             .setSingleChoiceItems(choices,selected){dialog,which->
