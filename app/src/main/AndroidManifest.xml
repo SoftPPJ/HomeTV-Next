@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
     <application
-        android:label="My Home TV Next"
+        android:label="MyTV"
         android:icon="@drawable/hometv_launcher"
         android:roundIcon="@drawable/hometv_launcher"
         android:theme="@android:style/Theme.Material.NoActionBar"
