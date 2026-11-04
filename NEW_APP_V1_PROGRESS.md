@@ -78,3 +78,35 @@ No APK release/prerelease or final release until the user explicitly approves. D
 - Existing saved user preference is respected; users who previously switched the overlay OFF remain OFF until they enable it.
 - Source commit: `f180ed155ff069e0529275f8dee4a2a00801ee31`.
 - A fresh compile-only workflow run is required for this commit. Android TV visual verification remains a device test and has not been performed.
+
+
+## Critical-readiness audit — 2026-11-04
+
+### Important correction to build status
+- Workflow run **41815289650** succeeded, but GitHub reports its checked-out branch as `main` and its source SHA as `db3871a109421933f4144ebcf85e9f23e491c078`.
+- Therefore this successful run does **not** verify branch `new-app-v1-development` or its latest commit `fb3c22c7181ac04a91d61b149eb8608d7ddf9e5d`. A compile check must be dispatched with `new-app-v1-development` explicitly selected.
+
+### Licence integration finding and source correction
+- The Android app already calls `SignedLicenseCache` and rejects unsigned validation responses.
+- The repository Worker source still returned only `{ok:true, expiry}` from `/validate`; this could never satisfy the Android signed-lease verifier.
+- Updated `cloudflare/hometv-license.js` to sign a device- and token-bound RSA-SHA256 lease using the `LICENSE_SIGNING_PRIVATE_JWK` Worker secret. The response now includes `lease`, `signature`, and `serverTime` in the format expected by `SignedLicenseCache`.
+- Worker source commit: `a8f9225e1131033a28a77f00060d7553d2ceb9de`.
+- Cloudflare confirms that the live `hometv-license` Worker has a secret binding named `LICENSE_SIGNING_PRIVATE_JWK`. The live Worker was last modified on 2026-10-20; the updated repository source has **not** yet been deployed or end-to-end tested against the live endpoint. Licence activation/validation remains a release blocker until deployment and signed-response verification succeed.
+
+### Confirmed from source; not device-tested
+- Cached playlist startup with background refresh; optional automatic playlist checking; conditional HTTP validation and channel-position index for large-list navigation.
+- Media3 and LibVLC playback paths; XMLTV parsing and EPG guide/scheduling; preferred audio language and manual track selection.
+- Rotating date/time/day overlay and selectable placement; current compile workflow success was on `main`, not this development branch.
+- Hidden-channel scan reports URL reachability. That is not proof of playback. Automatic unhide is not fully verified against the specification's positive-playback requirement.
+- YouTube resolver is best-effort for eligible publicly exposed HLS live streams; ordinary YouTube content continues through WebView. This is not universal native YouTube playback.
+- The current app has Media3 and LibVLC player paths. The FFmpeg decoder dependency is a Media3 decoder extension, not a separately integrated third player engine.
+
+### Remaining critical gates
+1. Deploy the updated Worker source without changing existing secrets/bindings, then verify activation, signed validation, expiry, offline grace, clock rollback, surrender, and cache-clear behaviour end to end.
+2. Run the Kotlin compile workflow on `new-app-v1-development` (not `main`), then assemble a debug APK.
+3. Add/run automated tests for playlist parsing/indexing, signed licence validation and clock cases, hidden-channel decisions, EPG matching, and YouTube fallback/state handling.
+4. Stress-test 10,000 and 20,000+ channel playlists, including initial startup, Up/Down navigation, refresh, and playlist deletion.
+5. Test on the actual Android TV: remote navigation/focus, HLS/DASH/SmoothStreaming/MP4/WebTV, original stream quality, engine fallback and no silent URL/engine switching, audio selection, EPG, YouTube, safe startup, and side-by-side installation with V6.
+6. Finish visual/regression review of the cinematic Home UI and confirm all carried-forward V6 functions.
+
+No final APK, prerelease, or release is approved or created by this audit.
