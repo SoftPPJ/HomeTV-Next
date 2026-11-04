@@ -8,14 +8,22 @@ Updated: 2026-11-04
 - Set Android application ID to `com.softppj.myhometv.next`, so this app can install beside V6 with separate app-private data.
 - Set app label to `My Home TV Next`.
 - Set debug APK output name to `HomeTV-Next-V1-debug.apk`.
-- Replaced the inherited V6 release workflow with an artifact-only test build workflow. No release or prerelease is created.
-- Added a branch push compile/build check and APK artifact upload.
+- Disabled automatic Actions runs on source pushes while the GitHub artifact-storage quota is exhausted.
+- Changed the compile-check workflow to manual-only and removed APK assembly and artifact upload. No source push should consume build/artifact quota.
 
 ## Build verification
-- GitHub Actions run 41799402590: Kotlin compilation passed.
-- APK assembly passed.
-- APK file verification passed.
-- That run did not yet include the artifact-upload step; the workflow was then updated to upload the APK on the next branch-triggered run.
+- GitHub Actions run 41800232280 (commit 3dea3fe): Kotlin compilation passed and APK assembly/file verification passed.
+- Artifact upload failed because GitHub Actions artifact storage quota was exhausted; no artifact was created.
+- The latest audio, playlist-refresh, large-list navigation, and auto-unhide changes have not been compiled yet. No build was triggered for them.
+
+## Latest source changes (not yet compiled or device-tested)
+- Added preferred audio language, per-channel Media3 track memory, language-code normalization, and LibVLC audio-track selection.
+- Corrected "Use stream default" so it does not silently fall back to Malayalam.
+- Added an optional Automatic Playlist Check & Update setting (default ON); cached playlists open first and background checks only run when enabled.
+- Added conditional HTTP playlist requests using ETag / Last-Modified plus a content hash to avoid reparsing unchanged feeds. Manual rebuild bypasses the conditional cache.
+- Optimized remote channel surfing with a cached channel-key-to-position index, avoiding a full 10k+ channel scan for every Up/Down press.
+- Added Auto Unhide Working Channels (default OFF); it only restores a manually hidden channel after a real foreground playback-start event, not an HTTP reachability result.
+- No APKs or artifacts have been generated for these latest changes.
 
 ## Existing implementation inherited from the audited baseline
 - Media3 playback and LibVLC fallback.
@@ -26,6 +34,7 @@ Updated: 2026-11-04
 - YouTube WebView playback, remote controls, startup audio request and quality preference controls.
 
 ## Not yet verified or completed
+- Compile the latest source changes; no build has been run since the recent edits.
 - Large-playlist stress tests (10k, 20k+).
 - Device-level Android TV remote and playback tests.
 - Full YouTube native-first resolution with robust WebView fallback; current path uses the WebView watch page for YouTube.
