@@ -1625,7 +1625,7 @@ class MainActivity: Activity() {
             // thread for one uninterrupted scan while preserving sequential,
             // low-bandwidth probing (no burst of simultaneous requests).
             val batches=hidden.chunked(16)
-            batches.forEachIndexed{batchIndex,batch->
+            for((batchIndex,batch) in batches.withIndex()){
                 batch.forEach{c->
                     val key=channelKey(c)
                     val urls=alternateChannelsByKey[key].orEmpty().distinctBy{it.url}
