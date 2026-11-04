@@ -8,6 +8,7 @@ on:
     paths:
       - '.github/workflows/android.yml'
       - 'app/src/main/java/com/softppj/hometv/MainActivity.kt'
+      - 'app/build.gradle.kts'
 
 permissions:
   contents: read
