@@ -49,3 +49,5 @@ Updated: 2026-11-04
 
 ## Release gate
 No APK release/prerelease or final release until the user explicitly approves. Device testing must be reported separately from compilation.
+
+- Investigated compile-check run 41806433311: the three Kotlin errors at `MainActivity.kt` lines 3788, 3796, and 3808 all stemmed from declaring Media3 `Tracks.Group` entries as `TrackGroup`. Updated the entry type to `Tracks.Group`, preserving access to its selected-state and underlying `mediaTrackGroup` for `TrackSelectionOverride`. Fix committed; compile-only rerun still required.
