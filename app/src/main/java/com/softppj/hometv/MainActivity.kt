@@ -20,6 +20,10 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
+import androidx.media3.effect.HslAdjustment
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
@@ -3974,6 +3978,122 @@ class MainActivity: Activity() {
                 }
             }.setNegativeButton("Cancel",null).show()
     }
+
+    private data class ChannelPictureAdjustments(val brightness:Int=100,val contrast:Int=100,val saturation:Int=100)
+    private fun pictureAdjustmentKey(c:Channel,kind:String)="picture_"+kind+"_"+hash(c.url)
+    private fun channelPictureAdjustments(c:Channel)=ChannelPictureAdjustments(
+        prefs.getInt(pictureAdjustmentKey(c,"brightness"),100).coerceIn(0,200),
+        prefs.getInt(pictureAdjustmentKey(c,"contrast"),100).coerceIn(0,200),
+        prefs.getInt(pictureAdjustmentKey(c,"saturation"),100).coerceIn(0,200)
+    )
+    @OptIn(UnstableApi::class)
+    private fun applyMedia3PictureAdjustments(exo:ExoPlayer,c:Channel){
+        val v=channelPictureAdjustments(c)
+        val effects=mutableListOf<androidx.media3.common.Effect>()
+        val brightness=(v.brightness-100)/100f
+        val contrast=(v.contrast-100)/100f
+        val saturation=(v.saturation-100).toFloat()
+        if(brightness!=0f)effects.add(Brightness(brightness))
+        if(contrast!=0f)effects.add(Contrast(contrast))
+        if(saturation!=0f)effects.add(HslAdjustment.Builder().adjustSaturation(saturation).build())
+        exo.setVideoEffects(effects)
+    }
+    private fun applyLibVlcPictureAdjustments(vlc:VlcPlayer,c:Channel){
+        val v=channelPictureAdjustments(c)
+        try{
+            val clazz=vlc.javaClass
+            clazz.getMethod("setVideoAdjustEnabled",Boolean::class.javaPrimitiveType).invoke(vlc,true)
+            val values=mapOf(
+                "setVideoAdjustBrightness" to v.brightness/100f,
+                "setVideoAdjustContrast" to v.contrast/100f,
+                "setVideoAdjustSaturation" to v.saturation/100f
+            )
+            values.forEach{(method,value)->
+                try{clazz.getMethod(method,Float::class.javaPrimitiveType).invoke(vlc,value)}
+                catch(_:Exception){}
+            }
+        }catch(e:Exception){
+            HomeTvDiagnostics.w("HomeTV","LibVLC picture adjustments unavailable on this player build",e)
+        }
+    }
+    private fun configureChannelPicture(activeIndex:Int){
+        val c=channels.getOrNull(activeIndex)?:return
+        val original=channelPictureAdjustments(c)
+        val values=intArrayOf(original.brightness,original.contrast,original.saturation)
+        val labels=arrayOf("Brightness","Contrast","Colour saturation")
+        val layout=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(28,12,28,4)
+        }
+        val bars=ArrayList<SeekBar>()
+        val readings=ArrayList<TextView>()
+        fun updatePreview(){
+            val now=ChannelPictureAdjustments(values[0],values[1],values[2])
+            prefs.edit()
+                .putInt(pictureAdjustmentKey(c,"brightness"),now.brightness)
+                .putInt(pictureAdjustmentKey(c,"contrast"),now.contrast)
+                .putInt(pictureAdjustmentKey(c,"saturation"),now.saturation).apply()
+            if(active==activeIndex && player!=null)try{applyMedia3PictureAdjustments(player!!,c)}catch(e:Exception){
+                HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment update failed",e)
+            }
+            if(active==activeIndex && vlcPlayer!=null)applyLibVlcPictureAdjustments(vlcPlayer!!,c)
+        }
+        labels.forEachIndexed{index,labelText->
+            val label=TextView(this).apply{
+                text=labelText+"  "+values[index]+"%"
+                textSize=15f
+                setTextColor(android.graphics.Color.WHITE)
+                setPadding(0,10,0,0)
+            }
+            readings.add(label)
+            layout.addView(label)
+            val bar=SeekBar(this).apply{
+                max=200
+                progress=values[index]
+                isFocusable=true
+                isFocusableInTouchMode=true
+            }
+            bars.add(bar)
+            bar.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(seekBar:SeekBar?,progress:Int,fromUser:Boolean){
+                    values[index]=progress.coerceIn(0,200)
+                    label.text=labelText+"  "+values[index]+"%"
+                    updatePreview()
+                }
+                override fun onStartTrackingTouch(seekBar:SeekBar?){}
+                override fun onStopTrackingTouch(seekBar:SeekBar?){}
+            })
+            layout.addView(bar)
+        }
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture")
+            .setView(layout)
+            .setNeutralButton("Reset"){_,_->
+                prefs.edit().remove(pictureAdjustmentKey(c,"brightness"))
+                    .remove(pictureAdjustmentKey(c,"contrast"))
+                    .remove(pictureAdjustmentKey(c,"saturation")).apply()
+                if(active==activeIndex){
+                    player?.let{try{applyMedia3PictureAdjustments(it,c)}catch(_:Exception){}}
+                    vlcPlayer?.let{applyLibVlcPictureAdjustments(it,c)}
+                }
+                showBanner("Picture settings reset for "+c.name)
+            }
+            .setPositiveButton("Done",null)
+            .setNegativeButton("Cancel"){_,_->
+                prefs.edit()
+                    .putInt(pictureAdjustmentKey(c,"brightness"),original.brightness)
+                    .putInt(pictureAdjustmentKey(c,"contrast"),original.contrast)
+                    .putInt(pictureAdjustmentKey(c,"saturation"),original.saturation).apply()
+                if(active==activeIndex){
+                    player?.let{try{applyMedia3PictureAdjustments(it,c)}catch(_:Exception){}}
+                    vlcPlayer?.let{applyLibVlcPictureAdjustments(it,c)}
+                }
+            }.create()
+        dialog.setOnShowListener{
+            bars.firstOrNull()?.requestFocus()
+        }
+        showSideDialog(dialog)
+    }
+
     private fun showChannelOptions(){
         if(active !in channels.indices)return
         val c=channels[active]
@@ -3990,7 +4110,8 @@ class MainActivity: Activity() {
             "Playback Engine ("+(prefs.getString("manual_engine_"+channelKey(c),null) ?: prefs.getString("engine","Media3"))+")",
             "Channel list",
             "Channel volume ("+prefs.getInt("channel_volume_"+hash(c.url),100)+"%)",
-            "Buffering ("+(prefs.getString("buffer_channel_"+channelKey(c),null) ?: "Universal")+")"
+            "Buffering ("+(prefs.getString("buffer_channel_"+channelKey(c),null) ?: "Universal")+")",
+            "Picture adjustments"
         )
         val dialog=AlertDialog.Builder(this).setTitle(numberFor(active).toString()+". "+c.name+" Settings")
             .setItems(opts){_,choice->
@@ -4008,6 +4129,7 @@ class MainActivity: Activity() {
                     10->showOverlayList()
                     11->configureChannelVolume(active)
                     12->chooseChannelBufferProfile(active)
+                    13->configureChannelPicture(active)
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(dialog)
@@ -5920,6 +6042,7 @@ class MainActivity: Activity() {
                 .build()
             exo.volume=1f
             player=exo
+            try{applyMedia3PictureAdjustments(exo,c)}catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Media3 picture adjustments unavailable",e)}
             applyQuality()
             applySubtitlePreference(c)
             val view=PlayerView(this).apply{
@@ -6044,6 +6167,7 @@ class MainActivity: Activity() {
             val vlc=VlcPlayer(core)
             vlcCore=core
             vlcPlayer=vlc
+            applyLibVlcPictureAdjustments(vlc,c)
             val surface=SurfaceView(this)
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             vlc.vlcVout.setVideoView(surface)
