@@ -1575,12 +1575,16 @@ class MainActivity: Activity() {
             Toast.makeText(this,"No hidden channels to check",Toast.LENGTH_SHORT).show()
             return
         }
+        val hiddenKeys=hidden.map{channelKey(it)}.toHashSet()
+        val alternateChannelsByKey=snapshot.asSequence()
+            .filter{channelKey(it) in hiddenKeys}
+            .groupBy{channelKey(it)}
         Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
         thread(name="HomeTV-hidden-channel-check"){
             val reachableKeys=mutableListOf<String>()
             hidden.forEach{c->
                 val key=channelKey(c)
-                val urls=snapshot.filter{channelKey(it)==key}.distinctBy{it.url}
+                val urls=alternateChannelsByKey[key].orEmpty().distinctBy{it.url}
                 val reachable=urls.any{candidate->
                     val address=candidate.url.lowercase(java.util.Locale.ROOT)
                     if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
