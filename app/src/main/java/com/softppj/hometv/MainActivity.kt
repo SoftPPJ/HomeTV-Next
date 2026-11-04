@@ -581,10 +581,12 @@ class MainActivity: Activity() {
     private var surfingCacheSize=-1
     private var surfingCacheSource:String?=null
     private var surfingCacheFavorites=false
+    private var surfingIndexByChannelKey:Map<String,Int> = emptyMap()
     private fun invalidateSurfingCache(){
         surfingCache=null
         surfingCacheOwner=null
         surfingCacheSize=-1
+        surfingIndexByChannelKey=emptyMap()
     }
     private fun surfingIndices():List<Int>{
         val now=android.os.SystemClock.uptimeMillis()
@@ -604,6 +606,12 @@ class MainActivity: Activity() {
         }
         val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
         val result=orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
+        // Build the key-to-position lookup once. DPAD Up/Down then advances
+        // directly through the cached sequence instead of scanning 10k+ entries
+        // for every remote key press.
+        surfingIndexByChannelKey=result.mapIndexed{position,index->
+            channelKey(channels[index]) to position
+        }.toMap()
         surfingCache=result
         surfingCacheAt=now
         surfingCacheOwner=channels
@@ -2757,9 +2765,10 @@ class MainActivity: Activity() {
                                     connection.setRequestProperty("Cache-Control","no-cache")
                                     connection.setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
                                     val oldTag=prefs.getString(metadataKey+"_etag",null)
-                                    if(!oldTag.isNullOrBlank())connection.setRequestProperty("If-None-Match",oldTag)
+                                    if(!forceRebuild && !oldTag.isNullOrBlank())
+                                        connection.setRequestProperty("If-None-Match",oldTag)
                                     val oldModified=prefs.getLong(metadataKey+"_modified",0L)
-                                    if(oldModified>0L)connection.setIfModifiedSince(oldModified)
+                                    if(!forceRebuild && oldModified>0L)connection.setIfModifiedSince(oldModified)
                                     val code=connection.responseCode
                                     checked[index]=true
                                     if(code==java.net.HttpURLConnection.HTTP_NOT_MODIFIED && file.exists()){
@@ -2769,7 +2778,7 @@ class MainActivity: Activity() {
                                         val bodyHash=MessageDigest.getInstance("SHA-256").digest(body.toByteArray())
                                             .joinToString(""){"%02x".format(it)}
                                         val oldHash=prefs.getString(metadataKey+"_hash",null)
-                                        parsed=if(bodyHash==oldHash && file.exists()){
+                                        parsed=if(!forceRebuild && bodyHash==oldHash && file.exists()){
                                             parseM3u(readPlaylistCache(file),p.name)
                                         }else{
                                             val fresh=parseM3u(body,p.name)
@@ -6030,32 +6039,16 @@ class MainActivity: Activity() {
             handleEngineFailure(index,screen)
         }
     }
-    // Choose the nearest eligible channel strictly in the requested direction.
-    // Compare playlist positions, not positions in the filtered surfing list.
+    // The surfing sequence is already filtered and ordered in the background
+    // cache. Use its prebuilt channel-key lookup so remote navigation is O(1),
+    // even with 10k–20k channel playlists.
     private fun nextSurfingIndex(current:Int,delta:Int,available:List<Int>):Int{
         if(available.isEmpty())return -1
-        // Use the cached playlist positions rather than repeatedly scanning every
-        // channel for every remote key press (which could freeze large playlists).
-        ensureChannelIndex()
-        val currentPosition=channels.getOrNull(current)?.let{channelPosition[channelKey(it)]} ?: 0
-        var forwardIndex=-1
-        var forwardPosition=Int.MAX_VALUE
-        var backwardIndex=-1
-        var backwardPosition=Int.MIN_VALUE
-        var firstIndex=-1
-        var firstPosition=Int.MAX_VALUE
-        var lastIndex=-1
-        var lastPosition=Int.MIN_VALUE
-        for(candidate in available){
-            val channel=channels.getOrNull(candidate) ?:continue
-            val position=channelPosition[channelKey(channel)] ?:continue
-            if(position<firstPosition){firstPosition=position;firstIndex=candidate}
-            if(position>lastPosition){lastPosition=position;lastIndex=candidate}
-            if(position>currentPosition && position<forwardPosition){forwardPosition=position;forwardIndex=candidate}
-            if(position<currentPosition && position>backwardPosition){backwardPosition=position;backwardIndex=candidate}
-        }
-        return if(delta>=0)if(forwardIndex>=0)forwardIndex else firstIndex
-            else if(backwardIndex>=0)backwardIndex else lastIndex
+        val key=channels.getOrNull(current)?.let{channelKey(it)}
+        val position=key?.let{surfingIndexByChannelKey[it]}
+        if(position==null)return if(delta>=0)available.first() else available.last()
+        val next=(position+(if(delta>=0)1 else -1)+available.size)%available.size
+        return available[next]
     }
     private fun switchChannel(delta:Int){
         clearChannelPreview()
