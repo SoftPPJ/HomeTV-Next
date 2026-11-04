@@ -1591,31 +1591,40 @@ class MainActivity: Activity() {
         Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
         thread(name="HomeTV-hidden-channel-check"){
             val reachableKeys=mutableListOf<String>()
-            hidden.forEach{c->
-                val key=channelKey(c)
-                val urls=alternateChannelsByKey[key].orEmpty().distinctBy{it.url}
-                val reachable=urls.any{candidate->
-                    val address=candidate.url.lowercase(java.util.Locale.ROOT)
-                    if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
-                    if("youtube.com" in address || "youtu.be" in address)return@any false
-                    try{
-                        val connection=URL(candidate.url).openConnection() as java.net.HttpURLConnection
+            // Process a limited group at a time and yield between groups. This
+            // keeps large hidden-channel collections from monopolising a worker
+            // thread for one uninterrupted scan while preserving sequential,
+            // low-bandwidth probing (no burst of simultaneous requests).
+            val batches=hidden.chunked(16)
+            batches.forEachIndexed{batchIndex,batch->
+                batch.forEach{c->
+                    val key=channelKey(c)
+                    val urls=alternateChannelsByKey[key].orEmpty().distinctBy{it.url}
+                    val reachable=urls.any{candidate->
+                        val address=candidate.url.lowercase(java.util.Locale.ROOT)
+                        if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
+                        if("youtube.com" in address || "youtu.be" in address)return@any false
                         try{
-                            connection.connectTimeout=3500
-                            connection.readTimeout=3500
-                            connection.instanceFollowRedirects=true
-                            connection.setRequestProperty("Range","bytes=0-1023")
-                            connection.setRequestProperty("User-Agent",candidate.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                            candidate.headers.forEach{(header,value)->
-                                if(!header.equals("User-Agent",true))connection.setRequestProperty(header,value)
-                            }
-                            val code=connection.responseCode
-                            val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
-                            code in 200..299 && !contentType.contains("text/html")
-                        }finally{connection.disconnect()}
-                    }catch(_:Exception){false}
+                            val connection=URL(candidate.url).openConnection() as java.net.HttpURLConnection
+                            try{
+                                connection.connectTimeout=2500
+                                connection.readTimeout=2500
+                                connection.instanceFollowRedirects=true
+                                connection.setRequestProperty("Range","bytes=0-1023")
+                                connection.setRequestProperty("User-Agent",candidate.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
+                                candidate.headers.forEach{(header,value)->
+                                    if(!header.equals("User-Agent",true))connection.setRequestProperty(header,value)
+                                }
+                                val code=connection.responseCode
+                                val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
+                                code in 200..299 && !contentType.contains("text/html")
+                            }finally{connection.disconnect()}
+                        }catch(_:Exception){false}
+                    }
+                    if(reachable)reachableKeys.add(key)
                 }
-                if(reachable)reachableKeys.add(key)
+                // Yield between batches so other background work gets scheduled.
+                if(batchIndex<batches.lastIndex)try{Thread.sleep(150L)}catch(_:InterruptedException){Thread.currentThread().interrupt();break}
             }
             handler.post{
                 // Resolve results against the current list, not stale numeric
