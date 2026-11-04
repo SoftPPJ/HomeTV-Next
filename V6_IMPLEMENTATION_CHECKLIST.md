@@ -110,3 +110,14 @@ Release rule: do not describe the app as fully implemented or production-ready u
 ## Playlist deletion consistency update — 1 November 2026
 - Commits ab55641 / eb6300a: Playlist Manager and the in-player playlist drawer now use one deletion path. Deleting from the drawer removes the playlist's channels from memory immediately, clears its local lock/history state and cache when no other playlist shares the URL, and updates the selected playlist.
 - If the deleted playlist was playing, playback moves to the next enabled playlist's saved last channel, or its first live channel; if neither exists, Home opens. This source change still requires compile and Android TV tests.
+
+
+## Independent stabilization work — 4 November 2026
+
+- Created `v6-stabilization-integration` from PR #5. Commit comparison confirms PR #4 is already an ancestor of PR #5; both drafts are preserved without merging either into the development branch.
+- Added seven-day signed-lease verification and startup integration. The app checks the signed cache locally and attempts online revalidation after 24 hours, rather than contacting the Worker on every launch. The lease is bound to the installation ID and token hash; expiry and clock rollback are checked.
+- Added the updated Worker source and deployment notes under `cloudflare/hometv-license/`. The deployed `/validate` endpoint still needs updating and end-to-end verification before the new app can activate.
+- No APK build, release, prerelease, or PR merge has been performed. Compilation and all runtime/device gates remain pending.
+- Android TV playback, picture quality and remote-control testing are assigned to the user; these gates will remain pending until results are reported.
+
+**Release status: NOT READY.** Source presence is not evidence of successful compilation or device acceptance.
