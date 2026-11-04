@@ -4049,7 +4049,7 @@ class MainActivity: Activity() {
         clockTask=null
         val screen=videoScreen ?:return
         screen.findViewWithTag<View>("clock_overlay")?.let{screen.removeView(it)}
-        if(!prefs.getBoolean("clock_enabled",false) ||
+        if(!prefs.getBoolean("clock_enabled",true) ||
             (!prefs.getBoolean("clock_show_date",true) &&
              !prefs.getBoolean("clock_show_time",true) &&
              !prefs.getBoolean("clock_show_day",true)))return
@@ -4218,7 +4218,7 @@ class MainActivity: Activity() {
     }
     private fun clockSettings(){
         val choices=arrayOf(
-            "Date · time · day overlay: "+if(prefs.getBoolean("clock_enabled",false))"ON" else "OFF",
+            "Date · time · day overlay: "+if(prefs.getBoolean("clock_enabled",true))"ON" else "OFF",
             "Show date: "+if(prefs.getBoolean("clock_show_date",true))"ON" else "OFF",
             "Show time: "+if(prefs.getBoolean("clock_show_time",true))"ON" else "OFF",
             "Show day: "+if(prefs.getBoolean("clock_show_day",true))"ON" else "OFF",
@@ -4229,7 +4229,7 @@ class MainActivity: Activity() {
         val clockDialog=AlertDialog.Builder(this).setTitle("Date · time · day overlay")
             .setItems(choices){_,which->
                 when(which){
-                    0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",false)).apply();updateClock();clockSettings()}
+                    0->{prefs.edit().putBoolean("clock_enabled",!prefs.getBoolean("clock_enabled",true)).apply();updateClock();clockSettings()}
                     1->{prefs.edit().putBoolean("clock_show_date",!prefs.getBoolean("clock_show_date",true)).apply();updateClock();clockSettings()}
                     2->{prefs.edit().putBoolean("clock_show_time",!prefs.getBoolean("clock_show_time",true)).apply();updateClock();clockSettings()}
                     3->{prefs.edit().putBoolean("clock_show_day",!prefs.getBoolean("clock_show_day",true)).apply();updateClock();clockSettings()}
