@@ -1,6 +1,6 @@
 # Cached licence validation: security integration status
 
-**Current status: Android verifier integrated; Worker signing source updated but NOT yet deployed or release-enabled.** The Android app verifies an RSA-SHA256 signed lease before allowing cached licence access. The Android cache is limited to seven days and the app requests background revalidation after 24 hours. Cloudflare confirms the `LICENSE_SIGNING_PRIVATE_JWK` secret binding exists on the live `hometv-license` Worker. The repository Worker source now returns the matching signed response (commit `a8f9225e1131033a28a77f00060d7553d2ceb9de`), but the live Worker has not yet been updated and end-to-end verification has not passed. Do not distribute an APK until deployment and the required licence tests are complete.
+**Current status: Android verifier integrated; Worker signing source updated but NOT yet deployed or release-enabled.** The Android app verifies an RSA-SHA256 signed lease before allowing cached licence access. The Android cache is limited to seven days and the app requests background revalidation after 24 hours. Cloudflare confirms the `LICENSE_SIGNING_PRIVATE_JWK` secret binding exists on the live `hometv-license` Worker. The repository Worker source now returns the matching signed response (commit `4216a1fb97e0aeaff8dedfa68d27788be79bac7a`), but the live Worker has not yet been updated and end-to-end verification has not passed. Do not distribute an APK until deployment and the required licence tests are complete.
 
 ## Signed response contract
 
