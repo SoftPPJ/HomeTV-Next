@@ -8,7 +8,7 @@ const enc=s=>new TextEncoder().encode(s);
 const hex=a=>[...new Uint8Array(a)].map(x=>x.toString(16).padStart(2,"0")).join("");
 const hash=async s=>hex(await crypto.subtle.digest("SHA-256",enc(s)));
 const b64url=value=>btoa(String.fromCharCode(...new TextEncoder().encode(value)))
- .replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+ .split("+").join("-").split("/").join("_").replace(/=+$/g,"");
 async function signedLease(env,row,device,tokenHash){
  if(!env.LICENSE_SIGNING_PRIVATE_JWK)throw Error("Licence signing key is not configured");
  let jwk;
@@ -25,7 +25,7 @@ async function signedLease(env,row,device,tokenHash){
  const signature=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,enc(lease));
  return {ok:true,expiry:row.expiry,lease,
   signature:btoa(String.fromCharCode(...new Uint8Array(signature)))
-   .replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,""),
+ .split("+").join("-").split("/").join("_").replace(/=+$/g,"");
   serverTime};
 }
 const b64decode=s=>atob(s.replace(/\s/g,""));
