@@ -25,7 +25,7 @@ Updated: 2026-11-04
 - Added Auto Unhide Working Channels (default OFF); it only restores a manually hidden channel after a real foreground playback-start event, not an HTTP reachability result.
 - Protected playback during background refresh by relocating the channel that is actually playing when the refresh completes. Playlist deletion invalidates any in-flight refresh so deleted sources cannot be re-added.
 - Made the manual hidden-channel check use a stable channel snapshot and re-resolve results against the current playlist after network checks. This prevents stale channel indexes from targeting the wrong channel if a playlist refresh or deletion occurs during the check; the snapshot grouping is linear rather than rescanning the full playlist for every hidden channel.
-- Made channel-surfing cache invalidation immediate when favourites, channel/group hiding, parental locks, skip settings, or temporary failure-hiding state changes. This avoids the short cache window showing a channel that the user has just hidden, locked, skipped, or restored.
+- Made channel-surfing cache invalidation immediate when favourites, viewer profiles, channel/group hiding, parental locks, skip settings, or temporary failure-hiding state changes. This avoids the short cache window showing a channel that the user has just hidden, locked, skipped, or restored.
 - No APKs or artifacts have been generated for these latest changes.
 
 ## Existing implementation inherited from the audited baseline
