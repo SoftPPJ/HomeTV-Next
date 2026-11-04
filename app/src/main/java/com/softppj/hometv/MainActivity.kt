@@ -261,14 +261,14 @@ class MainActivity: Activity() {
         startupHiddenScanScheduled=true
         handler.postDelayed({
             if(isFinishing || isDestroyed)return@postDelayed
-            if(!appInForeground){
+            if(!appInForeground || channels.isEmpty() ||
+                !prefs.getBoolean("auto_hidden_channel_check",true)){
                 startupHiddenScanScheduled=false
                 return@postDelayed
             }
-            if(licenseReady && !safeStartupMode && channels.isNotEmpty() &&
-                prefs.getBoolean("auto_hidden_channel_check",true)){
+            if(licenseReady && !safeStartupMode){
                 checkHiddenChannelsNow(showResults=false)
-            }
+            }else startupHiddenScanScheduled=false
         },30_000L)
     }
     private fun showLicenseScreen(error:String?=null){
