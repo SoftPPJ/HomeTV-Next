@@ -35,7 +35,7 @@ const expired=x=>x.expiry!=="unlimited" && (!/^\d{4}-\d{2}-\d{2}$/.test(x.expiry
 const customerFields=b=>Object.fromEntries(["issuedTo","mobile","email","location","remarks"].map(k=>[k,String(b[k]||"").trim().slice(0,k==="remarks"?500:150)]));
 
 const base64url=bytes=>btoa(String.fromCharCode(...new Uint8Array(bytes)))
- .replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+ .split("+").join("-").split("/").join("_").split("=").join("");
 async function issueSignedLease(env,row,device,tokenHash){
  if(!env.LICENSE_SIGNING_PRIVATE_JWK)throw Error("Licence signing is not configured");
  const privateJwk=JSON.parse(env.LICENSE_SIGNING_PRIVATE_JWK);
