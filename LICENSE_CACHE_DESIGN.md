@@ -1,23 +1,43 @@
 # Cached licence validation: security integration status
 
-**Current status: preparation only; NOT enabled.** The development branch includes `SignedLicenseCache.kt`, a fail-closed RSA-SHA256 signed-lease verifier, but the live Cloudflare `/validate` endpoint does not issue signed leases. The current application still validates online at launch. Never treat an unsigned successful `/validate` response as proof of offline entitlement.
+**Current status: implementation in progress; NOT release-enabled.** The V6 integration branch now verifies an RSA-SHA256 signed lease before allowing cached licence access. The Android cache is limited to seven days and the app requests background revalidation after 24 hours. The Cloudflare signing private key has been stored as the Worker secret `LICENSE_SIGNING_PRIVATE_JWK`. The live `/validate` handler still needs the matching signed-response code deployed and verified before a new APK can activate.
 
-## Intended contract for a future server update (requires separate approval)
-- `/validate` returns a signed, canonical base64url JSON lease and its RSA-SHA256 signature.
-- Lease binds a stable licence identifier and the device identifier, with trusted `issuedAt` and `expiresAt` timestamps in milliseconds.
-- Android APK includes only the public verification key; the private signing key stays in a secure server secret.
-- Server also returns a trusted server timestamp; client must not derive it from the device wall clock.
-- A successfully verified lease can be reused for at most 24 hours without network; if revalidation fails because the server is unreachable, an offline grace of at most 72 hours may apply, never beyond signed expiry.
-- Clock rollback, device reboot without reliable time continuity, invalid signature, invalid device binding or an explicit revoked/expired response requires immediate online verification or access denial.
-- A successful explicit revocation/expiry response clears the cached lease; network errors alone do not clear it.
-- Offline revocation cannot be instantaneous. A revoked device could keep using a previously signed lease during the allowed offline window.
-- Licence validation does not make protected online playlist delivery work offline. A separate carefully scoped offline playlist policy would be needed, without persisting master secrets.
+## Signed response contract
 
-## Before enabling
-1. Agree on canonical lease envelope and test vectors, including server-side signing.
-2. Add a real public key to the APK; do not add the signing private key.
-3. Integrate the verifier into activation/startup, explicit revocation and surrender.
-4. Test clock rollback, reboots, expired lease, wrong device, tampered signature, network outage, revoked licence, and 24h/72h boundaries.
-5. Run Android CI and test the resulting APK on a device.
+The Worker returns the existing `ok` and `expiry` fields plus:
 
-**No Cloudflare Worker, R2 object, existing APK or main branch has been modified.**
+- `lease`: base64url-encoded UTF-8 JSON.
+- `signature`: base64url RSA-SHA256 signature over the exact ASCII `lease` value.
+- `serverTime`: informational response field; the authoritative time is also inside the signed lease.
+
+The signed JSON contains `version`, `licenseId`, `device`, `tokenHash`, `issuedAt`, `serverTime`, and `expiresAt` (Unix epoch milliseconds). The token hash is SHA-256 of the device token. The lease is bound to both the device installation ID and its token.
+
+## Client rules
+
+- The APK contains only the public SPKI verification key. The matching private key must remain in the Cloudflare Worker secret and must never be committed to GitHub or embedded in the APK.
+- The app verifies the signature, device binding, token binding, issue time and expiry before saving or using a lease.
+- A verified lease can be used offline for at most seven days, and never beyond its signed expiry.
+- The app checks the signed cache locally at startup. It does not contact the Worker on every launch; it attempts background revalidation after 24 hours.
+- Signed server time is advanced using the device wall clock and Android monotonic elapsed time. A detected clock rollback fails closed and requires online validation. After a reboot, the saved wall-clock anchor is used; a clock rollback is still rejected.
+- A definitive server rejection (expired, revoked, or inactive token) clears the cached lease. A temporary network/service failure does not reset or extend the seven-day period.
+- Surrender clears the local signed lease only after the Worker confirms device release.
+- The lease is stored in app-private preferences, not the Android cache directory. Clearing the app cache therefore does not release the device or erase the licence state.
+
+## Security and operational limitations
+
+- Offline revocation cannot be instantaneous. A device that was revoked while offline may continue until the signed lease expires or the seven-day offline limit is reached.
+- A user who deliberately advances the device clock can cause early expiry. Rollback detection prevents the ordinary clock-reset bypass, but no client-only offline scheme can provide tamper-proof time on a fully compromised/rooted device.
+- Licence validity does not make the protected playlist available offline. The playlist endpoint still requires a live Worker validation and upstream access.
+- Do not use an unsigned `/validate` response as proof of offline entitlement.
+
+## Required tests before release
+
+1. Valid signed lease, tampered lease, tampered signature, wrong device and wrong token.
+2. Date-only expiry at the exact UTC end-of-day boundary and unlimited expiry.
+3. Clock rollback, clock advance, reboot, and seven-day boundary.
+4. Network unavailable at startup before 24 hours, after 24 hours, and after seven days.
+5. Server-side revoke/expire while online and while offline.
+6. Activation, retry, device surrender, app cache clear, and full app-data clear.
+7. Verify the deployed Worker returns a valid signed envelope and the APK contains only the public key.
+
+**Release gate:** do not issue a new APK until the Cloudflare `/validate` implementation is deployed, an end-to-end signature test passes, and Android compilation succeeds.
