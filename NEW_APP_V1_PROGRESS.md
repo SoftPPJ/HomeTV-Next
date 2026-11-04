@@ -21,7 +21,7 @@ Updated: 2026-11-04
 - Corrected "Use stream default" so it does not silently fall back to Malayalam.
 - Added an optional Automatic Playlist Check & Update setting (default ON); cached playlists open first and background checks only run when enabled.
 - Added conditional HTTP playlist requests using ETag / Last-Modified plus a content hash to avoid reparsing unchanged feeds. Manual rebuild bypasses the conditional cache; clearing the playlist cache forces a full download.
-- Optimized remote channel surfing with a cached channel-key-to-position index, avoiding a full 10k+ channel scan for every Up/Down press. Failure-recovery navigation uses a safe fallback for filtered lists.
+- Optimized remote channel surfing with a cached channel-key-to-position index, avoiding a full 10k+ channel scan for every Up/Down press. Failure-recovery navigation preserves the original channel order when skipping a failed entry.
 - Added Auto Unhide Working Channels (default OFF); it only restores a manually hidden channel after a real foreground playback-start event, not an HTTP reachability result.
 - Protected playback during background refresh by relocating the channel that is actually playing when the refresh completes. Playlist deletion invalidates any in-flight refresh so deleted sources cannot be re-added.
 - No APKs or artifacts have been generated for these latest changes.
