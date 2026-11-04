@@ -4013,7 +4013,7 @@ class MainActivity: Activity() {
             try{exo.setVideoEffects(emptyList())}catch(_:Exception){}
         }
     }
-    // Keep Media3 on the V6 unprocessed video path; presets use LibVLC only.
+    // LibVLC uses its native video-adjustment controls for the same saved presets.
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
         val preset=picturePresets[mode] ?: picturePresets.getValue("Standard")
@@ -6081,6 +6081,7 @@ class MainActivity: Activity() {
                 }
             })
             try{
+                applyMedia3PicturePreset(exo,c)
                 applyMedia3PicturePreset(exo,c)
                 exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
                 exo.prepare()
