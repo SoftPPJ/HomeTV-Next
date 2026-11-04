@@ -125,3 +125,16 @@ No final APK, prerelease, or release is approved or created by this audit.
 - The app now starts only after `SignedLicenseCache.saveVerified()` accepts the signed lease. If activation has bound a token but validation fails, the token is retained for **Retry Existing License**, while `licenseReady` remains false and the app stays on the licence screen.
 - Commit: `880b7fbc284fa5e1b1e7154b1c73328e8b4a3231`.
 - This is a source correction only. The development-branch Kotlin compile, real Worker activation/validation, and Android TV tests remain pending.
+
+
+## Current verified status — 2026-11-04 (supersedes earlier status notes above)
+
+- Active development branch: `new-app-v1-development`. The latest reviewed compile-check run is GitHub Actions run **41817687491**, job **126532539266**, source commit `789f30b8a8aa8457598f73557a3b28e2b137e748`. The run checked out the development branch and completed `:app:compileDebugKotlin` successfully.
+- This is a Kotlin compile check only. It did **not** assemble an APK, upload an artifact, run automated unit tests, or test the app on Android TV. No APK, prerelease, or release has been created.
+- The corrected Worker source was deployed to the live `hometv-license` Worker on 2026-11-04 with user approval. Active deployment: `d855ff6c-93c1-454a-a10e-d6a617aa014d`; version: `0fb63744-9204-4110-aae5-5bb393aa7054`; 100% traffic. Existing bindings and compatibility date were preserved; no licence records were changed.
+- The deployed Worker has not yet passed a real activation/validation test using a test licence and Android device. The Cloudflare private signing key cannot be read back, so matching it to the app's embedded public key must be proven by a real signature verification. This remains a release blocker.
+- Current Android player engines confirmed in source: Media3 and LibVLC. FFmpeg is a Media3 decoder extension; a separate IJKPlayer engine is **not** integrated.
+- YouTube native-first support remains limited to eligible individual public livestreams that expose HLS. Ordinary YouTube videos and unsupported URLs use WebView. The resolver and fallback still need device verification.
+- Hidden-channel scans are bounded and race-safe, but URL reachability is not proof of playback. Automatic unhide is only intended after a real foreground playback-start event; this needs device verification.
+- Remaining work: automated tests for signed licence validation and playlist/indexing; real Worker/device licence verification; debug APK assembly after test additions; 10k/20k+ playlist stress tests; Android TV remote/playback/EPG/YouTube/overlay tests; full UI and regression review. Keep V6, `main`, and release branches untouched.
+
