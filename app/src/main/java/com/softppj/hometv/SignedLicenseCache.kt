@@ -19,7 +19,7 @@ internal class SignedLicenseCache(
     private val deviceId: String,
     private val token: String,
     // Injectable only for deterministic cryptographic tests; production uses the pinned Worker key.
-    private val publicKeyDerBase64: String = PUBLIC_KEY_DER_BASE64
+    private val publicKeyDerBase64: String = Companion.PUBLIC_KEY_DER_BASE64
 ) {
     data class Status(
         val allowed: Boolean,
