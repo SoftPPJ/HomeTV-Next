@@ -41,7 +41,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:1.5.1")
     implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
-    implementation("androidx.media3:media3-effect:1.5.1")
     // GPLv3 decoder; retain only with appropriate distribution/licensing compliance.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("org.videolan.android:libvlc-all:3.5.1")
