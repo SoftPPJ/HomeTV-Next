@@ -2763,6 +2763,12 @@ class MainActivity: Activity() {
             }finally{pool.shutdownNow()}
             val updated=refreshed.count{it}
             val combined=mutableListOf<Channel>()
+            if(activeOnly){
+                // Refresh only the active playlist without dropping cached channels
+                // from every other enabled playlist already loaded at startup.
+                val refreshedSources=sources.map{it.name}.toSet()
+                combined.addAll(previousChannels.filter{it.source !in refreshedSources})
+            }
             sources.forEachIndexed{index,p->
                 val loaded=results[index]
                 if(loaded.isNotEmpty())combined.addAll(loaded)
