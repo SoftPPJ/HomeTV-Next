@@ -6066,7 +6066,15 @@ class MainActivity: Activity() {
     private fun nextSurfingIndex(current:Int,delta:Int,available:List<Int>):Int{
         if(available.isEmpty())return -1
         val key=channels.getOrNull(current)?.let{channelKey(it)}
-        val position=key?.let{surfingIndexByChannelKey[it]}
+        val position=if(available===surfingCache){
+            key?.let{surfingIndexByChannelKey[it]}
+        }else{
+            // Failure recovery may pass a filtered copy excluding the failed
+            // channel; its positions do not match the cached lookup.
+            available.indexOfFirst{candidate->
+                channels.getOrNull(candidate)?.let{channelKey(it)==key}==true
+            }.takeIf{it>=0}
+        }
         if(position==null)return if(delta>=0)available.first() else available.last()
         val next=(position+(if(delta>=0)1 else -1)+available.size)%available.size
         return available[next]
