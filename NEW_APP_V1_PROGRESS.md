@@ -14,7 +14,8 @@ Updated: 2026-11-04
 ## Build verification
 - GitHub Actions run 41800232280 (commit 3dea3fe): Kotlin compilation passed and APK assembly/file verification passed.
 - Artifact upload failed because GitHub Actions artifact storage quota was exhausted; no artifact was created.
-- The latest audio, playlist-refresh, large-list navigation, auto-unhide, and refresh/deletion safety changes have not been compiled yet. No build was triggered for them.
+- GitHub Actions run 41807459986 (commit 0ab337e): the compile-only Kotlin check passed, including the recent audio, playlist-refresh, large-list navigation, auto-unhide, and refresh/deletion safety changes. No APK was assembled or uploaded.
+- The rotating date/time/day overlay was committed after that successful run; this newest clock change still needs a fresh compile-only check. No APK/artifact has been created.
 
 ## Latest source changes (not yet compiled or device-tested)
 - Upgraded the on-video date/time overlay to rotate through date, time, and day of week one at a time, with a short fade/slide transition, transparent background, and text shadow. Added a separate Show day setting (enabled by default); retained the existing position, size, and 12/24-hour controls. This source change is committed but still needs a fresh compile check and Android TV visual verification.
@@ -38,7 +39,7 @@ Updated: 2026-11-04
 - YouTube WebView playback, remote controls, startup audio request and quality preference controls.
 
 ## Not yet verified or completed
-- Compile the latest source changes; no build has been run since the recent edits.
+- Re-run the compile-only workflow after the rotating date/time/day overlay change; run 41807459986 predates that clock update.
 - Large-playlist stress tests (10k, 20k+).
 - Device-level Android TV remote and playback tests.
 - Full YouTube native-first resolution with robust WebView fallback; current path uses the WebView watch page for YouTube.
