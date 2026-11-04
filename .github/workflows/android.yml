@@ -1,15 +1,8 @@
 name: HomeTV Next - build test APK
 
 on:
+  # APK builds are manual-only. Source commits must never assemble an APK automatically.
   workflow_dispatch:
-  push:
-    branches:
-      - new-app-v1-development
-    paths:
-      - '.github/workflows/android.yml'
-      - 'app/src/main/java/com/softppj/hometv/MainActivity.kt'
-      - 'app/src/main/res/**'
-      - 'app/build.gradle.kts'
 
 permissions:
   contents: read
