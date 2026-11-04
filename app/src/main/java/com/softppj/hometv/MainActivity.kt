@@ -4033,15 +4033,6 @@ class MainActivity: Activity() {
             setMargins(16,16,16,16)
         }
         screen.addView(clock,params)
-        val pages=mutableListOf<String>()
-        if(prefs.getBoolean("clock_show_date",true))
-            pages.add(java.text.SimpleDateFormat("dd MMM yyyy",java.util.Locale.getDefault()).format(java.util.Date()))
-        if(prefs.getBoolean("clock_show_time",true)){
-            val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
-            pages.add(java.text.SimpleDateFormat(pattern,java.util.Locale.getDefault()).format(java.util.Date()))
-        }
-        if(prefs.getBoolean("clock_show_day",true))
-            pages.add(java.text.SimpleDateFormat("EEEE",java.util.Locale.getDefault()).format(java.util.Date()))
         var pageIndex=0
         fun render(animate:Boolean){
             val now=java.util.Date()
