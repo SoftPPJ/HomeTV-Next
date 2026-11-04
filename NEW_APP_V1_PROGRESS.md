@@ -138,3 +138,11 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Hidden-channel scans are bounded and race-safe, but URL reachability is not proof of playback. Automatic unhide is only intended after a real foreground playback-start event; this needs device verification.
 - Remaining work: automated tests for signed licence validation and playlist/indexing; real Worker/device licence verification; debug APK assembly after test additions; 10k/20k+ playlist stress tests; Android TV remote/playback/EPG/YouTube/overlay tests; full UI and regression review. Keep V6, `main`, and release branches untouched.
 
+
+## Automated licence tests added — 2026-11-04
+
+- Added `SignedLicenseCacheTest.kt` with generated test-only RSA keys. Coverage includes valid signed lease acceptance, tampered signature rejection, device binding, token-hash binding, already-expired lease rejection, seven-day offline-grace enforcement, wall-clock rollback rejection, and local cache clearing.
+- The production verifier still defaults to the pinned Cloudflare public key. A constructor-only key override exists to let tests generate a disposable keypair; the private test key is never used by the app or Worker.
+- Added JUnit 4 and Robolectric test dependencies and enabled Android resources for local unit tests.
+- Updated the manual-only GitHub Actions compile workflow to run `:app:testDebugUnitTest` after Kotlin compilation. This does not trigger automatically on every push.
+- **Not yet executed:** the new test suite has been committed but no GitHub Actions run has executed it. Run the manual workflow from Actions to verify it. No APK assembly or device test has been run.
