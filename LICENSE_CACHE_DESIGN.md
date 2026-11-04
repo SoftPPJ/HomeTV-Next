@@ -63,3 +63,10 @@ A test-only public-key injection parameter was added to `SignedLicenseCache`; pr
 Added Robolectric/JUnit tests for valid signatures, tampered signatures, device binding, token binding, expiry, seven-day offline grace, clock rollback, and cache clearing. The manual GitHub Actions compile workflow now runs `:app:testDebugUnitTest` after Kotlin compilation.
 
 These tests are **committed but not yet run**. They validate the Android cache verifier with generated test keys; they do not prove that the deployed Cloudflare Worker's secret matches the app's production public key. That still requires a real signed response from the deployed Worker.
+
+
+## Test coverage update — 2026-11-04
+
+The Android test suite now also covers YouTube URL ID parsing and HLS player-response extraction. It checks supported URL patterns, rejects spoofed hosts and malformed IDs, requires `playabilityStatus=OK`, accepts only HTTPS HLS manifests, and rejects malformed or missing metadata.
+
+The manual Actions workflow now assembles and uploads a short-retention debug test APK only after Kotlin compilation and unit tests pass. No release/publish step is included. These tests and the workflow have not yet been executed.
