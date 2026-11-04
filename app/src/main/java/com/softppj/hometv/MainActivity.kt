@@ -41,6 +41,8 @@ class MainActivity: Activity() {
     private val licensedPlaylist="hometv://licensed-playlist"
     private var licenseReady=false
     private var licenseChecking=false
+    private var startupHiddenScanScheduled=false
+    private var hiddenChannelCheckRunning=false
     private var licenseOperationGeneration=0
     private var safeStartupMode=false
     private fun saveLicenseExpiry(response:JSONObject){
@@ -248,6 +250,22 @@ class MainActivity: Activity() {
             "Channels"->allChannels()
             else->if(prefs.getBoolean("resume",true))resumeLast() else showHome()
         }
+        scheduleStartupHiddenChannelScan()
+    }
+    // Hidden-channel checks are deliberately delayed until after the cached
+    // playlist has opened, so startup and first-picture time are unaffected.
+    // The automatic pass is non-modal; users can review results from the
+    // existing manual "Check hidden channels" action.
+    private fun scheduleStartupHiddenChannelScan(){
+        if(startupHiddenScanScheduled || safeStartupMode || !licenseReady)return
+        startupHiddenScanScheduled=true
+        handler.postDelayed({
+            if(!isFinishing && !isDestroyed && appInForeground && licenseReady &&
+                !safeStartupMode && channels.isNotEmpty() &&
+                prefs.getBoolean("auto_hidden_channel_check",true)){
+                checkHiddenChannelsNow(showResults=false)
+            }
+        },30_000L)
     }
     private fun showLicenseScreen(error:String?=null){
         licenseReady=false
@@ -1572,7 +1590,7 @@ class MainActivity: Activity() {
         invalidateSurfingCache()
         Toast.makeText(this,if(shouldHide)"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
-    private fun checkHiddenChannelsNow(){
+    private fun checkHiddenChannelsNow(showResults:Boolean=true){
         // Capture stable channel identities before leaving the UI thread. A
         // playlist refresh can replace the live channel list while checks run.
         val snapshot=channels.toList()
@@ -1580,15 +1598,17 @@ class MainActivity: Activity() {
             isManuallyHidden(c) || isGroupHidden(c.group) ||
                 temporaryFailureHidden.contains(channelKey(c))
         }.distinctBy{channelKey(it)}
+        if(hiddenChannelCheckRunning)return
         if(hidden.isEmpty()){
-            Toast.makeText(this,"No hidden channels to check",Toast.LENGTH_SHORT).show()
+            if(showResults)Toast.makeText(this,"No hidden channels to check",Toast.LENGTH_SHORT).show()
             return
         }
+        hiddenChannelCheckRunning=true
         val hiddenKeys=hidden.map{channelKey(it)}.toHashSet()
         val alternateChannelsByKey=snapshot.asSequence()
             .filter{channelKey(it) in hiddenKeys}
             .groupBy{channelKey(it)}
-        Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
+        if(showResults)Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
         thread(name="HomeTV-hidden-channel-check"){
             val reachableKeys=mutableListOf<String>()
             // Process a limited group at a time and yield between groups. This
@@ -1627,11 +1647,17 @@ class MainActivity: Activity() {
                 if(batchIndex<batches.lastIndex)try{Thread.sleep(150L)}catch(_:InterruptedException){Thread.currentThread().interrupt();break}
             }
             handler.post{
+                hiddenChannelCheckRunning=false
+                if(isFinishing || isDestroyed || !licenseReady)return@post
                 // Resolve results against the current list, not stale numeric
                 // indexes from before a background refresh or playlist deletion.
                 val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct().toMutableList()
                 if(results.isEmpty()){
-                    Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
+                    if(showResults)Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
+                    return@post
+                }
+                if(!showResults){
+                    showBanner(results.size.toString()+" hidden channel URL(s) responded. Open Hidden channels to review.")
                     return@post
                 }
                 val labels=results.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
