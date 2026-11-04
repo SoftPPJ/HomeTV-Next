@@ -2775,11 +2775,15 @@ class MainActivity: Activity() {
                                     connection.instanceFollowRedirects=true
                                     connection.setRequestProperty("Cache-Control","no-cache")
                                     connection.setRequestProperty("User-Agent","HomeTV/1.0 AndroidTV")
-                                    val oldTag=prefs.getString(metadataKey+"_etag",null)
-                                    if(!forceRebuild && !oldTag.isNullOrBlank())
-                                        connection.setRequestProperty("If-None-Match",oldTag)
-                                    val oldModified=prefs.getLong(metadataKey+"_modified",0L)
-                                    if(!forceRebuild && oldModified>0L)connection.setIfModifiedSince(oldModified)
+                                    // A validator is useful only while its matching local body exists.
+                                    // After Clear Cache, fetch a full response instead of accepting 304
+                                    // with no playlist file available to parse.
+                                    if(file.exists() && !forceRebuild){
+                                        val oldTag=prefs.getString(metadataKey+"_etag",null)
+                                        if(!oldTag.isNullOrBlank())connection.setRequestProperty("If-None-Match",oldTag)
+                                        val oldModified=prefs.getLong(metadataKey+"_modified",0L)
+                                        if(oldModified>0L)connection.setIfModifiedSince(oldModified)
+                                    }
                                     val code=connection.responseCode
                                     checked[index]=true
                                     if(code==java.net.HttpURLConnection.HTTP_NOT_MODIFIED && file.exists()){
