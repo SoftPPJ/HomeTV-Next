@@ -457,6 +457,19 @@ class MainActivity: Activity() {
         recoveryPrompted.remove(channelKey(c))
         failedUrlsThisSession.remove(c.url)
         unavailableChannels.remove(channelKey(c))
+        temporaryFailureHidden.remove(channelKey(c))
+        // Auto-unhide is deliberately tied to a real foreground Playing event,
+        // never to an HTTP 200 response or a timeout-based reachability probe.
+        if(prefs.getBoolean("auto_unhide_working_channels",false) && isManuallyHidden(c)){
+            ensureChannelIndex()
+            val updated=manuallyHiddenIds.toMutableSet()
+            (channelByKey[channelKey(c)] ?:emptyList()).forEach{updated.remove(id(channels[it]))}
+            updated.remove(hiddenChannelId(c))
+            prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+            invalidateSurfingCache()
+            if(active in channels.indices && channelKey(channels[active])==channelKey(c))
+                showBanner("Working channel restored: "+c.name)
+        }
         // Record the player that actually reached playback, not a pending fallback hint.
         val engine=if(vlcPlayer!=null)"LibVLC" else "Media3"
         // Keep the confirmed engine paired with the URL that actually played.
@@ -6372,6 +6385,8 @@ class MainActivity: Activity() {
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
+        root.addView(settingsToggle("Auto Unhide Working Channels","auto_unhide_working_channels",false))
+        root.addView(label("OFF by default. When ON, a channel hidden manually is restored only after it actually starts playing; URL reachability alone never unhides it."))
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
         root.addView(button("EPG time correction"){configureEpgOffset()})
         root.addView(button("Viewer profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
