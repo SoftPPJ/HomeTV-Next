@@ -42,6 +42,7 @@ class MainActivity: Activity() {
     private var licenseReady=false
     private var licenseChecking=false
     private var licenseOperationGeneration=0
+    private var safeStartupMode=false
     private fun saveLicenseExpiry(response:JSONObject){
         response.optString("expiry","").takeIf{it.isNotBlank()}?.let{prefs.edit().putString("license_expiry",it).apply()}
     }
@@ -222,8 +223,8 @@ class MainActivity: Activity() {
                 // the app on network refreshes of every configured playlist.
                 if(channels.isNotEmpty()){
                     openStartupDestination()
-                    // Show cached channels immediately; refresh only the selected active playlist in the background.
-                    refresh({},activeOnly=true)
+                    // Safe startup skips automatic refresh and background probes for this session.
+                    if(!safeStartupMode)refresh({},activeOnly=true)
                 } else {
                     // A changed playlist URL has a new cache key. Fetch it on first
                     // launch instead of silently opening an empty Home screen.
@@ -236,6 +237,11 @@ class MainActivity: Activity() {
         }
     }
     private fun openStartupDestination(){
+        if(safeStartupMode){
+            Toast.makeText(this,"Safe startup enabled after repeated crashes. Automatic resume and background checks are paused.",Toast.LENGTH_LONG).show()
+            showHome()
+            return
+        }
         when(prefs.getString("launch_screen","Last channel") ?: "Last channel"){
             "Home"->showHome()
             "Channels"->allChannels()
@@ -1987,6 +1993,7 @@ class MainActivity: Activity() {
             // stopPlayback saves VOD progress and releases Media3, LibVLC and WebView.
             stopPlayback()
         }
+        HomeTvDiagnostics.markCleanExit(this)
         super.onPause()
     }
     private fun migrateLegacyIJKPreferences(){
@@ -2009,7 +2016,7 @@ class MainActivity: Activity() {
     }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        HomeTvDiagnostics.initialize(this)
+        safeStartupMode=HomeTvDiagnostics.initialize(this)
         migrateLegacyIJKPreferences()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12) }
@@ -2889,7 +2896,7 @@ class MainActivity: Activity() {
     }
 
     private fun startBackgroundChannelChecks(){
-        if(!licenseReady)return
+        if(!licenseReady || safeStartupMode)return
         backgroundProbeGeneration++
         val generation=backgroundProbeGeneration
         periodicProbeTask?.let{handler.removeCallbacks(it)}
@@ -6464,6 +6471,7 @@ class MainActivity: Activity() {
         failedUrlsThisSession.clear()
         initialTried.clear()
         alternativeAttempted.clear()
+        HomeTvDiagnostics.markCleanExit(this)
         super.onDestroy()
     }
 }
