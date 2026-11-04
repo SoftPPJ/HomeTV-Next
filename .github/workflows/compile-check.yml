@@ -1,6 +1,9 @@
 name: HomeTV Next compile check
 
 on:
+  push:
+    branches:
+      - new-app-v1-development
   pull_request:
     branches:
       - new-app-v1-development
@@ -31,3 +34,7 @@ jobs:
           gradle-version: '8.9'
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK
+        run: test -s app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
