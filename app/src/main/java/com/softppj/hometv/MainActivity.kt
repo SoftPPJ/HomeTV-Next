@@ -6066,18 +6066,29 @@ class MainActivity: Activity() {
     private fun nextSurfingIndex(current:Int,delta:Int,available:List<Int>):Int{
         if(available.isEmpty())return -1
         val key=channels.getOrNull(current)?.let{channelKey(it)}
-        val position=if(available===surfingCache){
-            key?.let{surfingIndexByChannelKey[it]}
-        }else{
-            // Failure recovery may pass a filtered copy excluding the failed
-            // channel; its positions do not match the cached lookup.
-            available.indexOfFirst{candidate->
+        val direction=if(delta>=0)1 else -1
+        if(available!==surfingCache){
+            // Failure recovery passes a filtered copy that excludes the failed
+            // channel. Walk the original cached order and choose the next allowed
+            // entry, rather than treating the failed channel as position zero.
+            val base=surfingCache
+            val basePosition=key?.let{surfingIndexByChannelKey[it]}
+            if(base!=null && basePosition!=null){
+                val allowed=available.toHashSet()
+                for(step in 1..base.size){
+                    val candidate=base[(basePosition+direction*step+base.size)%base.size]
+                    if(candidate in allowed)return candidate
+                }
+            }
+            val filteredPosition=available.indexOfFirst{candidate->
                 channels.getOrNull(candidate)?.let{channelKey(it)==key}==true
-            }.takeIf{it>=0}
+            }
+            if(filteredPosition<0)return if(direction>0)available.first() else available.last()
+            return available[(filteredPosition+direction+available.size)%available.size]
         }
-        if(position==null)return if(delta>=0)available.first() else available.last()
-        val next=(position+(if(delta>=0)1 else -1)+available.size)%available.size
-        return available[next]
+        val position=key?.let{surfingIndexByChannelKey[it]}
+        if(position==null)return if(direction>0)available.first() else available.last()
+        return available[(position+direction+available.size)%available.size]
     }
     private fun switchChannel(delta:Int){
         clearChannelPreview()
