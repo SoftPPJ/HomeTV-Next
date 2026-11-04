@@ -25,7 +25,7 @@ async function signedLease(env,row,device,tokenHash){
  const signature=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,enc(lease));
  return {ok:true,expiry:row.expiry,lease,
   signature:btoa(String.fromCharCode(...new Uint8Array(signature)))
- .split("+").join("-").split("/").join("_").replace(/=+$/g,"");
+ .split("+").join("-").split("/").join("_").replace(/=+$/g,""),
   serverTime};
 }
 const b64decode=s=>atob(s.replace(/\s/g,""));
