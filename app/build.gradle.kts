@@ -28,6 +28,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -40,4 +44,7 @@ dependencies {
     // GPLv3 decoder; retain only with appropriate distribution/licensing compliance.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
     implementation("org.videolan.android:libvlc-all:3.5.1")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
