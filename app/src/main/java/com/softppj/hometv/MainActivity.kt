@@ -118,6 +118,13 @@ class MainActivity: Activity() {
         })
         setContentView(screen)
     }
+    private fun licenseCache(token:String)=SignedLicenseCache(prefs,installationId(),token)
+    private fun definitiveLicenseFailure(message:String):Boolean{
+        val value=message.lowercase(java.util.Locale.ROOT)
+        return value.contains("expired") || value.contains("revoked") ||
+            value.contains("not active") || value.contains("invalid token") ||
+            value.contains("invalid password")
+    }
     private fun beginLicensedSession(){
         if(licenseChecking)return
         val token=prefs.getString("license_token",null)
@@ -126,70 +133,73 @@ class MainActivity: Activity() {
             showLicenseScreen()
             return
         }
-        val now=System.currentTimeMillis()
-        val verified=prefs.getLong("license_verified_at",0L)
-        val seen=prefs.getLong("license_last_clock",0L)
-        val expiry=prefs.getString("license_expiry",null)
-        val expiryTime=expiry?.let{value->
-            when{
-                value.equals("unlimited",true)->Long.MAX_VALUE
-                else->try{java.time.Instant.parse(value).toEpochMilli()}catch(_:Exception){
-                    try{java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli()}catch(_:Exception){
-                        try{java.time.LocalDate.parse(value).plusDays(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()}catch(_:Exception){null}
-                    }
-                }
-            }
-        }
-        // Only a recently server-verified, non-expired, non-blocked license
-        // can start from cache. A clock rollback forces online verification.
-        val cachedAllowed=verified>0L && now>=verified && now>=seen &&
-            now-verified<7L*24*60*60*1000 &&
-            expiryTime!=null && now<expiryTime &&
-            prefs.getBoolean("license_last_verified",false) &&
-            !prefs.getBoolean("license_validation_blocked",false) &&
-            prefs.getString("license_verified_device",null)==installationId() &&
-            prefs.getString("license_verified_token",null)==token
-        prefs.edit().putLong("license_last_clock",maxOf(now,seen)).apply()
+
+        val cache=licenseCache(token)
+        val cached=cache.status()
+        val cachedAllowed=cached.allowed
         licenseChecking=true
         val operation=++licenseOperationGeneration
+
         if(cachedAllowed){
+            // The signed lease is checked locally first; do not contact the Worker
+            // on every app launch. Revalidate in the background at most once per 24h.
             licenseReady=true
             startLicensedApp()
+            if(!cached.needsRevalidation){
+                licenseChecking=false
+                return
+            }
         }else{
             licenseReady=false
             showLicenseCheckingScreen()
         }
-        thread{
-            val result=try{
+
+        thread(name="HomeTV-license-validation"){
+            var failure:String?=null
+            var permanentFailure=false
+            try{
                 val response=licenseRequest("/validate",licensePayload())
+                if(!cache.saveVerified(response))
+                    throw IllegalStateException("The licensing server did not provide a valid signed licence lease")
                 saveLicenseExpiry(response)
-                null
-            }catch(e:Exception){e.message?:"License validation failed"}
+            }catch(e:Exception){
+                failure=e.message?:"License validation failed"
+                permanentFailure=definitiveLicenseFailure(failure!!)
+            }
+
             runOnUiThread{
                 if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                 licenseChecking=false
-                if(result==null){
-                    prefs.edit().putBoolean("license_last_verified",true)
+                if(failure==null){
+                    prefs.edit()
+                        .putBoolean("license_last_verified",true)
                         .putBoolean("license_validation_blocked",false)
                         .putLong("license_verified_at",System.currentTimeMillis())
-                        .putLong("license_last_clock",maxOf(System.currentTimeMillis(),prefs.getLong("license_last_clock",0L)))
                         .putString("license_verified_device",installationId())
-                        .putString("license_verified_token",token).apply()
-                    if(!licenseReady){licenseReady=true;startLicensedApp()}
-                }else if(cachedAllowed && !result.contains("expired",true) &&
-                    !result.contains("revoked",true) && !result.contains("not active",true) &&
-                    !result.contains("Invalid token",true)){
-                    // Temporary network failure: continue only within the short
-                    // validated cache window. Next startup will retry.
-                    HomeTvDiagnostics.w("HomeTV","Background license check unavailable: "+result)
+                        .putString("license_verified_token",token)
+                        .apply()
+                    if(!licenseReady){
+                        licenseReady=true
+                        startLicensedApp()
+                    }
+                }else if(cachedAllowed && !permanentFailure){
+                    // Temporary network/service failure: retain the signed lease,
+                    // but never extend its seven-day limit or its signed expiry.
+                    licenseReady=true
+                    HomeTvDiagnostics.w("HomeTV","Background licence refresh unavailable; cached lease remains valid: "+failure)
                 }else{
-                    prefs.edit().putBoolean("license_validation_blocked",true)
-                        .putBoolean("license_last_verified",false).commit()
+                    cache.clear()
+                    prefs.edit()
+                        .putBoolean("license_validation_blocked",true)
+                        .putBoolean("license_last_verified",false)
+                        .apply()
+                    if(permanentFailure){
+                        prefs.edit().remove("license_token").remove("license_expiry")
+                            .remove("license_verified_at").remove("license_verified_device")
+                            .remove("license_verified_token").apply()
+                    }
                     licenseReady=false
-                    if(result.contains("expired",true)||result.contains("revoked",true)||
-                        result.contains("not active",true)||result.contains("Invalid token",true))
-                        prefs.edit().remove("license_token").remove("license_expiry").apply()
-                    showLicenseScreen("License verification failed: "+result)
+                    showLicenseScreen("License verification failed: "+failure)
                 }
             }
         }
