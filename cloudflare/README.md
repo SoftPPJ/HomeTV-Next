@@ -8,6 +8,7 @@ Create a **separate private** GitHub repository for licensing and license record
 - `GITHUB_TOKEN`: fine-grained token with **Contents: Read and write** for that private repository only.
 - `ADMIN_TOKEN`: long random administrator token; never embed in APK.
 - `PLAYLIST_URL`: the full existing HomeTV upstream M3U URL, including its query token. Set as a **secret**, not a plain variable. Do not commit it to GitHub.
+- `LICENSE_SIGNING_PRIVATE_JWK`: RSA private key in JSON Web Key (JWK) format, matching the public key embedded in `SignedLicenseCache.kt`. Set as a **secret**; never commit it, expose it in logs, or embed it in the APK. `/validate` uses it to sign device- and token-bound offline leases.
 
 Set Worker variables:
 - `GITHUB_REPO`: `owner/private-license-repo`
