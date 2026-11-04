@@ -1,9 +1,9 @@
-name: HomeTV V6 compile check
+name: HomeTV Next compile check
 
 on:
   pull_request:
     branches:
-      - my-home-tv-v6-development
+      - new-app-v1-development
   workflow_dispatch:
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Verify preinstalled Android SDK
+      - name: Verify Android SDK
         run: |
           test -d "$ANDROID_HOME"
           echo "Using Android SDK at $ANDROID_HOME"
@@ -29,5 +29,5 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Compile V6 debug Kotlin sources only
+      - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
