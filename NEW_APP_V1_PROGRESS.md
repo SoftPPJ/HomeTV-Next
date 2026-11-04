@@ -38,6 +38,9 @@ Updated: 2026-11-04
 - Signed offline licence cache implementation.
 - YouTube WebView playback, remote controls, startup audio request and quality preference controls.
 
+## Latest source changes (not yet compiled or device-tested)
+- Updated the manual hidden-channel reachability check to process 16 hidden channels per batch, yield briefly between batches, and use shorter 2.5-second connection/read timeouts. Requests remain sequential rather than launching a burst of parallel probes. Results still mean URL reachability only, not verified playback; the user must confirm manual unhide unless actual foreground playback triggers the separate Auto Unhide setting. This change is committed but not yet compile-checked or device-tested.
+
 ## Not yet verified or completed
 - Re-run the compile-only workflow after the rotating date/time/day overlay change; run 41807459986 predates that clock update.
 - Large-playlist stress tests (10k, 20k+).
