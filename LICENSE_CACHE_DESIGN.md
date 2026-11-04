@@ -54,3 +54,12 @@ The statement above that the Worker is not deployed is superseded. With user app
 - GitHub Actions compile check 41817687491 passed on `new-app-v1-development` (commit `789f30b8a8aa8457598f73557a3b28e2b137e748`). This is a Kotlin compile check, not APK assembly or Android TV testing.
 
 **Still unverified and release-blocking:** no real test licence/device has exercised `/activate` followed by `/validate`; the signed response has not yet been verified against the public key embedded in the Android app. The private signing key is intentionally not retrievable. A real signed response must verify successfully before the licence integration is considered complete.
+
+
+## Automated test implementation update — 2026-11-04
+
+A test-only public-key injection parameter was added to `SignedLicenseCache`; production defaults to the fixed embedded Cloudflare public key. Tests generate their own temporary RSA key pair and do not access or expose the production private key.
+
+Added Robolectric/JUnit tests for valid signatures, tampered signatures, device binding, token binding, expiry, seven-day offline grace, clock rollback, and cache clearing. The manual GitHub Actions compile workflow now runs `:app:testDebugUnitTest` after Kotlin compilation.
+
+These tests are **committed but not yet run**. They validate the Android cache verifier with generated test keys; they do not prove that the deployed Cloudflare Worker's secret matches the app's production public key. That still requires a real signed response from the deployed Worker.
