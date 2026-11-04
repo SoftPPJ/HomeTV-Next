@@ -3529,6 +3529,63 @@ class MainActivity: Activity() {
         // Android TV: initial OK confirms Exit; Back dismisses the dialog.
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
     }
+    private fun preferredAudioLanguage():String =
+        prefs.getString("preferred_audio_language","ml")?.takeIf{it.isNotBlank()} ?: "ml"
+
+    private fun audioTrackPreferenceKey(c:Channel)="audio_track_"+channelKey(c)
+
+    private fun applyAudioTrackPreference(c:Channel,exo:ExoPlayer){
+        val saved=prefs.getString(audioTrackPreferenceKey(c),null)
+        val wanted=saved ?: preferredAudioLanguage()
+        val matching=exo.currentTracks.groups.asSequence()
+            .filter{it.type==C.TRACK_TYPE_AUDIO}
+            .flatMap{group->(0 until group.length).asSequence().map{index->Triple(group,index,group.getTrackFormat(index))}}
+            .firstOrNull{(_,index,format)->
+                format.language?.equals(wanted,true)==true &&
+                    exo.currentTracks.groups.any{g->g.type==C.TRACK_TYPE_AUDIO && index<g.length && g.isTrackSupported(index)}
+            }
+        if(matching!=null){
+            val (group,index,_)=matching
+            val already=group.isTrackSelected(index)
+            if(!already){
+                exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                    .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup,listOf(index)))
+                    .build()
+            }
+        }else if(saved==null){
+            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                .setPreferredAudioLanguage(wanted)
+                .build()
+        }
+    }
+
+    private fun choosePreferredAudioLanguage(){
+        val choices=arrayOf("Malayalam (ml)","English (en)","Hindi (hi)","Tamil (ta)","Arabic (ar)","Use stream default")
+        val codes=arrayOf("ml","en","hi","ta","ar","")
+        val current=preferredAudioLanguage()
+        val selected=codes.indexOf(current).let{if(it<0)0 else it}
+        AlertDialog.Builder(this).setTitle("Preferred audio language")
+            .setSingleChoiceItems(choices,selected){dialog,which->
+                val code=codes[which]
+                if(code.isBlank()){
+                    prefs.edit().remove("preferred_audio_language").putBoolean("audio_use_stream_default",true).apply()
+                }else{
+                    prefs.edit().putString("preferred_audio_language",code).putBoolean("audio_use_stream_default",false).apply()
+                }
+                dialog.dismiss()
+                val index=active
+                if(index in channels.indices && player!=null){
+                    prefs.edit().remove(audioTrackPreferenceKey(channels[index])).apply()
+                    val exo=player!!
+                    exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .setPreferredAudioLanguage(if(code.isBlank())null else code)
+                        .build()
+                }
+                showBanner(if(code.isBlank())"Audio: stream default" else "Preferred audio: "+choices[which])
+            }.setNegativeButton("Cancel",null).show()
+    }
+
     private fun audioTracks(){
         val exo=player
         if(exo==null){Toast.makeText(this,"Audio track selection is available for IPTV streams",Toast.LENGTH_LONG).show();return}
@@ -3550,9 +3607,18 @@ class MainActivity: Activity() {
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .setOverrideForType(TrackSelectionOverride(group,listOf(index)))
                 .build()
+            val channel=channels.getOrNull(active)
+            val language=group.getFormat(index).language
+            if(channel!=null && !language.isNullOrBlank()){
+                prefs.edit().putString(audioTrackPreferenceKey(channel),language).apply()
+            }
             showBanner("Audio track: "+names[position])
         }.setNeutralButton("Automatic"){_,_->
-            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
+            channels.getOrNull(active)?.let{prefs.edit().remove(audioTrackPreferenceKey(it)).apply()}
+            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
+                .build()
         }.setNegativeButton("Cancel",null).show()
     }
 
@@ -4657,7 +4723,7 @@ class MainActivity: Activity() {
         val options=arrayOf(
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
-            "Picture quality","Buffering","Audio tracks","Subtitles","Sleep timer","Playback engine",
+            "Picture quality","Buffering","Audio tracks","Preferred audio language","Subtitles","Sleep timer","Playback engine",
             "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Channel volume"
         )
         val drawer=LinearLayout(this).apply{
@@ -4686,14 +4752,15 @@ class MainActivity: Activity() {
                 2->selectQuality(active.takeIf{it>=0})
                 3->chooseBufferProfile()
                 4->audioTracks()
-                5->subtitleTracks()
-                6->sleepTimer()
-                7->if(active>=0)chooseChannelEngine(active)
-                8->clockSettings()
-                9->selectAlternative(active)
-                10->showHome()
-                11->liveSettings()
-                12->if(active>=0)configureChannelVolume(active)
+                5->choosePreferredAudioLanguage()
+                6->subtitleTracks()
+                7->sleepTimer()
+                8->if(active>=0)chooseChannelEngine(active)
+                9->clockSettings()
+                10->selectAlternative(active)
+                11->showHome()
+                12->liveSettings()
+                13->if(active>=0)configureChannelVolume(active)
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -5581,6 +5648,9 @@ class MainActivity: Activity() {
             val exo=ExoPlayer.Builder(this, DefaultRenderersFactory(this)
                     .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
+            exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+                .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
+                .build()
             exo.volume=1f
             player=exo
             applyQuality()
@@ -5610,6 +5680,9 @@ class MainActivity: Activity() {
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
             exo.addListener(object:Player.Listener{
+                override fun onTracksChanged(tracks:androidx.media3.common.Tracks){
+                    if(player===exo && active==index)applyAudioTrackPreference(c,exo)
+                }
                 override fun onIsPlayingChanged(isPlaying:Boolean){
                     if(isPlaying && player===exo && active==index){
                         startupWatchdog?.let{handler.removeCallbacks(it)}
