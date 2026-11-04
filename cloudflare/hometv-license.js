@@ -7,6 +7,27 @@ const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:
 const enc=s=>new TextEncoder().encode(s);
 const hex=a=>[...new Uint8Array(a)].map(x=>x.toString(16).padStart(2,"0")).join("");
 const hash=async s=>hex(await crypto.subtle.digest("SHA-256",enc(s)));
+const b64url=value=>btoa(String.fromCharCode(...new TextEncoder().encode(value)))
+ .replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,"");
+async function signedLease(env,row,device,tokenHash){
+ if(!env.LICENSE_SIGNING_PRIVATE_JWK)throw Error("Licence signing key is not configured");
+ let jwk;
+ try{jwk=JSON.parse(env.LICENSE_SIGNING_PRIVATE_JWK)}catch{throw Error("Licence signing key is invalid")}
+ const key=await crypto.subtle.importKey("jwk",jwk,
+  {name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]);
+ const serverTime=Date.now();
+ const expiresAt=row.expiry==="unlimited"?253402300799999:
+  Date.parse(row.expiry+"T23:59:59.999Z");
+ if(!Number.isFinite(expiresAt)||expiresAt<=serverTime)throw Error("License expired");
+ const payload={version:1,licenseId:String(row.id||row.passwordHash.slice(0,16)),
+  device,tokenHash,issuedAt:serverTime,serverTime,expiresAt};
+ const lease=b64url(JSON.stringify(payload));
+ const signature=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,enc(lease));
+ return {ok:true,expiry:row.expiry,lease,
+  signature:btoa(String.fromCharCode(...new Uint8Array(signature)))
+   .replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/g,""),
+  serverTime};
+}
 const b64decode=s=>atob(s.replace(/\s/g,""));
 const b64encode=s=>btoa(String.fromCharCode(...enc(s)));
 const api=(env,path)=>"https://api.github.com/repos/"+env.GITHUB_REPO+"/contents/"+path.split("/").map(encodeURIComponent).join("/");
@@ -108,7 +129,7 @@ async function serve(req,env){
   return json({ok:true});
  }
  if(expired(row))return json({error:"License expired"},403);
- if(path==="/validate")return json({ok:true,expiry:row.expiry});
+ if(path==="/validate")return json(await signedLease(env,row,device,tokenHash));
  if(path==="/playlist"){
   // The upstream playlist URL (including its token) must be a Worker secret,
   // never published in the Android APK or in this repository.
