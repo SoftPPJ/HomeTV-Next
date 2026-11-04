@@ -5756,44 +5756,9 @@ class MainActivity: Activity() {
             (u.scheme=="http" || u.scheme=="https") &&
                 (routeWebOverride ?: isWebTv(c))
         }catch(_:Exception){false}
-        // Only individual video URLs are eligible for public live-HLS discovery.
-        // Channel and playlist URLs continue directly to the existing WebView route.
-        val youtubeVideoId=youtubeUri?.getQueryParameter("v")
-            ?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}
-        if(youtubeVideoId!=null && youtubeNativeStreamUrl==null && youtubeNativeAttemptedUrl!=c.url){
-            youtubeNativeAttemptedUrl=c.url
-            val requestGeneration=++youtubeNativeGeneration
-            showBanner("Checking YouTube stream…")
-            val timeout=Runnable{
-                if(requestGeneration==youtubeNativeGeneration && active==index && videoScreen===screen){
-                    youtubeResolveTimeout=null
-                    youtubeNativeGeneration++
-                    showBanner("YouTube stream check timed out. Opening YouTube player…")
-                    playIndexResolved(index,true)
-                }
-            }
-            youtubeResolveTimeout=timeout
-            handler.postDelayed(timeout,YouTubeStreamResolver.TIMEOUT_MS.toLong())
-            thread(name="YouTubeNativeResolve"){
-                val resolved=try{YouTubeStreamResolver.resolve(youtubeUri.toString())}catch(_:Exception){null}
-                handler.post{
-                    if(requestGeneration!=youtubeNativeGeneration || active!=index ||
-                        videoScreen!==screen || channels.getOrNull(index)?.url!=c.url)return@post
-                    youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
-                    youtubeResolveTimeout=null
-                    if(resolved!=null && resolved.kind=="hls" && resolved.url.startsWith("https://")){
-                        youtubeNativeStreamUrl=resolved.url
-                        showBanner("Opening native YouTube stream…")
-                        playIndexResolved(index,false)
-                    }else{
-                        showBanner("Opening YouTube player…")
-                        playIndexResolved(index,true)
-                    }
-                }
-            }
-            return
-        }
-        if((youtubeUri!=null && youtubeNativeStreamUrl==null) || webPage){
+        // Match V6: always use the original YouTube watch page in WebView.
+        // Do not extract a native stream; that route changes YouTube audio behaviour.
+        if(youtubeUri!=null || webPage){
             // Use the original YouTube watch page inside WebView.
             // Keep regular IPTV streams on their existing Media3/LibVLC path.
             val viewer=WebView(this)
