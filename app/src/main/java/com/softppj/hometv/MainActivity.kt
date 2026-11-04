@@ -1661,7 +1661,7 @@ class MainActivity: Activity() {
                     return@post
                 }
                 if(!showResults){
-                    showBanner(results.size.toString()+" hidden channel URL(s) responded. Open Hidden channels to review.")
+                    showBanner(results.size.toString()+" hidden channel URL(s) responded. Use Check hidden channels to review.")
                     return@post
                 }
                 val labels=results.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
