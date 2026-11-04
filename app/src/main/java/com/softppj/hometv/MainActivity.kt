@@ -287,38 +287,27 @@ class MainActivity: Activity() {
             reset("HomeTV • Activating license")
             thread{
                 var token:String?=null
-                var validationSucceeded=false
-                var verifiedLease:JSONObject?=null
+                var activationResult:JSONObject?=null
                 val error=try{
                     val result=licenseRequest("/activate",JSONObject().put("device",installationId()).put("password",value))
+                    activationResult=result
                     token=result.getString("token").takeIf{it.isNotBlank()}
                     if(token==null)throw IllegalStateException("Activation returned an empty token")
-                    // Activation alone must never grant access. The signed lease
-                    // must be verified and saved before the app can start.
-                    val verified=licenseRequest("/validate-lease",JSONObject()
+                    // Match V6: activation is followed by the standard /validate check.
+                    val verified=licenseRequest("/validate",JSONObject()
                         .put("device",installationId()).put("token",token))
-                    if(!licenseCache(token!!).saveVerified(verified))
-                        throw IllegalStateException("The licensing server did not provide a valid signed licence lease")
-                    verifiedLease=verified
-                    validationSucceeded=true
+                    activationResult=verified
                     null
                 }catch(e:Exception){e.message?:"Activation failed"}
                 runOnUiThread{
                     if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
-                    if(token!=null){
-                        prefs.edit()
-                            .putString("license_token",token)
-                            .putBoolean("license_last_verified",validationSucceeded)
-                            .putBoolean("license_validation_blocked",!validationSucceeded)
-                            .commit()
-                        if(validationSucceeded){
-                            verifiedLease?.let{saveLicenseExpiry(it)}
-                            licenseReady=true
-                            startLicensedApp()
-                        }else{
-                            licenseReady=false
-                            showLicenseScreen(error?:"Activation completed, but signed licence validation failed. Please retry.")
-                        }
+                    if(token!=null && error==null){
+                        prefs.edit().putString("license_token",token)
+                            .putBoolean("license_last_verified",true)
+                            .putBoolean("license_validation_blocked",false).apply()
+                        activationResult?.let{saveLicenseExpiry(it)}
+                        licenseReady=true
+                        startLicensedApp()
                     }else{
                         licenseReady=false
                         showLicenseScreen(error)
@@ -342,9 +331,7 @@ class MainActivity: Activity() {
                     runOnUiThread{
                         if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                         if(error==null){
-                            licenseCache(prefs.getString("license_token","") ?: "").clear()
-                            prefs.edit().remove("license_token").remove("license_expiry").remove("license_verified_at")
-                                .remove("license_verified_device").remove("license_verified_token")
+                            prefs.edit().remove("license_token").remove("license_expiry")
                                 .putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
