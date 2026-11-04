@@ -1564,22 +1564,23 @@ class MainActivity: Activity() {
         Toast.makeText(this,if(shouldHide)"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
     private fun checkHiddenChannelsNow(){
-        val hidden=channelNumbers().filter{
-            isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group) ||
-                temporaryFailureHidden.contains(channelKey(channels[it]))
-        }.distinctBy{channelKey(channels[it])}
+        // Capture stable channel identities before leaving the UI thread. A
+        // playlist refresh can replace the live channel list while checks run.
+        val snapshot=channels.toList()
+        val hidden=snapshot.filter{c->
+            isManuallyHidden(c) || isGroupHidden(c.group) ||
+                temporaryFailureHidden.contains(channelKey(c))
+        }.distinctBy{channelKey(it)}
         if(hidden.isEmpty()){
             Toast.makeText(this,"No hidden channels to check",Toast.LENGTH_SHORT).show()
             return
         }
-        // Run quietly; only display a full-screen results menu after checking finishes.
-        // Do not put a modal progress window over the currently playing channel.
         Toast.makeText(this,"Checking "+hidden.size+" hidden channels in background…",Toast.LENGTH_SHORT).show()
         thread(name="HomeTV-hidden-channel-check"){
-            val reachableIndices=mutableListOf<Int>()
-            hidden.forEach{index->
-                val c=channels[index]
-                val urls=alternateIndices(index).map{channels[it]}.ifEmpty{listOf(c)}
+            val reachableKeys=mutableListOf<String>()
+            hidden.forEach{c->
+                val key=channelKey(c)
+                val urls=snapshot.filter{channelKey(it)==key}.distinctBy{it.url}
                 val reachable=urls.any{candidate->
                     val address=candidate.url.lowercase(java.util.Locale.ROOT)
                     if(!address.startsWith("http://") && !address.startsWith("https://"))return@any false
@@ -1592,8 +1593,8 @@ class MainActivity: Activity() {
                             connection.instanceFollowRedirects=true
                             connection.setRequestProperty("Range","bytes=0-1023")
                             connection.setRequestProperty("User-Agent",candidate.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                            candidate.headers.forEach{(key,value)->
-                                if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
+                            candidate.headers.forEach{(header,value)->
+                                if(!header.equals("User-Agent",true))connection.setRequestProperty(header,value)
                             }
                             val code=connection.responseCode
                             val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
@@ -1601,15 +1602,17 @@ class MainActivity: Activity() {
                         }finally{connection.disconnect()}
                     }catch(_:Exception){false}
                 }
-                if(reachable)reachableIndices.add(index)
+                if(reachable)reachableKeys.add(key)
             }
             handler.post{
-                if(reachableIndices.isEmpty()){
-                    Toast.makeText(this,"Hidden channel check complete • No reachable channels found",Toast.LENGTH_LONG).show()
+                // Resolve results against the current list, not stale numeric
+                // indexes from before a background refresh or playlist deletion.
+                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct()
+                if(results.isEmpty()){
+                    Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
                     return@post
                 }
-                val results=reachableIndices.toMutableList()
-                val labels=results.map{channels[it].name+"  —  Unhide"}.toMutableList()
+                val labels=results.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
                 val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
                 val dialog=AlertDialog.Builder(this)
                     .setTitle("Hidden channel check complete • "+results.size+" found")
@@ -1617,16 +1620,22 @@ class MainActivity: Activity() {
                     .setNegativeButton("Close",null).create()
                 dialog.setOnShowListener{
                     dialog.listView?.setOnItemClickListener{_,_,position,_->
-                        val index=results.getOrNull(position) ?:return@setOnItemClickListener
+                        val key=results.getOrNull(position) ?:return@setOnItemClickListener
+                        val index=channels.indexOfFirst{channelKey(it)==key}
+                        if(index<0)return@setOnItemClickListener
                         val c=channels[index]
                         AlertDialog.Builder(this).setTitle(c.name)
                             .setMessage("The stream URL responded successfully, but video playback is not verified.")
                             .setPositiveButton("Unhide"){_,_->
-                                if(isManuallyHidden(c))toggleManualHide(c)
-                                temporaryFailureHidden.remove(channelKey(c))
-                                unavailableChannels.remove(channelKey(c))
-                                if(isGroupHidden(c.group))
-                                    Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
+                                val currentIndex=channels.indexOfFirst{channelKey(it)==key}
+                                if(currentIndex>=0){
+                                    val current=channels[currentIndex]
+                                    if(isManuallyHidden(current))toggleManualHide(current)
+                                    temporaryFailureHidden.remove(key)
+                                    unavailableChannels.remove(key)
+                                    if(isGroupHidden(current.group))
+                                        Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
+                                }
                                 results.removeAt(position)
                                 labels.removeAt(position)
                                 adapter.notifyDataSetChanged()
