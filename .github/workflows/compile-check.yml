@@ -38,3 +38,10 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - name: Verify APK
         run: test -s app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-Next-V1-debug
+          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          if-no-files-found: error
+          retention-days: 14
