@@ -1,12 +1,8 @@
 name: HomeTV Next compile check
 
+# Deliberately manual-only while the user has asked to avoid builds/artifacts.
+# This prevents source pushes from consuming Actions quota or uploading APKs.
 on:
-  push:
-    branches:
-      - new-app-v1-development
-  pull_request:
-    branches:
-      - new-app-v1-development
   workflow_dispatch:
 
 permissions:
