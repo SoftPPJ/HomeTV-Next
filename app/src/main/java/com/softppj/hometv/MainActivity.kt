@@ -4371,7 +4371,7 @@ class MainActivity: Activity() {
                     resizeMode=androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 }
                 panel.addView(view,0,FrameLayout.LayoutParams(-1,-1))
-                exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
+                exo.setMediaItem(mediaItemForStream(c.url))
                 exo.prepare()
                 if(c.mediaType in setOf("movie","series","music")){
                     val resume=mediaResumeSeconds(c)
@@ -5949,7 +5949,7 @@ class MainActivity: Activity() {
                     viewer.loadUrl(youtubeUri.buildUpon().appendQueryParameter("t",seconds.toString()+"s").appendQueryParameter("autoplay","1").build().toString())
                 }
             }
-        }else if(engineFor(c)=="LibVLC"){
+        }else if(engineFor(c)=="LibVLC" && youtubeNativeStreamUrl==null){
             startVlc(c,index,screen)
         }else{
             val factory=DefaultHttpDataSource.Factory()
@@ -6051,7 +6051,7 @@ class MainActivity: Activity() {
                 }
             })
             try{
-                exo.setMediaItem(mediaItemForStream(c.url))
+                exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
                 exo.prepare()
                 exo.play()
             }catch(e:Exception){
