@@ -91,7 +91,7 @@ No APK release/prerelease or final release until the user explicitly approves. D
 - The repository Worker source still returned only `{ok:true, expiry}` from `/validate`; this could never satisfy the Android signed-lease verifier.
 - Updated `cloudflare/hometv-license.js` to sign a device- and token-bound RSA-SHA256 lease using the `LICENSE_SIGNING_PRIVATE_JWK` Worker secret. The response now includes `lease`, `signature`, and `serverTime` in the format expected by `SignedLicenseCache`.
 - Worker source commit: `4216a1fb97e0aeaff8dedfa68d27788be79bac7a`.
-- Cloudflare confirms that the live `hometv-license` Worker has a secret binding named `LICENSE_SIGNING_PRIVATE_JWK`. The live Worker was last modified on 2026-10-20; the updated repository source has **not** yet been deployed or end-to-end tested against the live endpoint. Licence activation/validation remains a release blocker until deployment and signed-response verification succeed.
+- Cloudflare confirms that the live `hometv-license` Worker has a secret binding named `LICENSE_SIGNING_PRIVATE_JWK`. With the user's approval, the corrected source was deployed on 2026-11-04. Active deployment `d855ff6c-93c1-454a-a10e-d6a617aa014d`, version `0fb63744-9204-4110-aae5-5bb393aa7054` (100% traffic). Existing bindings and compatibility date were preserved. Cloudflare accepted the module and reports `startup_time_ms: 1`. Public health/activation/validation endpoints could not be exercised from this environment, and no real test licence/device was used. Licence activation/validation remains a release blocker until a test device verifies the signed response against the APK public key.
 
 ### Confirmed from source; not device-tested
 - Cached playlist startup with background refresh; optional automatic playlist checking; conditional HTTP validation and channel-position index for large-list navigation.
@@ -110,3 +110,11 @@ No APK release/prerelease or final release until the user explicitly approves. D
 6. Finish visual/regression review of the cinematic Home UI and confirm all carried-forward V6 functions.
 
 No final APK, prerelease, or release is approved or created by this audit.
+
+
+### Live Cloudflare deployment — 2026-11-04
+- User approved deployment of the signed-lease validation correction.
+- Deployed `cloudflare/hometv-license.js` to existing Worker `hometv-license` using the content-only endpoint; Worker configuration and bindings were preserved.
+- Active deployment: `d855ff6c-93c1-454a-a10e-d6a617aa014d`; version: `0fb63744-9204-4110-aae5-5bb393aa7054`; 100% traffic.
+- Preserved bindings: `ADMIN_TOKEN`, `GITHUB_REPO`, `GITHUB_TOKEN`, `LICENSE_PATH`, `LICENSE_SIGNING_PRIVATE_JWK`, `PLAYLIST_URL`; compatibility date remains `2026-10-19`.
+- Cloudflare accepted the module upload successfully. End-to-end activation and signed validation still need a real test device/licence. The Android public key/private signing key match has not been independently verified from a test signature, so do not declare licence flow release-ready yet.
