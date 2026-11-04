@@ -41,3 +41,16 @@ The signed JSON contains `version`, `licenseId`, `device`, `tokenHash`, `issuedA
 7. Verify the deployed Worker returns a valid signed envelope and the APK contains only the public key.
 
 **Release gate:** do not issue a new APK until the Cloudflare `/validate` implementation is deployed, an end-to-end signature test passes, and Android compilation succeeds.
+
+
+## Deployment and verification update — 2026-11-04
+
+The statement above that the Worker is not deployed is superseded. With user approval, the signed-lease Worker source was deployed to the live `hometv-license` Worker on 2026-11-04.
+
+- Deployment ID: `d855ff6c-93c1-454a-a10e-d6a617aa014d`
+- Active version ID: `0fb63744-9204-4110-aae5-5bb393aa7054`
+- Traffic allocation: 100%
+- Existing Worker bindings and compatibility date were preserved; no licence records were modified.
+- GitHub Actions compile check 41817687491 passed on `new-app-v1-development` (commit `789f30b8a8aa8457598f73557a3b28e2b137e748`). This is a Kotlin compile check, not APK assembly or Android TV testing.
+
+**Still unverified and release-blocking:** no real test licence/device has exercised `/activate` followed by `/validate`; the signed response has not yet been verified against the public key embedded in the Android app. The private signing key is intentionally not retrievable. A real signed response must verify successfully before the licence integration is considered complete.
