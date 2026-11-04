@@ -70,3 +70,11 @@ No APK release/prerelease or final release until the user explicitly approves. D
 - Switching channels and stopping playback guard against stale resolver callbacks; timeout callbacks are removed during playback cleanup. The existing IPTV preview path remains unchanged.
 - Source commits: `1b32b938ed5f6e5fb070077725bfc1c5669b87ab` and `0320fe47cc65817195edeb871cb3c8d62250e029`. Source-only; no APK, release, or build artifact was created. Kotlin compile-only check and Android TV playback testing remain pending.
 - Limitation: native playback is best-effort and only applies when YouTube publicly exposes an HLS livestream manifest. It does not resolve ordinary YouTube video formats or bypass authentication, CAPTCHA, DRM, or access restrictions.
+
+## Playback date/time overlay default (2026-11-04)
+- Enabled the on-video date/time/day overlay by default for a fresh installation.
+- Kept the existing six selectable positions (top/bottom × left/center/right), with **Top right** as the default.
+- Kept the existing individual date/time/day visibility controls, 12/24-hour format, text-size control, transparent background, and four-second rotation.
+- Existing saved user preference is respected; users who previously switched the overlay OFF remain OFF until they enable it.
+- Source commit: `f180ed155ff069e0529275f8dee4a2a00801ee31`.
+- A fresh compile-only workflow run is required for this commit. Android TV visual verification remains a device test and has not been performed.
