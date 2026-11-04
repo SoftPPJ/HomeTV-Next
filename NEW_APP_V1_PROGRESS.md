@@ -17,6 +17,7 @@ Updated: 2026-11-04
 - The latest audio, playlist-refresh, large-list navigation, auto-unhide, and refresh/deletion safety changes have not been compiled yet. No build was triggered for them.
 
 ## Latest source changes (not yet compiled or device-tested)
+- Upgraded the on-video date/time overlay to rotate through date, time, and day of week one at a time, with a short fade/slide transition, transparent background, and text shadow. Added a separate Show day setting (enabled by default); retained the existing position, size, and 12/24-hour controls. This source change is committed but still needs a fresh compile check and Android TV visual verification.
 - Added preferred audio language, per-channel Media3 track memory, language-code normalization, and LibVLC audio-track selection.
 - Corrected "Use stream default" so it does not silently fall back to Malayalam.
 - Added an optional Automatic Playlist Check & Update setting (default ON); cached playlists open first and background checks only run when enabled.
