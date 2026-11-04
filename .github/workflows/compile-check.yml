@@ -1,7 +1,7 @@
 name: HomeTV Next compile check
 
-# Deliberately manual-only while the user has asked to avoid builds/artifacts.
-# This prevents source pushes from consuming Actions quota or uploading APKs.
+# Deliberately manual-only: source pushes must not consume Actions quota.
+# A manually requested run compiles, tests, and creates a debug-only APK artifact for device testing.
 on:
   workflow_dispatch:
 
@@ -11,7 +11,7 @@ permissions:
 jobs:
   compile-debug:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -32,3 +32,12 @@ jobs:
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Assemble debug test APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload debug test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-Next-V1-debug-test
+          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          if-no-files-found: error
+          retention-days: 7
