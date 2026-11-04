@@ -456,8 +456,9 @@ class MainActivity: Activity() {
         playedThisSession.add(channelKey(c))
         recoveryPrompted.remove(channelKey(c))
         failedUrlsThisSession.remove(c.url)
-        unavailableChannels.remove(channelKey(c))
-        temporaryFailureHidden.remove(channelKey(c))
+        val recoveredUnavailable=unavailableChannels.remove(channelKey(c))
+        val recoveredTemporary=temporaryFailureHidden.remove(channelKey(c))
+        if(recoveredUnavailable || recoveredTemporary)invalidateSurfingCache()
         // Auto-unhide is deliberately tied to a real foreground Playing event,
         // never to an HTTP 200 response or a timeout-based reachability probe.
         if(prefs.getBoolean("auto_unhide_working_channels",false) && isManuallyHidden(c)){
@@ -565,6 +566,7 @@ class MainActivity: Activity() {
         val set=favoriteIds.toMutableSet()
         if(!set.add(id(c)))set.remove(id(c))
         prefs.edit().putStringSet(viewerKey("favorites"),set).apply()
+        invalidateSurfingCache()
         Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
@@ -638,6 +640,7 @@ class MainActivity: Activity() {
         val skipped=!isSkipped(c)
         alternateIndices(channels.indexOf(c)).forEach{val entry=channels[it];if(skipped)values.add(id(entry)) else values.remove(id(entry))}
         prefs.edit().putStringSet("skip_channel_surfing",values).apply()
+        invalidateSurfingCache()
         Toast.makeText(this,if(skipped)"Skipped during channel surfing: "+c.name else "Included in channel surfing: "+c.name,Toast.LENGTH_SHORT).show()
     }
     private fun manageSkippedChannels(){
@@ -790,6 +793,7 @@ class MainActivity: Activity() {
                 failurePromptKey=null
                 temporaryFailureHidden.add(key)
                 unavailableChannels.add(key)
+                invalidateSurfingCache()
                 moveAfterFailedChannelHidden(index,screen)
             }
             .setNegativeButton("Hide permanently"){_,_->
@@ -1046,6 +1050,7 @@ class MainActivity: Activity() {
         val updated=manuallyHiddenGroups.toMutableSet()
         if(!updated.add(group))updated.remove(group)
         prefs.edit().putStringSet("manually_hidden_groups",updated).apply()
+        invalidateSurfingCache()
         Toast.makeText(this,if(isGroupHidden(group))"Group hidden until manually restored" else "Group restored",Toast.LENGTH_SHORT).show()
     }
     private fun groupOptions(group:String){
@@ -1561,6 +1566,7 @@ class MainActivity: Activity() {
         (channelByKey[channelKey(c)] ?:emptyList()).forEach{updated.remove(id(channels[it]))}
         if(shouldHide)updated.add(hiddenChannelId(c)) else updated.remove(hiddenChannelId(c))
         prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+        invalidateSurfingCache()
         Toast.makeText(this,if(shouldHide)"Channel hidden until manually restored" else "Channel restored",Toast.LENGTH_SHORT).show()
     }
     private fun checkHiddenChannelsNow(){
@@ -3458,6 +3464,7 @@ class MainActivity: Activity() {
             val set=(prefs.getStringSet(key,emptySet())?:emptySet()).toMutableSet()
             if(!set.add(value))set.remove(value)
             prefs.edit().putStringSet(key,set).apply()
+            invalidateSurfingCache()
             if(active>=0 && channels.getOrNull(active)?.let{isLocked(it)}==true)allChannels()
             else if(active>=0)showBanner("Channel lock updated")
             else allChannels()
