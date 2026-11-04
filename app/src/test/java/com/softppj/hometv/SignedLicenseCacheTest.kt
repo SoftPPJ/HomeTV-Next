@@ -1,8 +1,8 @@
 package com.softppj.hometv
 
 import android.util.Base64
-import androidx.test.core.app.ApplicationProvider
 import android.content.Context
+import org.robolectric.RuntimeEnvironment
 import org.json.JSONObject
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -27,7 +27,7 @@ class SignedLicenseCacheTest {
 
     @Before
     fun setUp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
+        val context = RuntimeEnvironment.getApplication() as Context
         preferences = context.getSharedPreferences("signed-license-tests", Context.MODE_PRIVATE)
         preferences.edit().clear().commit()
         signingKeys = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
