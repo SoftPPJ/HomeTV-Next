@@ -283,6 +283,8 @@ class MainActivity: Activity() {
                     // device/token validation required at every app startup.
                     val verified=licenseRequest("/validate",JSONObject()
                         .put("device",installationId()).put("token",token))
+                    if(!licenseCache(token!!).saveVerified(verified))
+                        throw IllegalStateException("The licensing server did not provide a valid signed licence lease")
                     activationResult=verified
                     null
                 }catch(e:Exception){e.message?:"Activation failed"}
@@ -312,7 +314,10 @@ class MainActivity: Activity() {
                     runOnUiThread{
                         if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                         if(error==null){
-                            prefs.edit().remove("license_token").remove("license_expiry").putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
+                            licenseCache(prefs.getString("license_token","") ?: "").clear()
+                            prefs.edit().remove("license_token").remove("license_expiry").remove("license_verified_at")
+                                .remove("license_verified_device").remove("license_verified_token")
+                                .putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
                         }else{
                             // Server did not confirm surrender: retain the token,
