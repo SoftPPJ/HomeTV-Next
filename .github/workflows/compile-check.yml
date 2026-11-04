@@ -1,4 +1,4 @@
-name: MyTV V1 compile, test and prerelease
+name: MyTV V1 compile and test only
 
 on:
   push:
@@ -33,15 +33,3 @@ jobs:
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Publish APK as GitHub prerelease
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: mytv-v1.0.0-test
-          name: MyTV V1.0.0 Test
-          prerelease: true
-          make_latest: false
-          overwrite_files: true
-          fail_on_unmatched_files: true
-          files: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
