@@ -90,7 +90,7 @@ No APK release/prerelease or final release until the user explicitly approves. D
 - The Android app already calls `SignedLicenseCache` and rejects unsigned validation responses.
 - The repository Worker source still returned only `{ok:true, expiry}` from `/validate`; this could never satisfy the Android signed-lease verifier.
 - Updated `cloudflare/hometv-license.js` to sign a device- and token-bound RSA-SHA256 lease using the `LICENSE_SIGNING_PRIVATE_JWK` Worker secret. The response now includes `lease`, `signature`, and `serverTime` in the format expected by `SignedLicenseCache`.
-- Worker source commit: `a8f9225e1131033a28a77f00060d7553d2ceb9de`.
+- Worker source commit: `4216a1fb97e0aeaff8dedfa68d27788be79bac7a`.
 - Cloudflare confirms that the live `hometv-license` Worker has a secret binding named `LICENSE_SIGNING_PRIVATE_JWK`. The live Worker was last modified on 2026-10-20; the updated repository source has **not** yet been deployed or end-to-end tested against the live endpoint. Licence activation/validation remains a release blocker until deployment and signed-response verification succeed.
 
 ### Confirmed from source; not device-tested
