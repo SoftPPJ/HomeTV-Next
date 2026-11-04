@@ -529,6 +529,7 @@ class MainActivity: Activity() {
                 when {
                     which<entries.size->{
                         prefs.edit().putString("active_viewer",if(which==0)"default" else entries[which]).apply()
+                        invalidateSurfingCache()
                         settings()
                     }
                     which==entries.size->{
@@ -539,6 +540,7 @@ class MainActivity: Activity() {
                                 if(name.matches(Regex("[A-Za-z0-9 _-]{1,24}")) && name!="Default" && !entries.contains(name)){
                                     names.put(name)
                                     prefs.edit().putString("viewer_profiles",names.toString()).putString("active_viewer",name).apply()
+                                    invalidateSurfingCache()
                                     settings()
                                 }else Toast.makeText(this,"Enter a unique name (1–24 letters/numbers)",Toast.LENGTH_LONG).show()
                             }.setNegativeButton("Cancel",null).show()
@@ -553,6 +555,7 @@ class MainActivity: Activity() {
                                 prefs.edit().putString("viewer_profiles",remaining.toString())
                                     .putString("active_viewer","default")
                                     .remove("viewer_"+old+"_favorites").remove("viewer_"+old+"_recent_channels").apply()
+                                invalidateSurfingCache()
                                 settings()
                             }.setNegativeButton("Cancel",null).show()
                     }
