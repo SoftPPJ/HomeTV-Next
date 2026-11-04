@@ -24,6 +24,7 @@ Updated: 2026-11-04
 - Optimized remote channel surfing with a cached channel-key-to-position index, avoiding a full 10k+ channel scan for every Up/Down press. Failure-recovery navigation preserves the original channel order when skipping a failed entry.
 - Added Auto Unhide Working Channels (default OFF); it only restores a manually hidden channel after a real foreground playback-start event, not an HTTP reachability result.
 - Protected playback during background refresh by relocating the channel that is actually playing when the refresh completes. Playlist deletion invalidates any in-flight refresh so deleted sources cannot be re-added.
+- Made the manual hidden-channel check use a stable channel snapshot and re-resolve results against the current playlist after network checks. This prevents stale channel indexes from targeting the wrong channel if a playlist refresh or deletion occurs during the check; the snapshot grouping is linear rather than rescanning the full playlist for every hidden channel.
 - No APKs or artifacts have been generated for these latest changes.
 
 ## Existing implementation inherited from the audited baseline
@@ -42,6 +43,8 @@ Updated: 2026-11-04
 - Automatic hidden-channel checks/unhide policy from the V1 specification.
 - Independent licence activation and Worker end-to-end validation for the new package.
 - Full UI redesign and regression testing.
+- Review/integration of the existing `YouTubeStreamResolver`: it is currently not called by the playback path. Settings explicitly identify YouTube WebView watch-page compatibility mode, so native-first YouTube playback is still pending and must not be described as implemented.
+- The manual hidden-channel check is race-safe now, but it remains sequential HTTP reachability checking. It does not prove playback and does not automatically unhide channels; bounded parallel scanning and any automatic policy remain pending.
 
 ## Release gate
 No APK release/prerelease or final release until the user explicitly approves. Device testing must be reported separately from compilation.
