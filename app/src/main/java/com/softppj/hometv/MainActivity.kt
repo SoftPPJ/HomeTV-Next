@@ -260,8 +260,12 @@ class MainActivity: Activity() {
         if(startupHiddenScanScheduled || safeStartupMode || !licenseReady)return
         startupHiddenScanScheduled=true
         handler.postDelayed({
-            if(!isFinishing && !isDestroyed && appInForeground && licenseReady &&
-                !safeStartupMode && channels.isNotEmpty() &&
+            if(isFinishing || isDestroyed)return@postDelayed
+            if(!appInForeground){
+                startupHiddenScanScheduled=false
+                return@postDelayed
+            }
+            if(licenseReady && !safeStartupMode && channels.isNotEmpty() &&
                 prefs.getBoolean("auto_hidden_channel_check",true)){
                 checkHiddenChannelsNow(showResults=false)
             }
@@ -1648,7 +1652,7 @@ class MainActivity: Activity() {
             }
             handler.post{
                 hiddenChannelCheckRunning=false
-                if(isFinishing || isDestroyed || !licenseReady)return@post
+                if(isFinishing || isDestroyed || !licenseReady || !appInForeground)return@post
                 // Resolve results against the current list, not stale numeric
                 // indexes from before a background refresh or playlist deletion.
                 val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct().toMutableList()
@@ -2049,6 +2053,7 @@ class MainActivity: Activity() {
     override fun onResume(){
         super.onResume()
         appInForeground=true
+        if(licenseReady)scheduleStartupHiddenChannelScan()
         val url=suspendedPlaybackUrl
         val identity=suspendedPlaybackIdentity
         suspendedPlaybackUrl=null
@@ -6496,6 +6501,8 @@ class MainActivity: Activity() {
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
+        root.addView(settingsToggle("Check hidden channels automatically","auto_hidden_channel_check",true))
+        root.addView(label("Runs a quiet check 30 seconds after startup. It never delays playback or unhides channels automatically."))
         root.addView(settingsToggle("Auto Unhide Working Channels","auto_unhide_working_channels",false))
         root.addView(label("OFF by default. When ON, a channel hidden manually is restored only after it actually starts playing; URL reachability alone never unhides it."))
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
