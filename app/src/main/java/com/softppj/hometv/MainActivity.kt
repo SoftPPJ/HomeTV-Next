@@ -2738,8 +2738,6 @@ class MainActivity: Activity() {
             return
         }
         Toast.makeText(this,if(forceRebuild)"Rebuilding playlists from source…" else "Checking "+sources.size+" playlists for updates…",Toast.LENGTH_LONG).show()
-        val playingBeforeRefresh=channels.getOrNull(active)
-        val playingUrlBeforeRefresh=playingBeforeRefresh?.url
         // Take an immutable reference snapshot; grouping thousands of channels
         // on the TV UI thread causes visible freezes during refresh.
         val previousChannels=channels.toList()
@@ -2867,13 +2865,15 @@ class MainActivity: Activity() {
                     channels=nextChannels
                     if(forceRebuild)Toast.makeText(this,"Rebuilt "+updated+"/"+sources.size+" playlists • "+actualChannelCount()+" channels",Toast.LENGTH_LONG).show()
                 }
-                // A background refresh can reorder or remove entries while a
-                // channel is playing. Never leave active pointing to a different
-                // channel after replacing the channel list.
+                // Preserve whichever channel is playing when the refresh finishes,
+                // not whichever channel happened to be playing when the network
+                // request began. The viewer may have changed channels meanwhile.
                 if(active>=0){
-                    val stillPlaying=playingUrlBeforeRefresh
-                    val relocated=channels.indexOfFirst{it.url==stillPlaying &&
-                        (playingBeforeRefresh==null || it.source==playingBeforeRefresh.source)}
+                    val currentBeforeApply=previousChannels.getOrNull(active)
+                    val currentUrl=currentBeforeApply?.url
+                    val currentSource=currentBeforeApply?.source
+                    val relocated=channels.indexOfFirst{it.url==currentUrl &&
+                        (currentSource==null || it.source==currentSource)}
                     if(relocated>=0)active=relocated
                     else{
                         stopPlayback()
@@ -3332,6 +3332,8 @@ class MainActivity: Activity() {
     // Shared deletion path for Playlist Manager and the in-player playlist drawer.
     // Remove a source's channels from memory immediately, not only after refresh.
     private fun deletePlaylistSource(name:String){
+        // Invalidate an in-flight network refresh so it cannot re-add this source.
+        refreshGeneration++
         val items=playlists()
         val removed=items.firstOrNull{it.name==name} ?:return
         val wasPlaying=channels.getOrNull(active)?.source==name
@@ -3383,6 +3385,8 @@ class MainActivity: Activity() {
         unlockedGroupsThisSession.removeAll(groupsToClear)
     }
     private fun deletePlaylistAfterPinFailures(name:String){
+        // Invalidate an in-flight network refresh so it cannot re-add this source.
+        refreshGeneration++
         val items=playlists().toMutableList()
         val removed=items.firstOrNull{it.name==name}
         if(removed==null)return
