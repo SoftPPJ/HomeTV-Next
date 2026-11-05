@@ -49,6 +49,7 @@ class MainActivity: Activity() {
     private var hiddenChannelCheckRunning=false
     private var licenseOperationGeneration=0
     private var safeStartupMode=false
+    private class LicenseHttpException(val statusCode:Int,message:String):IllegalStateException(message)
     private fun saveLicenseExpiry(response:JSONObject){
         response.optString("expiry","").takeIf{it.isNotBlank()}?.let{prefs.edit().putString("license_expiry",it).apply()}
     }
@@ -69,7 +70,7 @@ class MainActivity: Activity() {
             val status=conn.responseCode
             val body=(if(status in 200..299)conn.inputStream else conn.errorStream)?.bufferedReader()?.use{it.readText()} ?: ""
             val result=try{JSONObject(body)}catch(_:Exception){JSONObject()}
-            if(status !in 200..299)throw IllegalStateException(result.optString("error","License server error: "+status))
+            if(status !in 200..299)throw LicenseHttpException(status,result.optString("error","License server error: "+status))
             // Never treat a 2xx HTTP response with an explicit rejection
             // or a malformed body as a valid license.
             if(body.isBlank() || result.length()==0)
@@ -157,8 +158,12 @@ class MainActivity: Activity() {
             showLicenseCheckingScreen()
         }
         thread{
+            var serverRejected=false
             val response=try{
                 licenseRequest("/validate",licensePayload())
+            }catch(e:LicenseHttpException){
+                serverRejected=e.statusCode in 400..499 && e.statusCode!=429
+                null
             }catch(e:Exception){null}
             val saved=response?.let{cache.saveVerified(it)} ?: false
             runOnUiThread{
@@ -172,7 +177,7 @@ class MainActivity: Activity() {
                         .putString("license_verified_device",installationId())
                         .putString("license_verified_token",token).apply()
                     if(!licenseReady){licenseReady=true;startLicensedApp()}
-                }else if(response==null && cachedAllowed){
+                }else if(response==null && cachedAllowed && !serverRejected){
                     // A transient network error does not invalidate a valid signed
                     // lease. It cannot extend the signed seven-day offline window.
                     android.util.Log.w("HomeTV","Background signed-lease refresh unavailable")
@@ -183,9 +188,11 @@ class MainActivity: Activity() {
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
                     licenseReady=false
-                    showLicenseScreen(if(response!=null)
-                        "The license server returned an invalid signed lease. Please retry activation."
-                    else "License verification failed. Connect to the internet and retry.")
+                    showLicenseScreen(when {
+                        serverRejected -> "The license server rejected this activation. Please reactivate or contact support."
+                        response!=null -> "The license server returned an invalid signed lease. Please retry activation."
+                        else -> "License verification failed. Connect to the internet and retry."
+                    })
                 }
             }
         }
