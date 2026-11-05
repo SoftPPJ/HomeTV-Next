@@ -36,7 +36,7 @@ const deviceLimit=x=>x.maxDevices==="unlimited"?"unlimited":Math.max(1,Number(x.
 const expiryExclusive=x=>{
  if(x.expiry==="unlimited")return Date.parse("2101-01-01T00:00:00+04:00");
  const value=String(x.expiry||"");
- if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return NaN;
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return NaN;
  const calendarCheck=Date.parse(value+"T00:00:00Z");
  if(!Number.isFinite(calendarCheck)||new Date(calendarCheck).toISOString().slice(0,10)!==value)return NaN;
  return Date.parse(value+"T00:00:00+04:00")+24*60*60*1000;
@@ -121,8 +121,9 @@ async function serve(req,env){
  }
  if(path==="/admin/create"){
   if(!env.ADMIN_TOKEN||req.headers.get("Authorization")!=="Bearer "+env.ADMIN_TOKEN)return json({error:"Unauthorized"},401);
-  const expiry=String(body.expiry||"unlimited");
-  if(expiry!=="unlimited" && (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)||!Number.isFinite(Date.parse(expiry+"T23:59:59Z"))))return json({error:"Invalid expiry"},400);
+  const requestedExpiry=String(body.expiry||"2100-12-31");
+  const expiry=requestedExpiry==="unlimited"?"2100-12-31":requestedExpiry;
+  if(!Number.isFinite(expiryExclusive({expiry})) || expiryExclusive({expiry})<=Date.now())return json({error:"Invalid or past expiry date"},400);
   const maxDevices=body.maxDevices==="unlimited"?"unlimited":Number(body.maxDevices??1);
   if(maxDevices!=="unlimited"&&(!Number.isInteger(maxDevices)||maxDevices<1||maxDevices>100))return json({error:"Invalid device limit"},400);
   const customer=customerFields(body);
@@ -163,7 +164,7 @@ async function serve(req,env){
   const token=crypto.randomUUID()+"-"+crypto.randomUUID();
   active[device]=await hash(token);row.sessions=active;row.device=null;row.tokenHash=null;
   await put(env,licensePath(env),JSON.stringify(records,null,2)+"\n",sha);
-  return json({ok:true,token,expiry:row.expiry});
+  return json({ok:true,token,expiry:displayExpiry(row)});
  }
  const token=String(body.token||"");
  if(token.length<20||token.length>200)return json({error:"Invalid token"},401);
