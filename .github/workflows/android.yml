@@ -1,14 +1,13 @@
-name: HomeTV Next - build test APK
+name: HomeTV Next - build and publish prerelease APK
 
 on:
-  # Build and verify the debug APK for development changes; never publish a release.
   push:
     branches:
       - new-app-v1-development
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -43,10 +42,17 @@ jobs:
           ls -lh "$APK"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep -F "package: name='com.softppj.myhometv.next'"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep -F "application-label:'My Home TV Next'"
-      - name: Upload verified APK artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish verified APK as prerelease
+        uses: softprops/action-gh-release@v2
         with:
-          name: HomeTV-Next-V1-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          tag_name: next-v1-test-${{ github.run_number }}
+          name: HomeTV Next V1 - Prerelease #${{ github.run_number }}
+          body: |
+            Automated test build for My Home TV Next.
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+
+            This is a prerelease for testing, not a stable production release.
+          prerelease: true
+          draft: false
+          files: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
