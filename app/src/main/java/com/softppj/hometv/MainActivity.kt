@@ -41,7 +41,7 @@ class MainActivity: Activity() {
     private val prefs by lazy { getSharedPreferences("hometv", MODE_PRIVATE) }
     private var channels = mutableListOf<Channel>()
     // Licensing is verified online before any cached or remote playlist is opened.
-    private val licenseApi="https://hometv-license.prasanthpjoy.workers.dev"
+    private val licenseApi="https://hometv-license-next.prasanthpjoy.workers.dev"
     private val licensedPlaylist="hometv://licensed-playlist"
     private var licenseReady=false
     private var licenseChecking=false
@@ -106,7 +106,7 @@ class MainActivity: Activity() {
             setBackgroundColor(0xFF101E31.toInt())
         }
         screen.addView(ImageView(this).apply{
-            setImageResource(R.drawable.hometv_icon)
+            setImageResource(R.drawable.hometv_launcher)
             scaleType=ImageView.ScaleType.FIT_CENTER
         },LinearLayout.LayoutParams((160*resources.displayMetrics.density).toInt(),(160*resources.displayMetrics.density).toInt()))
         screen.addView(TextView(this).apply{
