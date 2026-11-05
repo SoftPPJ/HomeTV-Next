@@ -63,6 +63,12 @@ async function handle(request, env) {
     return json({ ok: upstream.ok, service: "next-v1-license-gateway" }, upstream.ok ? 200 : 503);
   }
 
+  let validationBody = null;
+  if (incoming.pathname === "/validate" || incoming.pathname === "/validate-lease") {
+    try { validationBody = await request.clone().json(); }
+    catch { return json({ error: "Invalid JSON" }, 400); }
+  }
+
   const target = upstreamBase + incoming.pathname + incoming.search;
   const headers = new Headers();
   for (const name of ["content-type", "authorization"]) {
@@ -84,12 +90,7 @@ async function handle(request, env) {
     let body;
     try { body = JSON.parse(raw); } catch { return json({ error: "Invalid licensing backend response" }, 502); }
     if (!body || body.ok !== true) return json({ error: "License validation failed" }, 502);
-    let requestBody;
-    try {
-      const clone = request.clone();
-      requestBody = await clone.json();
-    } catch { return json({ error: "Invalid JSON" }, 400); }
-    return signedLease(env, requestBody, body);
+    return signedLease(env, validationBody, body);
   }
 
   const responseHeaders = new Headers();
