@@ -125,6 +125,8 @@ class MainActivity: Activity() {
         })
         setContentView(screen)
     }
+    private fun signedLicenseCache(token:String)=SignedLicenseCache(prefs,installationId(),token)
+
     private fun beginLicensedSession(){
         if(licenseChecking)return
         val token=prefs.getString("license_token",null)
@@ -133,25 +135,12 @@ class MainActivity: Activity() {
             showLicenseScreen()
             return
         }
-        val now=System.currentTimeMillis()
-        val verified=prefs.getLong("license_verified_at",0L)
-        val seen=prefs.getLong("license_last_clock",0L)
-        val expiry=prefs.getString("license_expiry",null)
-        val expiryTime=expiry?.let{value->
-            try{java.time.Instant.parse(value).toEpochMilli()}catch(_:Exception){
-                try{java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli()}catch(_:Exception){null}
-            }
-        }
-        // Only a recently server-verified, non-expired, non-blocked license
-        // can start from cache. A clock rollback forces online verification.
-        val cachedAllowed=verified>0L && now>=verified && now>=seen &&
-            now-verified<7L*24*60*60*1000 &&
-            expiryTime!=null && now<expiryTime &&
-            prefs.getBoolean("license_last_verified",false) &&
-            !prefs.getBoolean("license_validation_blocked",false) &&
-            prefs.getString("license_verified_device",null)==installationId() &&
-            prefs.getString("license_verified_token",null)==token
-        prefs.edit().putLong("license_last_clock",maxOf(now,seen)).apply()
+        // Only a cryptographically verified, device- and token-bound lease may
+        // authorize offline startup. The signed lease itself enforces expiry,
+        // clock rollback detection and the seven-day offline ceiling.
+        val cache=signedLicenseCache(token)
+        val cachedStatus=cache.status()
+        val cachedAllowed=cachedStatus.allowed
         licenseChecking=true
         val operation=++licenseOperationGeneration
         if(cachedAllowed){
@@ -162,36 +151,33 @@ class MainActivity: Activity() {
             showLicenseCheckingScreen()
         }
         thread{
-            val result=try{
-                val response=licenseRequest("/validate",licensePayload())
-                saveLicenseExpiry(response)
-                null
-            }catch(e:Exception){e.message?:"License validation failed"}
+            val response=try{
+                licenseRequest("/validate",licensePayload())
+            }catch(e:Exception){null}
+            val saved=response?.let{cache.saveVerified(it)} ?: false
             runOnUiThread{
                 if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                 licenseChecking=false
-                if(result==null){
+                if(response!=null && saved){
+                    saveLicenseExpiry(response)
                     prefs.edit().putBoolean("license_last_verified",true)
                         .putBoolean("license_validation_blocked",false)
                         .putLong("license_verified_at",System.currentTimeMillis())
-                        .putLong("license_last_clock",maxOf(System.currentTimeMillis(),prefs.getLong("license_last_clock",0L)))
                         .putString("license_verified_device",installationId())
                         .putString("license_verified_token",token).apply()
                     if(!licenseReady){licenseReady=true;startLicensedApp()}
-                }else if(cachedAllowed && !result.contains("expired",true) &&
-                    !result.contains("revoked",true) && !result.contains("not active",true) &&
-                    !result.contains("Invalid token",true)){
-                    // Temporary network failure: continue only within the short
-                    // validated cache window. Next startup will retry.
-                    android.util.Log.w("HomeTV","Background license check unavailable: "+result)
+                }else if(cachedAllowed){
+                    // A transient network error does not invalidate a valid signed
+                    // lease. It cannot extend the signed seven-day offline window.
+                    android.util.Log.w("HomeTV","Background signed-lease refresh unavailable")
                 }else{
+                    cache.clear()
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
                     licenseReady=false
-                    if(result.contains("expired",true)||result.contains("revoked",true)||
-                        result.contains("not active",true)||result.contains("Invalid token",true))
-                        prefs.edit().remove("license_token").remove("license_expiry").apply()
-                    showLicenseScreen("License verification failed: "+result)
+                    showLicenseScreen(if(response!=null)
+                        "The license server returned an invalid signed lease. Please retry activation."
+                    else "License verification failed. Connect to the internet and retry.")
                 }
             }
         }
@@ -300,6 +286,8 @@ class MainActivity: Activity() {
                     // Match V6: activation is followed by the standard /validate check.
                     val verified=licenseRequest("/validate",JSONObject()
                         .put("device",installationId()).put("token",token))
+                    if(!signedLicenseCache(token).saveVerified(verified))
+                        throw IllegalStateException("The license server returned an invalid signed lease")
                     activationResult=verified
                     null
                 }catch(e:Exception){e.message?:"Activation failed"}
@@ -335,6 +323,7 @@ class MainActivity: Activity() {
                     runOnUiThread{
                         if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
                         if(error==null){
+                            prefs.getString("license_token",null)?.let{signedLicenseCache(it).clear()}
                             prefs.edit().remove("license_token").remove("license_expiry")
                                 .putBoolean("license_last_verified",false).putBoolean("license_validation_blocked",true).apply()
                             licenseReady=false;channels.clear();showLicenseScreen("Device released successfully.")
