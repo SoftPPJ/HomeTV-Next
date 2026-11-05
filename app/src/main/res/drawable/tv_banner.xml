@@ -5,14 +5,29 @@
     <path android:fillColor="#102A63" android:pathData="M0,0h320v180h-320z"/>
     <path android:fillColor="#07152F" android:pathData="M0,132 L320,62 L320,180 L0,180 Z"/>
     <path android:fillColor="#1D4DB7" android:pathData="M0,0 L320,0 L320,18 L0,92 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M20,80 L65,42 Q68,39 72,42 L113,80 L106,87 L69,53 L27,87 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M34,82 L69,57 L104,82 V126 H34 Z"/>
-    <path android:fillColor="#07152F" android:pathData="M46,87 H92 V116 H46 Z"/>
-    <path android:fillColor="#FF9D16" android:pathData="M63,91 L82,101.5 L63,112 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M142,58 H151 V106 H142 Z M151,58 H176 V66 H151 Z M151,78 H172 V86 H151 Z M151,98 H176 V106 H151 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M181,58 H190 L202,91 L214,58 H223 L206,106 H198 Z"/>
-    <path android:fillColor="#FFCB28" android:pathData="M231,58 H276 V67 H258 V106 H248 V67 H231 Z"/>
-    <path android:fillColor="#FFCB28" android:pathData="M277,58 H287 L299,93 L311,58 H320 L302,106 H294 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M143,119 H160 V126 H150 V132 H159 V139 H150 V148 H143 Z M165,119 H172 L178,138 L184,119 H191 V148 H184 V133 L180,148 H176 L172,133 V148 H165 Z"/>
-    <path android:fillColor="#FF9D16" android:pathData="M137,158 Q222,139 309,158 L309,163 Q222,150 137,163 Z"/>
+    <!-- Colourful hand-drawn HomeTV house and play-screen mark -->
+    <path android:fillColor="#FFD83D" android:pathData="M15,30 Q18,18 28,22 Q36,13 43,25 Q54,25 52,37 Q48,45 37,42 L22,43 Q11,41 15,30 Z"/>
+    <path android:fillColor="#FFF1C8" android:strokeColor="#8A5A3B" android:strokeWidth="2"
+        android:pathData="M18,82 L69,43 L119,82 L116,132 Q115,137 109,137 H29 Q22,136 22,130 Z"/>
+    <path android:fillColor="#E94B3C" android:strokeColor="#B92E2B" android:strokeWidth="2"
+        android:pathData="M8,83 L66,34 Q70,31 75,35 L130,81 Q134,86 127,89 L119,91 L69,51 L20,91 L11,88 Q5,86 8,83 Z"/>
+    <path android:fillColor="#E9A34A" android:pathData="M96,48 L100,30 L110,30 L110,59 Z"/>
+    <path android:fillColor="#FFE35B" android:strokeColor="#2587D8" android:strokeWidth="2"
+        android:pathData="M34,87 Q34,83 39,83 H57 Q61,83 61,88 V113 H34 Z"/>
+    <path android:fillColor="#242B35" android:strokeColor="#343B45" android:strokeWidth="2"
+        android:pathData="M70,79 Q70,74 76,74 H106 Q112,74 112,80 V112 Q112,118 106,118 H76 Q70,118 70,112 Z"/>
+    <path android:fillColor="#FFFDF5" android:pathData="M76,81 H106 V111 H76 Z"/>
+    <path android:fillColor="#F04438" android:pathData="M86,85 L101,96 L86,107 Z"/>
+    <path android:fillColor="#55B947" android:pathData="M7,140 Q24,132 41,139 Q58,132 76,139 Q96,132 113,139 L119,146 Q91,144 66,148 Q36,144 5,148 Z"/>
+    <path android:fillColor="#8D55C7" android:pathData="M9,125 Q4,120 10,116 Q14,111 19,116 Q25,112 28,119 Q30,125 23,129 Q17,133 14,128 Z"/>
+    <path android:fillColor="#FFD83D" android:pathData="M15,120 Q18,115 21,120 Q21,124 18,124 Q14,124 15,120 Z"/>
+    <path android:fillColor="#F28B24" android:pathData="M104,127 Q99,122 105,117 Q110,112 114,118 Q120,123 114,129 Q108,134 104,127 Z"/>
+    <path android:fillColor="#FFD83D" android:pathData="M108,121 Q111,116 114,121 Q114,125 111,125 Q107,125 108,121 Z"/>
+    <!-- Keep the existing HomeTV wordmark -->
+    <path android:fillColor="#FFFFFF" android:pathData="M151,58 H160 V106 H151 Z M160,58 H185 V66 H160 Z M160,78 H181 V86 H160 Z M160,98 H185 V106 H160 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M190,58 H199 L211,91 L223,58 H232 L215,106 H207 Z"/>
+    <path android:fillColor="#FFCB28" android:pathData="M240,58 H285 V67 H267 V106 H257 V67 H240 Z"/>
+    <path android:fillColor="#FFCB28" android:pathData="M286,58 H296 L308,93 L320,58 H320 L302,106 H294 Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M152,119 H169 V126 H159 V132 H168 V139 H159 V148 H152 Z M174,119 H181 L187,138 L193,119 H200 V148 H193 V133 L189,148 H185 L181,133 V148 H174 Z"/>
+    <path android:fillColor="#FF9D16" android:pathData="M146,158 Q229,139 315,158 L315,163 Q229,150 146,163 Z"/>
 </vector>
