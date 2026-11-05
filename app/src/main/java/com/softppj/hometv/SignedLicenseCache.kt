@@ -35,7 +35,7 @@ internal class SignedLicenseCache(
 
         // Public key only. The matching private key is stored as a Cloudflare Worker secret.
         const val PUBLIC_KEY_DER_BASE64 =
-            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1E3oG5IbBFm08JsZ/PJMITel6lXGh12HpoALy3aRyaPDBgf8qiHBsMmavZOZX+C9azWEzeVcbRx5JOaCDQ7ueGViS+CmLnBrajsGUWmuNneBgv3e3YyFY1diF/N9Fj11XzVFUrFqMEJncEWHueDijt6xW1ZUIol9TrVPrtnImh0lLS9d8yP9W+nUaF/Wx1BxwA8tlb6DZ3Otc4mFKPIQM1XyEdWKlD+x1oeH2deDRmcbj9s1EfpmRQIkWst8zdmGTKhnT7zjSm0AaPGUcVSQzaN2+hFkcJK7d0wxlMiwOWI8J8us38Zc1F3ut/clTYxBrrUNtsm4NurGakrzhQNcfwIDAQAB"
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5CShj6ILWiQhT97gwuFWoMJjlgQ/hxJNiBt4kx2D76fa5RFtmTvsxZBIoVoZHJoAl1Gw3F2xOKWTIadoyozTZo6OYnlRBCxccRtZwrJpBmJSKiGMih8/DNH5tq049xdr9/d85O0J2W0rApb5ARaHW/UYPjiRFG1VTQJGmIgzTTI9gDphiqf+vZOPC/7sCZ8VR9kHfPb42NRUvlutwq7UgAU6yR118ozDiEqjfN9MeP3XLDXJpbTDC3CzrOsHISWL7E3DZXhmZtO8bLTtlf3a3Y/YEsC9zI/BW6mtJVONxrJcKhsNnl9mc+SxY8pF+FYwrIwEtko1bNlYf90hdReQXwIDAQAB"
 
         private const val KEY_LEASE = "signed_license_lease"
         private const val KEY_SERVER_TIME = "signed_license_server_time"
