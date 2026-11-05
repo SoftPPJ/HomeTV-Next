@@ -166,11 +166,13 @@ class MainActivity: Activity() {
                         .putString("license_verified_device",installationId())
                         .putString("license_verified_token",token).apply()
                     if(!licenseReady){licenseReady=true;startLicensedApp()}
-                }else if(cachedAllowed){
+                }else if(response==null && cachedAllowed){
                     // A transient network error does not invalidate a valid signed
                     // lease. It cannot extend the signed seven-day offline window.
                     android.util.Log.w("HomeTV","Background signed-lease refresh unavailable")
                 }else{
+                    // A server response that cannot be verified is not a network
+                    // outage: fail closed and discard the cached entitlement.
                     cache.clear()
                     prefs.edit().putBoolean("license_validation_blocked",true)
                         .putBoolean("license_last_verified",false).commit()
