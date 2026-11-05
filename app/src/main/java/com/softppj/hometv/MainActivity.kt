@@ -791,12 +791,18 @@ class MainActivity: Activity() {
         val available=surfingIndices().toHashSet()
         val size=previousSequence.size
         val position=previousSequence.indexOf(index)
-        if(position>=0 && size>0){
+        val failedKey=channelKey(channels[index])
+        // The active row may be an alternate URL rather than the representative
+        // stored in the surfing sequence. Resolve its logical channel position.
+        val sequencePosition=if(position>=0)position else previousSequence.indexOfFirst{
+            it in channels.indices && channelKey(channels[it])==failedKey
+        }
+        if(sequencePosition>=0 && size>0){
             val direction=if(surfingDirection>=0)1 else -1
             for(step in 1..size){
-                val candidate=previousSequence[(position+direction*step+size)%size]
+                val candidate=previousSequence[(sequencePosition+direction*step+size)%size]
                 if(candidate in available && candidate in channels.indices &&
-                    channelKey(channels[candidate])!=channelKey(channels[index])){
+                    channelKey(channels[candidate])!=failedKey){
                     playIndex(preferredChannel(candidate))
                     return
                 }
@@ -1059,8 +1065,12 @@ class MainActivity: Activity() {
             return true
         }
         if(prefs.getBoolean("auto_skip_nonworking",true)){
+            // Capture order before excluding the failed channel. Rebuilding the
+            // cache first loses its old position and can send recovery to channel 1.
+            val previousSequence=surfingIndices()
             unavailableChannels.add(key)
-            moveAfterFailedChannelHidden(index,screen)
+            invalidateSurfingCache()
+            moveAfterFailedChannelHidden(index,screen,previousSequence)
         }else if(!prefs.getBoolean("first_failure_prompted_"+key,false)){
             promptFailedChannel(index,screen)
         }
