@@ -1,9 +1,11 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="320dp" android:height="180dp"
     android:viewportWidth="320" android:viewportHeight="180">
-    <path android:fillColor="#06132D" android:pathData="M0,0h320v180h-320z"/>
-    <path android:fillColor="#102A63" android:pathData="M0,0h320v180h-320z"/>
-    <path android:fillColor="#07152F" android:pathData="M0,132 L320,62 L320,180 L0,180 Z"/>
+    <path android:fillColor="#2FB3D8" android:pathData="M0,0h320v180h-320z"/>
+    <path android:fillColor="#36B9E0" android:pathData="M0,0h320v180h-320z"/>
+    <path android:fillColor="#239BCB" android:pathData="M0,132 L320,62 L320,180 L0,180 Z"/>
+    <!-- Crayon-like sky strokes and smiling sun echo the approved launcher drawing -->
+    <path android:strokeColor="#63D0EA" android:strokeWidth="1.2" android:pathData="M0,12 L320,12 M0,22 L320,22 M0,32 L320,32 M0,42 L320,42 M0,52 L320,52"/>
     <path android:fillColor="#1D4DB7" android:pathData="M0,0 L320,0 L320,18 L0,92 Z"/>
     <!-- Colourful hand-drawn HomeTV house and play-screen mark -->
     <path android:fillColor="#FFD83D" android:pathData="M15,30 Q18,18 28,22 Q36,13 43,25 Q54,25 52,37 Q48,45 37,42 L22,43 Q11,41 15,30 Z"/>
@@ -23,6 +25,10 @@
     <path android:fillColor="#FFD83D" android:pathData="M15,120 Q18,115 21,120 Q21,124 18,124 Q14,124 15,120 Z"/>
     <path android:fillColor="#F28B24" android:pathData="M104,127 Q99,122 105,117 Q110,112 114,118 Q120,123 114,129 Q108,134 104,127 Z"/>
     <path android:fillColor="#FFD83D" android:pathData="M108,121 Q111,116 114,121 Q114,125 111,125 Q107,125 108,121 Z"/>
+    <path android:fillColor="#FFD83D" android:pathData="M130,17 L133,7 L137,18 L146,12 L143,23 L153,24 L144,30 L150,39 L139,36 L135,47 L131,36 L120,41 L125,30 L115,25 L127,23 Z"/>
+    <path android:fillColor="#FFE35B" android:pathData="M121,26 Q122,14 135,14 Q148,14 149,27 Q149,40 135,41 Q121,40 121,26 Z"/>
+    <path android:fillColor="#242B35" android:pathData="M128,24 Q130,20 132,24 L131,27 L129,27 Z M139,24 Q141,20 143,24 L142,27 L140,27 Z"/>
+    <path android:strokeColor="#E94B3C" android:strokeWidth="1.8" android:strokeLineCap="round" android:pathData="M129,31 Q135,38 142,31"/>
     <!-- Keep the existing HomeTV wordmark -->
     <path android:fillColor="#FFFFFF" android:pathData="M151,58 H160 V106 H151 Z M160,58 H185 V66 H160 Z M160,78 H181 V86 H160 Z M160,98 H185 V106 H160 Z"/>
     <path android:fillColor="#FFFFFF" android:pathData="M190,58 H199 L211,91 L223,58 H232 L215,106 H207 Z"/>
