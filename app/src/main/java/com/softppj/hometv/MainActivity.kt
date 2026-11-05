@@ -146,6 +146,12 @@ class MainActivity: Activity() {
         if(cachedAllowed){
             licenseReady=true
             startLicensedApp()
+            // Match the V6 licensing requirement: validate locally on every
+            // launch, but contact the Worker only after the 24-hour recheck age.
+            if(!cachedStatus.needsRevalidation){
+                licenseChecking=false
+                return
+            }
         }else{
             licenseReady=false
             showLicenseCheckingScreen()
