@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-prerelease:
+  compile-and-unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
