@@ -4046,8 +4046,8 @@ class MainActivity: Activity() {
     private fun picturePresetKey(c:Channel)="picture_mode_"+hash(c.url)
     private fun selectedPicturePreset(c:Channel)=
         prefs.getString(picturePresetKey(c),"Standard")?.takeIf{picturePresets.containsKey(it)} ?: "Standard"
-    // Apply the same saved channel preset to Media3 using Media3's optional GL effects.
-    // The empty list is installed before prepare so a preset can also be changed during playback.
+    // Apply non-standard saved channel picture presets through Media3's optional GL effects.
+    // Standard mode deliberately leaves the native video rendering path untouched.
     @UnstableApi
     private fun media3PictureEffects(c:Channel):List<androidx.media3.common.Effect>{
         val preset=picturePresets[selectedPicturePreset(c)] ?: picturePresets.getValue("Standard")
