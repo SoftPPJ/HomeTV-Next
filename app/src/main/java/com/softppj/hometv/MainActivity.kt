@@ -1679,53 +1679,88 @@ class MainActivity: Activity() {
             }
             handler.post{
                 hiddenChannelCheckRunning=false
-                if(isFinishing || isDestroyed || !licenseReady || !appInForeground)return@post
-                // Resolve results against the current list, not stale numeric
-                // indexes from before a background refresh or playlist deletion.
-                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct().toMutableList()
+                if(isFinishing || isDestroyed || !licenseReady)return@post
+                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct()
                 if(results.isEmpty()){
-                    if(showResults)Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
+                    if(showResults && appInForeground)Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
                     return@post
                 }
-                if(!showResults){
-                    showBanner(results.size.toString()+" hidden channel URL(s) responded. Use Check hidden channels to review.")
+                if(!appInForeground || !showResults){
+                    val pending=prefs.getStringSet("pending_hidden_channel_results",emptySet()).orEmpty().toMutableSet()
+                    pending.addAll(results)
+                    prefs.edit().putStringSet("pending_hidden_channel_results",pending).apply()
+                    if(appInForeground)showPendingHiddenChannelPrompt()
                     return@post
                 }
-                val labels=results.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
-                val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
-                val dialog=AlertDialog.Builder(this)
-                    .setTitle("Hidden channel check complete • "+results.size+" found")
-                    .setAdapter(adapter){_,_->}
-                    .setNegativeButton("Close",null).create()
-                dialog.setOnShowListener{
-                    dialog.listView?.setOnItemClickListener{_,_,position,_->
-                        val key=results.getOrNull(position) ?:return@setOnItemClickListener
-                        val index=channels.indexOfFirst{channelKey(it)==key}
-                        if(index<0)return@setOnItemClickListener
-                        val c=channels[index]
-                        AlertDialog.Builder(this).setTitle(c.name)
-                            .setMessage("The stream URL responded successfully, but video playback is not verified.")
-                            .setPositiveButton("Unhide"){_,_->
-                                val currentIndex=channels.indexOfFirst{channelKey(it)==key}
-                                if(currentIndex>=0){
-                                    val current=channels[currentIndex]
-                                    if(isManuallyHidden(current))toggleManualHide(current)
-                                    temporaryFailureHidden.remove(key)
-                                    unavailableChannels.remove(key)
-                                    if(isGroupHidden(current.group))
-                                        Toast.makeText(this,"Restore the hidden group separately.",Toast.LENGTH_LONG).show()
-                                }
-                                results.removeAt(position)
-                                labels.removeAt(position)
-                                adapter.notifyDataSetChanged()
-                                dialog.setTitle("Reachable hidden channels • "+results.size+" remaining")
-                            }
-                            .setNegativeButton("Keep hidden",null).show()
-                    }
-                }
-                showSideDialog(dialog)
+                showPendingHiddenChannelPrompt(results)
             }
         }
+    }
+    private fun showPendingHiddenChannelPrompt(newResults:List<String>?=null){
+        if(!appInForeground || isFinishing || isDestroyed)return
+        val pending=(newResults ?: prefs.getStringSet("pending_hidden_channel_results",emptySet()).orEmpty().toList())
+            .filter{key->channels.any{channelKey(it)==key}}
+            .distinct()
+        if(pending.isEmpty())return
+        prefs.edit().remove("pending_hidden_channel_results").apply()
+        val count=pending.size
+        AlertDialog.Builder(this)
+            .setTitle("Working hidden channels found")
+            .setMessage("HomeTV found $count hidden channel(s) whose stream URLs responded. URL response does not guarantee video playback. Would you like to unhide all of them?")
+            .setPositiveButton("Unhide All"){_,_->
+                val updated=manuallyHiddenIds.toMutableSet()
+                pending.forEach{key->
+                    val matches=channels.filter{channelKey(it)==key}
+                    matches.forEach{channel->
+                        updated.remove(id(channel));updated.remove(hiddenChannelId(channel))
+                        temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
+                    }
+                }
+                prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+                invalidateSurfingCache()
+                val groupCount=pending.count{key->channels.any{channelKey(it)==key && isGroupHidden(it.group)}}
+                Toast.makeText(this,"Restored $count channel(s)."+if(groupCount>0)" Some remain hidden by group settings." else "",Toast.LENGTH_LONG).show()
+            }
+            .setNeutralButton("Review"){_,_->showHiddenChannelReview(pending)}
+            .setNegativeButton("Later"){_,_->
+                val remaining=prefs.getStringSet("pending_hidden_channel_results",emptySet()).orEmpty().toMutableSet()
+                remaining.addAll(pending);prefs.edit().putStringSet("pending_hidden_channel_results",remaining).apply()
+            }.show()
+    }
+    private fun showHiddenChannelReview(keys:List<String>){
+        val remaining=keys.filter{key->channels.any{channelKey(it)==key}}.toMutableList()
+        val labels=remaining.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
+        val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
+        val dialog=AlertDialog.Builder(this).setTitle("Reachable hidden channels • "+remaining.size)
+            .setAdapter(adapter){_,_->}
+            .setPositiveButton("Unhide All"){_,_->
+                val updated=manuallyHiddenIds.toMutableSet()
+                remaining.forEach{key->channels.filter{channelKey(it)==key}.forEach{c->
+                    updated.remove(id(c));updated.remove(hiddenChannelId(c))
+                    temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
+                }}
+                prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+                invalidateSurfingCache()
+                Toast.makeText(this,"Selected working hidden channels restored",Toast.LENGTH_LONG).show()
+            }.setNegativeButton("Close",null).create()
+        dialog.setOnShowListener{
+            dialog.listView?.setOnItemClickListener{_,_,position,_->
+                val key=remaining.getOrNull(position)?:return@setOnItemClickListener
+                val c=channels.firstOrNull{channelKey(it)==key}?:return@setOnItemClickListener
+                AlertDialog.Builder(this).setTitle(c.name)
+                    .setMessage("The stream URL responded successfully, but video playback is not verified.")
+                    .setPositiveButton("Unhide"){_,_->
+                        val updated=manuallyHiddenIds.toMutableSet()
+                        channels.filter{channelKey(it)==key}.forEach{updated.remove(id(it));updated.remove(hiddenChannelId(it))}
+                        prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
+                        temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
+                        invalidateSurfingCache()
+                        remaining.removeAt(position);labels.removeAt(position);adapter.notifyDataSetChanged()
+                        dialog.setTitle("Reachable hidden channels • "+remaining.size)
+                    }.setNegativeButton("Keep hidden",null).show()
+            }
+        }
+        showSideDialog(dialog)
     }
     private fun hiddenChannels(){
         val hidden=channelNumbers().filter{isManuallyHidden(channels[it]) || isGroupHidden(channels[it].group)}
@@ -2080,7 +2115,10 @@ class MainActivity: Activity() {
     override fun onResume(){
         super.onResume()
         appInForeground=true
-        if(licenseReady)scheduleStartupHiddenChannelScan()
+        if(licenseReady){
+            showPendingHiddenChannelPrompt()
+            scheduleStartupHiddenChannelScan()
+        }
         val url=suspendedPlaybackUrl
         val identity=suspendedPlaybackIdentity
         suspendedPlaybackUrl=null
@@ -2098,11 +2136,18 @@ class MainActivity: Activity() {
         if(licenseReady)checkEpgTune() else armEpgTune()
     }
     override fun onPause(){
+        val wasPlaying=active in channels.indices && !isFinishing
         appInForeground=false
-        if(active in channels.indices && !isFinishing){
+        if(wasPlaying){
             val current=channels[active]
             suspendedPlaybackUrl=current.url
             suspendedPlaybackIdentity=id(current)
+            // A low-priority hidden-channel scan may continue on its worker
+            // while the app is backgrounded; it never controls playback.
+            if(licenseReady && !safeStartupMode &&
+                prefs.getBoolean("auto_hidden_channel_check",true) &&
+                prefs.getBoolean("background_hidden_channel_check",true) &&
+                !hiddenChannelCheckRunning)checkHiddenChannelsNow(showResults=false)
             // stopPlayback saves VOD progress and releases Media3, LibVLC and WebView.
             stopPlayback()
         }
@@ -4044,13 +4089,22 @@ class MainActivity: Activity() {
         "Soft" to PicturePreset(0.92f,0.92f,0.90f)
     )
     private fun picturePresetKey(c:Channel)="picture_mode_"+hash(c.url)
+    private fun pictureCustomKey(c:Channel,field:String)="picture_custom_"+field+"_"+hash(c.url)
     private fun selectedPicturePreset(c:Channel)=
-        prefs.getString(picturePresetKey(c),"Standard")?.takeIf{picturePresets.containsKey(it)} ?: "Standard"
-    // Apply non-standard saved channel picture presets through Media3's optional GL effects.
-    // Standard mode deliberately leaves the native video rendering path untouched.
+        prefs.getString(picturePresetKey(c),"Standard")?.takeIf{it=="Custom" || picturePresets.containsKey(it)} ?: "Standard"
+    private fun selectedPictureValues(c:Channel):PicturePreset{
+        if(selectedPicturePreset(c)=="Custom"){
+            return PicturePreset(
+                (prefs.getInt(pictureCustomKey(c,"brightness"),50)-50).coerceIn(-50,50)/50f+1f,
+                (prefs.getInt(pictureCustomKey(c,"contrast"),50)-50).coerceIn(-50,50)/50f+1f,
+                (prefs.getInt(pictureCustomKey(c,"saturation"),50)-50).coerceIn(-50,50)/50f+1f
+            )
+        }
+        return picturePresets[selectedPicturePreset(c)] ?: picturePresets.getValue("Standard")
+    }
     @UnstableApi
     private fun media3PictureEffects(c:Channel):List<androidx.media3.common.Effect>{
-        val preset=picturePresets[selectedPicturePreset(c)] ?: picturePresets.getValue("Standard")
+        val preset=selectedPictureValues(c)
         val brightness=((preset.brightness-1f)*0.5f).coerceIn(-1f,1f)
         val contrast=((preset.contrast-1f)*0.5f).coerceIn(-1f,1f)
         val saturation=((preset.saturation-1f)*100f).coerceIn(-100f,100f)
@@ -4062,22 +4116,13 @@ class MainActivity: Activity() {
     }
     @UnstableApi
     private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
-        // Keep the default Media3 playback path on its native video surface.
-        // Installing an empty GL effect chain for the Standard preset is
-        // unnecessary and can force frame processing on TV decoders.
         if(selectedPicturePreset(c)=="Standard")return
-        try{
-            exo.setVideoEffects(media3PictureEffects(c))
-        }catch(e:Exception){
-            // Do not install an empty effect chain as a fallback: leave the
-            // decoder's original surface/rendering path untouched.
-            HomeTvDiagnostics.w("HomeTV","Media3 picture preset could not be applied; native video rendering retained",e)
-        }
+        try{exo.setVideoEffects(media3PictureEffects(c))}
+        catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)}
     }
-    // LibVLC uses its native video-adjustment controls for the same saved presets.
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
-        val preset=picturePresets[mode] ?: picturePresets.getValue("Standard")
+        val preset=selectedPictureValues(c)
         try{
             val clazz=vlc.javaClass
             clazz.getMethod("setVideoAdjustEnabled",Boolean::class.javaPrimitiveType).invoke(vlc,mode!="Standard")
@@ -4085,30 +4130,61 @@ class MainActivity: Activity() {
                 "setVideoAdjustSaturation" to preset.saturation).forEach{(method,value)->
                 try{clazz.getMethod(method,Float::class.javaPrimitiveType).invoke(vlc,value)}catch(_:Exception){}
             }
-        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","LibVLC picture preset unavailable",e)}
+        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","LibVLC picture adjustment unavailable",e)}
+    }
+    private fun applyPictureChoice(index:Int,c:Channel,mode:String){
+        prefs.edit().putString(picturePresetKey(c),mode)
+            .remove(pictureCustomKey(c,"brightness")).remove(pictureCustomKey(c,"contrast"))
+            .remove(pictureCustomKey(c,"saturation")).apply()
+        if(active==index){
+            vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+            player?.let{applyMedia3PicturePreset(it,c)}
+        }
+        showBanner(c.name+" picture mode: "+mode)
+    }
+    private fun configureManualPicture(activeIndex:Int,c:Channel){
+        val current=selectedPictureValues(c)
+        fun toSlider(value:Float)=((value-1f)*50f+50f).toInt().coerceIn(0,100)
+        val brightness=android.widget.SeekBar(this).apply{max=100;progress=toSlider(current.brightness)}
+        val contrast=android.widget.SeekBar(this).apply{max=100;progress=toSlider(current.contrast)}
+        val saturation=android.widget.SeekBar(this).apply{max=100;progress=toSlider(current.saturation)}
+        val layout=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(28,16,28,12)}
+        fun addControl(name:String,bar:android.widget.SeekBar){
+            val caption=TextView(this).apply{textSize=17f;setTextColor(android.graphics.Color.WHITE);text=name+": "+bar.progress+"%"}
+            bar.setOnSeekBarChangeListener(object:android.widget.SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(seekBar:android.widget.SeekBar?,value:Int,fromUser:Boolean){caption.text=name+": "+value+"%"}
+                override fun onStartTrackingTouch(seekBar:android.widget.SeekBar?){}
+                override fun onStopTrackingTouch(seekBar:android.widget.SeekBar?){}
+            })
+            layout.addView(caption);layout.addView(bar)
+        }
+        addControl("Brightness",brightness);addControl("Contrast",contrast);addControl("Saturation",saturation)
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Manual picture settings").setView(layout)
+            .setPositiveButton("Apply"){_,_->
+                prefs.edit().putString(picturePresetKey(c),"Custom")
+                    .putInt(pictureCustomKey(c,"brightness"),brightness.progress)
+                    .putInt(pictureCustomKey(c,"contrast"),contrast.progress)
+                    .putInt(pictureCustomKey(c,"saturation"),saturation.progress).apply()
+                if(active==activeIndex){
+                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                    player?.let{applyMedia3PicturePreset(it,c)}
+                }
+                showBanner(c.name+" custom picture settings saved")
+            }.setNeutralButton("Reset"){_,_->applyPictureChoice(activeIndex,c,"Standard")}
+            .setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
     private fun configureChannelPicture(activeIndex:Int){
         val c=channels.getOrNull(activeIndex)?:return
         val names=picturePresets.keys.toTypedArray()
         val selected=selectedPicturePreset(c)
-        val message="Choose a picture style for this channel. The same preset is saved per stream and applied by Media3 or LibVLC. Media3 video effects use GPU processing and may be unavailable with some decoder paths."
-        val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode").setMessage(message)
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode")
+            .setMessage("Choose a preset or open Manual adjustments. Settings are saved for this stream.")
             .setSingleChoiceItems(names,names.indexOf(selected).coerceAtLeast(0)){d,which->
-                val mode=names[which]
-                prefs.edit().putString(picturePresetKey(c),mode).apply()
-                if(active==activeIndex){
-                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-                    player?.let{applyMedia3PicturePreset(it,c)}
-                }
-                showBanner(c.name+" picture mode: "+mode);d.dismiss()
-            }.setNeutralButton("Reset to Standard"){_,_->
-                prefs.edit().remove(picturePresetKey(c)).apply()
-                if(active==activeIndex){
-                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-                    player?.let{applyMedia3PicturePreset(it,c)}
-                }
-                showBanner("Picture mode reset to Standard for "+c.name)
-            }.setNegativeButton("Close",null).create()
+                applyPictureChoice(activeIndex,c,names[which]);d.dismiss()
+            }.setPositiveButton("Manual adjustments"){_,_->configureManualPicture(activeIndex,c)}
+            .setNeutralButton("Reset to Standard"){_,_->applyPictureChoice(activeIndex,c,"Standard")}
+            .setNegativeButton("Close",null).create()
         showSideDialog(dialog)
     }
 
@@ -6663,9 +6739,11 @@ class MainActivity: Activity() {
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(settingsToggle("Check hidden channels automatically","auto_hidden_channel_check",true))
-        root.addView(label("Runs a quiet check 30 seconds after startup. It never delays playback or unhides channels automatically."))
+        root.addView(label("Checks hidden channels after startup without delaying playback."))
+        root.addView(settingsToggle("Check hidden channels when app is in background","background_hidden_channel_check",true))
+        root.addView(label("When you leave HomeTV after playback, a low-priority check continues while the app process remains alive. Results are saved and shown when you return. Android may stop background work if it kills the app."))
         root.addView(settingsToggle("Auto Unhide Working Channels","auto_unhide_working_channels",false))
-        root.addView(label("OFF by default. When ON, a channel hidden manually is restored only after it actually starts playing; URL reachability alone never unhides it."))
+        root.addView(label("OFF by default. When ON, a channel is restored only after actual playback succeeds. URL checks alone never unhide channels."))
         root.addView(button("EPG / XMLTV guide"){configureEpg()})
         root.addView(button("EPG time correction"){configureEpgOffset()})
         root.addView(button("Viewer profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
