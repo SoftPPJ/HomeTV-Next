@@ -4062,11 +4062,16 @@ class MainActivity: Activity() {
     }
     @UnstableApi
     private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
+        // Keep the default Media3 playback path on its native video surface.
+        // Installing an empty GL effect chain for the Standard preset is
+        // unnecessary and can force frame processing on TV decoders.
+        if(selectedPicturePreset(c)=="Standard")return
         try{
             exo.setVideoEffects(media3PictureEffects(c))
         }catch(e:Exception){
-            HomeTvDiagnostics.w("HomeTV","Media3 picture preset could not be applied; original video path retained",e)
-            try{exo.setVideoEffects(emptyList())}catch(_:Exception){}
+            // Do not install an empty effect chain as a fallback: leave the
+            // decoder's original surface/rendering path untouched.
+            HomeTvDiagnostics.w("HomeTV","Media3 picture preset could not be applied; native video rendering retained",e)
         }
     }
     // LibVLC uses its native video-adjustment controls for the same saved presets.
