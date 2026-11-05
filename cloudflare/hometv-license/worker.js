@@ -167,8 +167,7 @@ async function serve(req,env){
   return json({ok:true});
  }
  if(expired(row))return json({error:"License expired"},403);
- if(path==="/validate")return json({ok:true,expiry:row.expiry});
- if(path==="/validate-lease"){
+ if(path==="/validate"||path==="/validate-lease"){
   const signed=await issueSignedLease(env,row,device,tokenHash);
   return json({ok:true,expiry:row.expiry,...signed});
  }
