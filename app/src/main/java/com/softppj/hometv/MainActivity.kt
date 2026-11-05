@@ -6115,7 +6115,6 @@ class MainActivity: Activity() {
             })
             try{
                 applyMedia3PicturePreset(exo,c)
-                applyMedia3PicturePreset(exo,c)
                 exo.setMediaItem(mediaItemForStream(youtubeNativeStreamUrl ?: c.url))
                 exo.prepare()
                 exo.play()
