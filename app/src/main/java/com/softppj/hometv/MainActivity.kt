@@ -360,6 +360,9 @@ class MainActivity: Activity() {
     private var fallbackEngineOverride:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
+    // A YouTube page can finish more than once during redirects/SPA navigation.
+    // Initialise its startup helpers only once for each channel playback generation.
+    private var youtubePageInitializedGeneration=-1
     // Native YouTube is attempted once per selected URL; WebView remains the fallback.
     private var youtubeNativeAttemptedUrl:String?=null
     private var youtubeNativeStreamUrl:String?=null
@@ -779,14 +782,27 @@ class MainActivity: Activity() {
     private val recoveryPrompted=mutableSetOf<String>()
     private var failurePromptKey:String?=null
     private val failureSearches=mutableSetOf<String>()
-    private fun moveAfterFailedChannelHidden(index:Int,screen:FrameLayout){
+    private fun moveAfterFailedChannelHidden(index:Int,screen:FrameLayout,previousSequence:List<Int>){
         if(active!=index || videoScreen!==screen)return
-        val available=surfingIndices().filter{candidate->
-            candidate in channels.indices && channelKey(channels[candidate])!=channelKey(channels[index])
+        // Use the exact pre-hide sequence. Once a failed channel is hidden it is
+        // absent from the rebuilt cache, so a key-based lookup can lose its
+        // position (especially when a playlist contains duplicate channel keys)
+        // and incorrectly fall back to the first channel.
+        val available=surfingIndices().toHashSet()
+        val size=previousSequence.size
+        val position=previousSequence.indexOf(index)
+        if(position>=0 && size>0){
+            val direction=if(surfingDirection>=0)1 else -1
+            for(step in 1..size){
+                val candidate=previousSequence[(position+direction*step+size)%size]
+                if(candidate in available && candidate in channels.indices &&
+                    channelKey(channels[candidate])!=channelKey(channels[index])){
+                    playIndex(preferredChannel(candidate))
+                    return
+                }
+            }
         }
-        val next=nextSurfingIndex(index,surfingDirection,available)
-        if(next>=0)playIndex(preferredChannel(next))
-        else showHome() // No other surfable channel remains.
+        showHome() // No other surfable channel remains.
     }
     private fun promptFailedChannel(index:Int,screen:FrameLayout){
         if(index !in channels.indices || active!=index || videoScreen!==screen)return
@@ -811,15 +827,17 @@ class MainActivity: Activity() {
             }
             .setNeutralButton("Hide until restart"){_,_->
                 failurePromptKey=null
+                val previousSequence=surfingIndices()
                 temporaryFailureHidden.add(key)
                 unavailableChannels.add(key)
                 invalidateSurfingCache()
-                moveAfterFailedChannelHidden(index,screen)
+                moveAfterFailedChannelHidden(index,screen,previousSequence)
             }
             .setNegativeButton("Hide permanently"){_,_->
                 failurePromptKey=null
+                val previousSequence=surfingIndices()
                 if(!isManuallyHidden(c))toggleManualHide(c)
-                moveAfterFailedChannelHidden(index,screen)
+                moveAfterFailedChannelHidden(index,screen,previousSequence)
             }
             .setOnCancelListener{failurePromptKey=null}
             .create()
@@ -5870,7 +5888,9 @@ class MainActivity: Activity() {
                     super.onPageFinished(view,url)
                     // Expand the YouTube video surface to fill the TV display.
                     // CSS layout avoids browser Fullscreen API gesture restrictions.
-                    if(youtubeUri!=null && web===view && active==index && videoScreen===screen){
+                    if(youtubeUri!=null && web===view && active==index && videoScreen===screen &&
+                        youtubePageInitializedGeneration!=playbackGeneration){
+                        youtubePageInitializedGeneration=playbackGeneration
                         val fullScreenCss = """(function(){
                             if(document.getElementById('hometv-tv-fullscreen'))return;
                             var style=document.createElement('style');
@@ -5905,7 +5925,10 @@ class MainActivity: Activity() {
                         })();"""
                         view.evaluateJavascript(fullScreenCss,null)
                         requestYoutubeStartupAudio(view,index,screen)
-                        requestYoutubeEnhancedQuality(view,index,screen)
+                        // For live broadcasts let YouTube manage adaptive quality during
+                        // startup. Forcing a quality range in the first seconds can
+                        // restart a live/DVR segment and make the picture repeat.
+                        if(c.mediaType!="live")requestYoutubeEnhancedQuality(view,index,screen)
                         beginYoutubeProgressTracking(view,index,screen)
                     }
                 }
