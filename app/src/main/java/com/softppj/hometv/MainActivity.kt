@@ -4178,7 +4178,7 @@ class MainActivity: Activity() {
             if(prefs.getBoolean("clock_show_date",true))
                 values.add(java.text.SimpleDateFormat("dd MMM yyyy",java.util.Locale.getDefault()).format(now))
             if(prefs.getBoolean("clock_show_time",true)){
-                val pattern=if(prefs.getBoolean("clock_24h",true))"HH:mm" else "hh:mm a"
+                val pattern=if(prefs.getBoolean("clock_24h",false))"HH:mm:ss" else "hh:mm:ss a"
                 values.add(java.text.SimpleDateFormat(pattern,java.util.Locale.getDefault()).format(now))
             }
             if(prefs.getBoolean("clock_show_day",true))
@@ -4315,7 +4315,7 @@ class MainActivity: Activity() {
             "Show date: "+if(prefs.getBoolean("clock_show_date",true))"ON" else "OFF",
             "Show time: "+if(prefs.getBoolean("clock_show_time",true))"ON" else "OFF",
             "Show day: "+if(prefs.getBoolean("clock_show_day",true))"ON" else "OFF",
-            "Time format: "+if(prefs.getBoolean("clock_24h",true))"24-hour" else "12-hour",
+            "Time format: "+if(prefs.getBoolean("clock_24h",false))"24-hour" else "12-hour",
             "Text size: "+prefs.getInt("clock_size",18)+" sp",
             "Position: "+(prefs.getString("clock_position","Top right") ?: "Top right")
         )
@@ -4326,7 +4326,7 @@ class MainActivity: Activity() {
                     1->{prefs.edit().putBoolean("clock_show_date",!prefs.getBoolean("clock_show_date",true)).apply();updateClock();clockSettings()}
                     2->{prefs.edit().putBoolean("clock_show_time",!prefs.getBoolean("clock_show_time",true)).apply();updateClock();clockSettings()}
                     3->{prefs.edit().putBoolean("clock_show_day",!prefs.getBoolean("clock_show_day",true)).apply();updateClock();clockSettings()}
-                    4->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",true)).apply();updateClock();clockSettings()}
+                    4->{prefs.edit().putBoolean("clock_24h",!prefs.getBoolean("clock_24h",false)).apply();updateClock();clockSettings()}
                     5->{
                         val sizes=intArrayOf(12,14,16,18,20,24,28,32,36)
                         AlertDialog.Builder(this).setTitle("Clock text size")
