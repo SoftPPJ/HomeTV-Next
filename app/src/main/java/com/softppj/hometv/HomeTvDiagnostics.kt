@@ -1,6 +1,9 @@
 package com.softppj.hometv
 
 import android.content.Context
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
+import android.os.Build
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -22,10 +25,29 @@ internal object HomeTvDiagnostics {
     @Synchronized fun initialize(context: Context): Boolean {
         appContext = context.applicationContext
         val prefs = appContext!!.getSharedPreferences("hometv", Context.MODE_PRIVATE)
-        // Count actual uncaught application crashes, not ordinary background
-        // process eviction. Android may kill a paused app without an Activity
-        // callback; that must not trigger safe startup on the next launch.
-        val crashCount = prefs.getInt("startup_crash_count", 0)
+        // On Android 11+, use the OS exit reason so native crashes are
+        // counted while normal background/low-memory process eviction is not.
+        var crashCount = prefs.getInt("startup_crash_count", 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                val latest = manager?.getHistoricalProcessExitReasons(context.packageName, 0, 5)
+                    ?.maxByOrNull { it.timestamp }
+                val lastProcessed = prefs.getLong("last_processed_exit_timestamp", 0L)
+                if (latest != null && latest.timestamp > lastProcessed) {
+                    val crashed = latest.reason == ApplicationExitInfo.REASON_CRASH ||
+                        latest.reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                        latest.reason == ApplicationExitInfo.REASON_ANR ||
+                        latest.reason == ApplicationExitInfo.REASON_INITIALIZATION_FAILURE
+                    if (crashed) crashCount++
+                    prefs.edit()
+                        .putLong("last_processed_exit_timestamp", latest.timestamp)
+                        .putInt("startup_crash_count", crashCount)
+                        .putBoolean("safe_startup_mode", crashCount >= 2)
+                        .apply()
+                }
+            } catch (_: Exception) { }
+        }
         val safeMode = prefs.getBoolean("safe_startup_mode", false) || crashCount >= 2
         prefs.edit()
             .putBoolean("startup_in_progress", true)
@@ -40,12 +62,16 @@ internal object HomeTvDiagnostics {
                     val context = appContext
                     if (context != null) {
                         val crashPrefs = context.getSharedPreferences("hometv", Context.MODE_PRIVATE)
-                        val crashes = crashPrefs.getInt("startup_crash_count", 0) + 1
-                        crashPrefs.edit()
-                            .putInt("startup_crash_count", crashes)
-                            .putBoolean("safe_startup_mode", crashes >= 2)
-                            .putBoolean("startup_in_progress", false)
-                            .commit()
+                        crashPrefs.edit().putBoolean("startup_in_progress", false).commit()
+                        // Android 11+ records this crash in ApplicationExitInfo
+                        // on the next launch; counting here as well would double-count it.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                            val crashes = crashPrefs.getInt("startup_crash_count", 0) + 1
+                            crashPrefs.edit()
+                                .putInt("startup_crash_count", crashes)
+                                .putBoolean("safe_startup_mode", crashes >= 2)
+                                .commit()
+                        }
                     }
                 } catch (_: Exception) { }
                 e("HomeTV", "Uncaught crash on thread " + thread.name, error)
