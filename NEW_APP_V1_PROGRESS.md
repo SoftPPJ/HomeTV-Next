@@ -159,3 +159,10 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Large-playlist protections found in source include a 32 MiB playlist read cap, bounded three-thread playlist cache/refresh pools, cached playlist parsing off the UI thread, virtualized ListView rows, and cached Up/Down surfing indexes. These are source-level observations only; no 10k/20k stress test has been run.
 - Per-playlist logical channel numbering and optional continuous numbering are present in the indexing code. The runtime numbering and playback navigation still require Android TV verification.
 - Hidden-channel reachability scan explicitly warns that an HTTP response does not verify video playback; auto-unhide is tied to the foreground player Playing callback. Runtime behavior still needs device testing.
+
+## Playback settings drawer and picture adjustments — 2026-11-06
+
+- Commit b1371028: playback option dialogs now leave the playback-settings drawer open, so users can change aspect ratio, picture quality, buffering, audio, and other settings consecutively without reopening the drawer. The drawer closes only for Home and Full Settings destinations that replace playback.
+- Added a direct Picture adjustments entry to the playback-settings drawer, showing the active channel's selected preset.
+- Clarified in the picture-mode dialog that Cinema/Vivid/Natural/Soft are HomeTV-defined starting points, not TV calibration standards, and apply only to the selected channel. Engine Native (Original) adds no HomeTV picture correction.
+- Source committed only. No compile check or Android TV runtime test has yet been run for this commit.
