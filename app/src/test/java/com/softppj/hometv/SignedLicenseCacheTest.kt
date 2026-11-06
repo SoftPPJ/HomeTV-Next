@@ -119,9 +119,10 @@ class SignedLicenseCacheTest {
     }
 
     @Test
-    fun acceptsUnlimitedExpiryLeaseButStillUsesOfflineGrace() {
+    fun acceptsUnlimitedExpiryLeaseThroughEndOf2100ButStillUsesOfflineGrace() {
         val now = System.currentTimeMillis()
-        val envelope = signedEnvelope(serverTime = now, expiresAt = 253402300799000L)
+        val unlimitedBoundary = java.time.Instant.parse("2100-12-31T20:00:00Z").toEpochMilli()
+        val envelope = signedEnvelope(serverTime = now, expiresAt = unlimitedBoundary)
         assertTrue(cache().saveVerified(envelope.json))
         assertTrue(cache().status().allowed)
     }
