@@ -202,3 +202,14 @@ No final APK, prerelease, or release is approved or created by this audit.
 - `targetSdk` remains 32; review and update it only with Android TV compatibility testing.
 
 **Release decision:** source compilation and unit tests pass, but Home TV Next V1 is not yet approved as a final APK. No APK was assembled or published during this audit.
+
+## Playlist-source decision and follow-up corrections — 2026-11-06
+
+- Owner confirmed that the app should continue using the existing `TV.m3u` feed; do not integrate `Master.m3u`.
+- Updated `MainActivity.playlists()` so the default feed is `https://raw.githubusercontent.com/my-hometv/tv/main/TV.m3u`. Existing saved entries pointing to either the old TV feed or the former Master feed are migrated to one `TV` entry, preserving its enabled/disabled state. Other user-configured playlists remain intact.
+- Removed the `MASTER_PLAYLIST_URL` BuildConfig injection from `app/build.gradle.kts`.
+- Removed the `MASTER_PLAYLIST_URL` repository-variable requirement and validation step from the manual APK workflow. The workflow remains manual-only and still requires the explicit publish input before it will publish a prerelease.
+- V6 branch, V6 licensing, and all licensing source/Worker configuration were left untouched in this follow-up.
+- YouTube native-first playback was not enabled: the current WebView compatibility route is intentionally retained until its audio/playback behaviour can be tested and approved. The resolver remains present but is not invoked by MainActivity.
+- The compile-check workflow remains manual-only. A new compile/test run has not yet been triggered for these latest playlist-source changes; the previous successful run does not validate these new commits.
+- Physical Android TV tests, 10k+ playlist stress testing, production signing/release preparation, and release compliance review remain outstanding.
