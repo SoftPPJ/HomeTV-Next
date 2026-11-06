@@ -6792,7 +6792,7 @@ class MainActivity: Activity() {
         val report=HomeTvDiagnostics.readReport()
         AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
             .setMessage(if(report.isBlank())"No diagnostic logs have been recorded yet." else report)
-            .setPositiveButton("Export report"){_,_->exportDiagnosticReport()}
+            .setPositiveButton("Save report"){_,_->exportDiagnosticReport()}
             .setNegativeButton("Close",null).show()
     }
     private fun exportDiagnosticReport(){
@@ -6896,7 +6896,7 @@ class MainActivity: Activity() {
         root.addView(tvSection("SYSTEM & DIAGNOSTICS"))
         root.addView(button("Playback status & diagnostics"){showPlaybackDiagnostics()})
         root.addView(button("View diagnostic logs"){showDiagnosticLogs()})
-        root.addView(button("Export diagnostic report"){exportDiagnosticReport()})
+        root.addView(button("Save diagnostic report"){exportDiagnosticReport()})
         root.addView(button("Test network speed"){runNetworkDiagnostics()})
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
