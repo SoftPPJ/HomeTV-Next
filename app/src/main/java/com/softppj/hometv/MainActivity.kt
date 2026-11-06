@@ -1995,7 +1995,9 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(bufferProfiles,pending){_,i->pending=i}
             .setPositiveButton("OK"){_,_->
                 prefs.edit().putString("buffer_profile",bufferProfiles[pending]).apply()
-                if(active>=0)showPlaybackSettings() else settings()
+                if(settingsScreenVisible)settings()
+                else if(active>=0)showPlaybackSettings()
+                else settings()
             }.setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
@@ -4244,14 +4246,15 @@ class MainActivity: Activity() {
     }
     private fun configureChannelPicture(activeIndex:Int){
         val c=channels.getOrNull(activeIndex)?:return
-        val names=picturePresets.keys.toTypedArray()
+        val modes=picturePresets.keys.toList()
+        val names=modes.map{if(it=="Standard")"Engine Native (Original)" else it}.toTypedArray()
         val selected=selectedPicturePreset(c)
-        var pending=names.indexOf(selected).coerceAtLeast(0)
+        var pending=modes.indexOf(selected).coerceAtLeast(0)
         val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode")
-            .setMessage("UP/DOWN previews a preset. Press OK to save or BACK to cancel. Manual adjustments are separate.")
+            .setMessage("Engine Native (Original) keeps the player's original picture with no added correction. Other presets preview while browsing. OK saves; BACK cancels.")
             .setSingleChoiceItems(names,pending){_,which->
                 pending=which
-                previewPictureChoice(activeIndex,c,names[which])
+                previewPictureChoice(activeIndex,c,modes[which])
             }.setPositiveButton("OK",null)
             .setNeutralButton("Manual adjustments",null)
             .setNegativeButton("Cancel",null).create()
@@ -4263,12 +4266,12 @@ class MainActivity: Activity() {
                 override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
                     pending=position
                     list.setItemChecked(position,true)
-                    previewPictureChoice(activeIndex,c,names[position])
+                    previewPictureChoice(activeIndex,c,modes[position])
                 }
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
-                applyPictureChoice(activeIndex,c,names[pending]);dialog.dismiss()
+                applyPictureChoice(activeIndex,c,modes[pending]);dialog.dismiss()
             }
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener{
                 clearPicturePreview(activeIndex,c);dialog.dismiss();configureManualPicture(activeIndex,c)
@@ -5475,6 +5478,7 @@ class MainActivity: Activity() {
         }
     }
     private fun selectQuality(index:Int?=null){
+        val returnToSettings=settingsScreenVisible
         if(index!=null && isYoutubeChannel(index)){
             AlertDialog.Builder(this).setTitle("YouTube picture quality")
                 .setItems(arrayOf("Best available (experimental)","Prefer 1080p","Prefer 720p","Auto (YouTube controls resolution)","Show actual resolution / quality")){
@@ -5534,6 +5538,7 @@ class MainActivity: Activity() {
             previewQualityMode=null
             previewQualityIndex=null
             if(index==null || index==active)applyQuality()
+            if(returnToSettings)settings()
         }
         dialog.show()
     }
@@ -5628,6 +5633,7 @@ class MainActivity: Activity() {
         }
     }
     private fun selectScreenMode(channelIndex:Int?=null){
+        val returnToSettings=settingsScreenVisible
         val target=channelIndex?.takeIf{it in channels.indices}
         val key=if(target!=null)"screen_channel_"+hash(channels[target].url) else "screen_mode"
         val original=prefs.getString(key,null)
@@ -5664,6 +5670,7 @@ class MainActivity: Activity() {
             previewScreenMode=null
             applyVideoSize()
             if(confirmed && active>=0)showBanner("Screen: "+screenMode())
+            if(returnToSettings)settings()
         }
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
@@ -6915,7 +6922,7 @@ class MainActivity: Activity() {
         root.addView(settingsToggle("Try launch at device boot","boot",false))
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
         root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
-        root.addView(label("Picture quality controls available stream resolutions in Media3. LibVLC and fixed-quality streams may ignore this setting."))
+        root.addView(label("Auto uses the original quality offered by the active playback engine/stream. Manual resolution preferences apply only where the engine and stream support them."))
         root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
         root.addView(button("Date & time overlay"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
