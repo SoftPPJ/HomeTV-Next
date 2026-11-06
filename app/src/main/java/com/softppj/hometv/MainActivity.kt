@@ -2295,44 +2295,41 @@ class MainActivity: Activity() {
     }
     private fun playlists():MutableList<Playlist> {
         val arr=JSONArray(prefs.getString("playlists","[]"))
-        // A private tokenized Master URL may be injected at build time. Keep a
-        // public, non-tokenized feed as a safe fallback for local/debug builds.
-        val masterFeed=BuildConfig.MASTER_PLAYLIST_URL.trim().ifEmpty {
-            "https://raw.githubusercontent.com/my-hometv/tv/main/Master.m3u"
-        }
-        val oldFeed="https://raw.githubusercontent.com/my-hometv/tv/main/TV.m3u"
+        // Use the existing TV.m3u feed directly; no Master playlist or build-time
+        // playlist variable is required.
+        val tvFeed="https://raw.githubusercontent.com/my-hometv/tv/main/TV.m3u"
         val previousMasterFeed="https://raw.githubusercontent.com/my-hometv/tv/main/Master.m3u"
         var migrated=false
-        var masterAdded=false
+        var tvAdded=false
         val configured=mutableListOf<Playlist>()
         for(i in 0 until arr.length()) {
             val o=arr.getJSONObject(i)
             val original=o.getString("url")
             val name=o.optString("name","")
             val normalized=original.substringBefore('?').substringBefore('#').trimEnd('/')
-            val isPreviousMaster=name.equals("Master",true) ||
-                normalized.equals(oldFeed,true) ||
+            val isPreviousFeed=name.equals("Master",true) ||
+                normalized.equals(tvFeed,true) ||
                 normalized.equals(previousMasterFeed,true) ||
                 normalized.equals("https://github.com/my-hometv/tv/blob/main/TV.m3u",true) ||
                 normalized.equals("https://github.com/my-hometv/tv/blob/main/Master.m3u",true)
-            if(isPreviousMaster) {
-                if(!masterAdded) {
-                    configured.add(Playlist("Master",masterFeed,o.optBoolean("enabled",true)))
-                    masterAdded=true
+            if(isPreviousFeed) {
+                if(!tvAdded) {
+                    configured.add(Playlist("TV",tvFeed,o.optBoolean("enabled",true)))
+                    tvAdded=true
                 }
                 migrated=true
             } else {
                 configured.add(Playlist(name,original,o.optBoolean("enabled",true)))
             }
         }
-        if(!masterAdded) {
-            configured.add(0,Playlist("Master",masterFeed,true))
+        if(!tvAdded) {
+            configured.add(0,Playlist("TV",tvFeed,true))
             migrated=true
         }
         val result=mutableListOf(Playlist("HomeTV Live",licensedPlaylist)).apply{addAll(configured)}
         val selected=prefs.getString("selected_playlist_source",null)
         if(selected==null || selected.equals("TV",true) || selected.equals("Master",true)) {
-            prefs.edit().putString("selected_playlist_source","Master").apply()
+            prefs.edit().putString("selected_playlist_source","TV").apply()
         }
         if(migrated)savePlaylists(result)
         return result
