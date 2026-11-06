@@ -22,8 +22,15 @@ async function signedLease(env, body, upstreamData) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
     return json({ error: "Licensing backend returned an invalid expiry" }, 502);
   }
+  // Validate the calendar date in UTC before applying the UAE (+04:00)
+  // boundary. Converting UAE midnight to UTC yields the previous UTC date.
+  const calendarCheck = Date.parse(expiry + "T00:00:00Z");
+  if (!Number.isFinite(calendarCheck) ||
+      new Date(calendarCheck).toISOString().slice(0, 10) !== expiry) {
+    return json({ error: "Licensing backend returned an invalid expiry" }, 502);
+  }
   const midnight = Date.parse(expiry + "T00:00:00+04:00");
-  if (!Number.isFinite(midnight) || new Date(midnight).toISOString().slice(0, 10) !== expiry) {
+  if (!Number.isFinite(midnight)) {
     return json({ error: "Licensing backend returned an invalid expiry" }, 502);
   }
   const now = Date.now();
