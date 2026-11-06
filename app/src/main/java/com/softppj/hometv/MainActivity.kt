@@ -1968,21 +1968,24 @@ class MainActivity: Activity() {
         val options=arrayOf("Use universal default")+bufferProfiles
         val current=prefs.getString(key,null)
         val selected=if(current==null)0 else options.indexOf(current).coerceAtLeast(0)
+        var pending=selected
         AlertDialog.Builder(this).setTitle(c.name+" — Buffering")
-            .setSingleChoiceItems(options,selected){dialog,choice->
+            .setSingleChoiceItems(options,selected){_,choice->pending=choice}
+            .setPositiveButton("OK"){_,_->
                 prefs.edit().apply{
-                    if(choice==0)remove(key)
-                    else putString(key,bufferProfiles[choice-1])
+                    if(pending==0)remove(key)
+                    else putString(key,bufferProfiles[pending-1])
                 }.apply()
-                dialog.dismiss()
                 showBanner("Buffer setting saved • applies when channel next starts")
             }.setNegativeButton("Cancel",null).show()
     }
     private fun chooseBufferProfile(){
+        var pending=bufferProfiles.indexOf(prefs.getString("buffer_profile","Auto")).coerceAtLeast(0)
         AlertDialog.Builder(this).setTitle("Playback buffer")
-            .setSingleChoiceItems(bufferProfiles,bufferProfiles.indexOf(prefs.getString("buffer_profile","Auto")).coerceAtLeast(0)){dialog,i->
-                prefs.edit().putString("buffer_profile",bufferProfiles[i]).apply()
-                dialog.dismiss();if(active>=0)showPlaybackSettings() else settings()
+            .setSingleChoiceItems(bufferProfiles,pending){_,i->pending=i}
+            .setPositiveButton("OK"){_,_->
+                prefs.edit().putString("buffer_profile",bufferProfiles[pending]).apply()
+                if(active>=0)showPlaybackSettings() else settings()
             }.setNegativeButton("Cancel",null).show()
     }
     // Stream routing is independent of the user-selected engine and never
@@ -2040,14 +2043,15 @@ class MainActivity: Activity() {
             "LibVLC"->2
             else->0
         }
+        var pending=selected
         AlertDialog.Builder(this).setTitle(c.name+" — Player")
-            .setSingleChoiceItems(choices,selected){dialog,which->
+            .setSingleChoiceItems(choices,selected){_,which->pending=which}
+            .setPositiveButton("OK"){_,_->
                 prefs.edit().apply{
-                    if(which==0)remove("manual_engine_"+channelKey(c))
-                    else putString("manual_engine_"+channelKey(c),choices[which])
+                    if(pending==0)remove("manual_engine_"+channelKey(c))
+                    else putString("manual_engine_"+channelKey(c),choices[pending])
                 }.apply()
                 engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
-                dialog.dismiss()
                 if(active==i)playIndex(i)
             }.setNegativeButton("Cancel",null).show()
     }
@@ -5261,9 +5265,14 @@ class MainActivity: Activity() {
         qualityUpgradeTask=null
         applyQuality()
     }
+    private var previewQualityMode:String?=null
+    private var previewQualityIndex:Int?=null
     private fun applyQuality(){
         val exo=player ?:return
-        val mode=qualityMode()
+        val mode=if(previewQualityIndex==active)previewQualityMode ?: qualityMode() else qualityMode()
+        applyQualityMode(exo,mode)
+    }
+    private fun applyQualityMode(exo:androidx.media3.common.Player,mode:String){
         val maxHeight=when(mode){
             "Data Saver (360p)"->360
             "Standard (480p)"->480
@@ -5399,20 +5408,35 @@ class MainActivity: Activity() {
         val options=if(key!=null)arrayOf("Use universal default")+qualityModes else qualityModes
         val current=if(key!=null)prefs.getString(key,null) else prefs.getString("quality_global","Auto")
         val selected=if(key!=null && current==null)0 else options.indexOf(current).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Universal picture quality")
-            .setSingleChoiceItems(options,selected){dialog,choice->
+        var pending=selected
+        previewQualityIndex=index ?: active
+        previewQualityMode=if(key!=null && pending==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[pending]
+        val dialog=AlertDialog.Builder(this)
+            .setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Universal picture quality")
+            .setSingleChoiceItems(options,selected){_,choice->
+                pending=choice
+                previewQualityMode=if(key!=null && choice==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[choice]
+                if(index==null || index==active)player?.let{applyQualityMode(it,previewQualityMode!!)}
+            }
+            .setPositiveButton("OK"){_,_->
                 val editor=prefs.edit()
                 if(key!=null){
-                    if(choice==0)editor.remove(key) else editor.putString(key,options[choice])
+                    if(pending==0)editor.remove(key) else editor.putString(key,options[pending])
                 }else{
-                    editor.putString("quality_global",options[choice])
+                    editor.putString("quality_global",options[pending])
                     prefs.all.keys.filter{it.startsWith("quality_channel_")}.forEach{editor.remove(it)}
                 }
                 editor.apply()
-                applyQuality()
-                dialog.dismiss()
-                if(active>=0)showBanner("Quality: "+qualityMode()) else if(index==null)settings()
-            }.setNegativeButton("Cancel",null).show()
+                if(index==null || index==active)applyQuality()
+                showBanner("Picture quality saved")
+            }
+            .setNegativeButton("Cancel",null).create()
+        dialog.setOnDismissListener{
+            previewQualityMode=null
+            previewQualityIndex=null
+            if(index==null || index==active)applyQuality()
+        }
+        dialog.show()
     }
     private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","21:9","1:1","Original","Zoom 110%","Zoom 125%","Zoom 150%")
     private var previewScreenMode:String?=null
@@ -5531,13 +5555,11 @@ class MainActivity: Activity() {
         }
         val dialog=AlertDialog.Builder(this)
             .setTitle(if(target!=null)numberFor(target).toString()+". "+channels[target].name+" Settings — Aspect Ratio" else "Universal aspect ratio")
-            .setSingleChoiceItems(labels,selected){d,position->
+            .setSingleChoiceItems(labels,selected){_,position->
+                // Highlighting previews the aspect ratio; only OK saves it.
                 preview(position)
-                // Android TV remote OK on a list row is a completed selection.
-                commit()
-                d.dismiss()
             }
-            .setPositiveButton("Apply"){_,_->commit()}
+            .setPositiveButton("OK"){_,_->commit()}
             .setNegativeButton("Cancel",null).create()
         dialog.setOnDismissListener{
             previewScreenMode=null
