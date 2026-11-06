@@ -166,3 +166,39 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Added a direct Picture adjustments entry to the playback-settings drawer, showing the active channel's selected preset.
 - Clarified in the picture-mode dialog that Cinema/Vivid/Natural/Soft are HomeTV-defined starting points, not TV calibration standards, and apply only to the selected channel. Engine Native (Original) adds no HomeTV picture correction.
 - Source committed only. No compile check or Android TV runtime test has yet been run for this commit.
+
+
+## Final pre-release source audit — 2026-11-06
+
+**Branch audited:** `new-app-v1-development` (Home TV Next V1). The V6 branch and release branch were not changed.
+
+### Corrections committed during the audit
+- Fixed the Next V1 licence gateway's UAE expiry-date validation. It now validates the calendar date in UTC and separately calculates the UAE (+04:00) expiry boundary.
+- Replaced email/share-based diagnostic and settings-backup export with Android Storage Access Framework file pickers. Reports save as TXT; settings save as JSON; restore selects a JSON backup file.
+- Excluded licence tokens, device identity, signed offline lease data, parental PIN, and crash-recovery state from manual settings backups. Android automatic backup is disabled. A warning explains that playlist URLs may contain provider credentials.
+- Changed the diagnostic viewer to show a bounded preview while saving the complete available 30-day report.
+- Improved safe-startup crash counting: Android 11+ uses OS process-exit reasons for Java/native crashes and ANRs; older Android uses the uncaught-exception handler. Ordinary background process eviction is not counted as a crash.
+- Wired the connection-loss waiting/retry path into playback failures and moved network detection to Android NetworkCapabilities. Recovery retries the selected channel rather than treating every stream as broken.
+- Prevented EPG reminder polling from spinning at zero delay while the app is backgrounded.
+- Rebinds the active channel after playlist refresh if its list index changes, keeping player listeners and recovery callbacks aligned.
+- Keeps the playback options drawer available after buffer, engine, and alternative-stream changes.
+- Standardized menu terminology, removed an inactive duplicate menu item, and clarified the Android 10+ boot-launch restriction.
+- Made the compile-check workflow manual-only to conserve Actions quota and updated its GitHub Actions versions.
+- Added a required `MASTER_PLAYLIST_URL` repository variable to the manual APK workflow. The APK build stops if it is missing, rather than silently packaging the raw GitHub fallback.
+
+### Automated verification
+- Latest audited application source was checked by workflow run [42183183073](https://github.com/SoftPPJ/HomeTV/actions/runs/42183183073), commit `84bbfde1ba519ee774cd56e87e97423a2f42ad10`.
+- `:app:compileDebugKotlin` passed; `:app:testDebugUnitTest` passed. The run completed successfully.
+- Remaining compiler messages are Android deprecation warnings (system UI flags, `onBackPressed`, and `TRIM_MEMORY_RUNNING_LOW`) plus the Gradle 8.9 lifecycle warning. No Kotlin compilation errors were reported.
+- The automated workflow does not assemble an APK, run Android lint, run instrumentation tests, or exercise playback on physical TV hardware.
+
+### Release blockers and items requiring confirmation
+- **Licence service:** the app points to `hometv-license-next.prasanthpjoy.workers.dev`. The source gateway requires `UPSTREAM_BASE` and `LICENSE_SIGNING_PRIVATE_JWK`; the live deployment, secret bindings, and match with the public key embedded in the app have not been verified. The expiry fix is committed to source but has not been deployed to Cloudflare.
+- **Playlist source:** the app's non-workflow fallback remains the raw GitHub `Master.m3u` URL. The APK workflow now requires the repository variable `MASTER_PLAYLIST_URL`; that variable must be set to the approved Cloudflare Worker playlist URL before an APK build. The exact Worker URL was not available during this audit and was not guessed.
+- **YouTube:** `YouTubeStreamResolver` and its unit tests exist, but `MainActivity` currently uses the WebView compatibility path; native-first resolution is not wired into active playback. This differs from the native-first item in the V1 specification and should be explicitly accepted or restored before final approval.
+- **Hidden-channel checks:** the background/manual scan checks URL reachability, not successful video playback. Automatic unhide still requires an actual foreground playback success.
+- **Performance and device validation:** no 10k+ playlist stress run or physical Android TV test has been completed. Remote navigation, HLS/DASH/TS/MP4/LibVLC playback, picture controls, backup/restore via TV/USB/Drive, licence activation/offline grace, and crash recovery still require device testing.
+- **Release packaging:** the current APK workflow builds a debug APK and can publish a prerelease only when explicitly dispatched with its publish option. There is no production signing configuration or final stable release build in this branch. The included FFmpeg decoder is marked GPLv3 in the Gradle configuration; distribution compliance must be checked before distributing the APK.
+- `targetSdk` remains 32; review and update it only with Android TV compatibility testing.
+
+**Release decision:** source compilation and unit tests pass, but Home TV Next V1 is not yet approved as a final APK. No APK was assembled or published during this audit.
