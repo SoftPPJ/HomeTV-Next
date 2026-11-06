@@ -1969,7 +1969,7 @@ class MainActivity: Activity() {
         val current=prefs.getString(key,null)
         val selected=if(current==null)0 else options.indexOf(current).coerceAtLeast(0)
         var pending=selected
-        AlertDialog.Builder(this).setTitle(c.name+" — Buffering")
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Buffering")
             .setSingleChoiceItems(options,selected){_,choice->pending=choice}
             .setPositiveButton("OK"){_,_->
                 prefs.edit().apply{
@@ -1977,16 +1977,36 @@ class MainActivity: Activity() {
                     else putString(key,bufferProfiles[pending-1])
                 }.apply()
                 showBanner("Buffer setting saved • applies when channel next starts")
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(selected,true);list.setSelection(selected)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){pending=position;list.setItemChecked(position,true)}
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+        }
+        dialog.show()
     }
     private fun chooseBufferProfile(){
         var pending=bufferProfiles.indexOf(prefs.getString("buffer_profile","Auto")).coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle("Playback buffer")
+        val dialog=AlertDialog.Builder(this).setTitle("Playback buffer")
             .setSingleChoiceItems(bufferProfiles,pending){_,i->pending=i}
             .setPositiveButton("OK"){_,_->
                 prefs.edit().putString("buffer_profile",bufferProfiles[pending]).apply()
                 if(active>=0)showPlaybackSettings() else settings()
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(pending,true);list.setSelection(pending)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){pending=position;list.setItemChecked(position,true)}
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+        }
+        dialog.show()
     }
     // Stream routing is independent of the user-selected engine and never
     // overrides a confirmed working URL/engine or a manual engine selection.
@@ -2044,7 +2064,7 @@ class MainActivity: Activity() {
             else->0
         }
         var pending=selected
-        AlertDialog.Builder(this).setTitle(c.name+" — Player")
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Player")
             .setSingleChoiceItems(choices,selected){_,which->pending=which}
             .setPositiveButton("OK"){_,_->
                 prefs.edit().apply{
@@ -2053,7 +2073,17 @@ class MainActivity: Activity() {
                 }.apply()
                 engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
                 if(active==i)playIndex(i)
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(selected,true);list.setSelection(selected)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){pending=position;list.setItemChecked(position,true)}
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+        }
+        dialog.show()
     }
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
@@ -3881,8 +3911,11 @@ class MainActivity: Activity() {
         val codes=arrayOf("ml","en","hi","ta","ar","")
         val current=if(prefs.getBoolean("audio_use_stream_default",false)) "" else preferredAudioLanguage()
         val selected=codes.indexOf(current).let{if(it<0)0 else it}
-        AlertDialog.Builder(this).setTitle("Preferred audio language")
-            .setSingleChoiceItems(choices,selected){dialog,which->
+        var pending=selected
+        val dialog=AlertDialog.Builder(this).setTitle("Preferred audio language")
+            .setSingleChoiceItems(choices,selected){_,which->pending=which}
+            .setPositiveButton("OK"){_,_->
+                val which=pending
                 val code=codes[which]
                 if(code.isBlank()){
                     prefs.edit().remove("preferred_audio_language").putBoolean("audio_use_stream_default",true).apply()
@@ -3907,7 +3940,17 @@ class MainActivity: Activity() {
                     }
                 }
                 showBanner(if(code.isBlank())"Audio: stream default" else "Preferred audio: "+choices[which])
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(selected,true);list.setSelection(selected)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){pending=position;list.setItemChecked(position,true)}
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+        }
+        dialog.show()
     }
 
     private fun audioTracks(){
@@ -4094,8 +4137,11 @@ class MainActivity: Activity() {
     )
     private fun picturePresetKey(c:Channel)="picture_mode_"+hash(c.url)
     private fun pictureCustomKey(c:Channel,field:String)="picture_custom_"+field+"_"+hash(c.url)
+    private var previewPictureChannelKey:String?=null
+    private var previewPictureMode:String?=null
     private fun selectedPicturePreset(c:Channel)=
-        prefs.getString(picturePresetKey(c),"Standard")?.takeIf{it=="Custom" || picturePresets.containsKey(it)} ?: "Standard"
+        if(previewPictureChannelKey==channelKey(c)) previewPictureMode ?: (prefs.getString(picturePresetKey(c),"Standard") ?: "Standard")
+        else prefs.getString(picturePresetKey(c),"Standard")?.takeIf{it=="Custom" || picturePresets.containsKey(it)} ?: "Standard"
     private fun selectedPictureValues(c:Channel):PicturePreset{
         if(selectedPicturePreset(c)=="Custom"){
             return PicturePreset(
@@ -4120,9 +4166,10 @@ class MainActivity: Activity() {
     }
     @UnstableApi
     private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
-        if(selectedPicturePreset(c)=="Standard")return
-        try{exo.setVideoEffects(media3PictureEffects(c))}
-        catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)}
+        try{
+            if(selectedPicturePreset(c)=="Standard")exo.setVideoEffects(emptyList())
+            else exo.setVideoEffects(media3PictureEffects(c))
+        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)}
     }
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
@@ -4136,7 +4183,26 @@ class MainActivity: Activity() {
             }
         }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","LibVLC picture adjustment unavailable",e)}
     }
+    private fun previewPictureChoice(index:Int,c:Channel,mode:String){
+        previewPictureChannelKey=channelKey(c)
+        previewPictureMode=mode
+        if(active==index){
+            vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+            player?.let{applyMedia3PicturePreset(it,c)}
+        }
+    }
+    private fun clearPicturePreview(index:Int,c:Channel){
+        if(previewPictureChannelKey==channelKey(c)){
+            previewPictureChannelKey=null
+            previewPictureMode=null
+            if(active==index){
+                vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
+                player?.let{applyMedia3PicturePreset(it,c)}
+            }
+        }
+    }
     private fun applyPictureChoice(index:Int,c:Channel,mode:String){
+        clearPicturePreview(index,c)
         prefs.edit().putString(picturePresetKey(c),mode)
             .remove(pictureCustomKey(c,"brightness")).remove(pictureCustomKey(c,"contrast"))
             .remove(pictureCustomKey(c,"saturation")).apply()
@@ -4182,13 +4248,35 @@ class MainActivity: Activity() {
         val c=channels.getOrNull(activeIndex)?:return
         val names=picturePresets.keys.toTypedArray()
         val selected=selectedPicturePreset(c)
+        var pending=names.indexOf(selected).coerceAtLeast(0)
         val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode")
-            .setMessage("Choose a preset or open Manual adjustments. Settings are saved for this stream.")
-            .setSingleChoiceItems(names,names.indexOf(selected).coerceAtLeast(0)){d,which->
-                applyPictureChoice(activeIndex,c,names[which]);d.dismiss()
-            }.setPositiveButton("Manual adjustments"){_,_->configureManualPicture(activeIndex,c)}
-            .setNeutralButton("Reset to Standard"){_,_->applyPictureChoice(activeIndex,c,"Standard")}
-            .setNegativeButton("Close",null).create()
+            .setMessage("UP/DOWN previews a preset. Press OK to save or BACK to cancel. Manual adjustments are separate.")
+            .setSingleChoiceItems(names,pending){_,which->
+                pending=which
+                previewPictureChoice(activeIndex,c,names[which])
+            }.setPositiveButton("OK",null)
+            .setNeutralButton("Manual adjustments",null)
+            .setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView
+            list?.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list?.setItemChecked(pending,true);list?.setSelection(pending)
+            list?.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
+                    pending=position
+                    list.setItemChecked(position,true)
+                    previewPictureChoice(activeIndex,c,names[position])
+                }
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+                applyPictureChoice(activeIndex,c,names[pending]);dialog.dismiss()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener{
+                clearPicturePreview(activeIndex,c);dialog.dismiss();configureManualPicture(activeIndex,c)
+            }
+        }
+        dialog.setOnDismissListener{clearPicturePreview(activeIndex,c)}
         showSideDialog(dialog)
     }
 
@@ -5431,6 +5519,19 @@ class MainActivity: Activity() {
                 showBanner("Picture quality saved")
             }
             .setNegativeButton("Cancel",null).create()
+        dialog.setOnShowListener{
+            val list=dialog.listView
+            list?.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list?.setItemChecked(selected,true);list?.setSelection(selected)
+            list?.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+                override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
+                    pending=position;list.setItemChecked(position,true)
+                    previewQualityMode=if(key!=null && position==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[position]
+                    if(index==null || index==active)player?.let{applyQualityMode(it,previewQualityMode!!)}
+                }
+                override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
+            }
+        }
         dialog.setOnDismissListener{
             previewQualityMode=null
             previewQualityIndex=null

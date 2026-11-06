@@ -1,16 +1,20 @@
 name: HomeTV Next - build and publish prerelease APK
 
 on:
-  push:
-    branches:
-      - new-app-v1-development
   workflow_dispatch:
+    inputs:
+      publish_apk:
+        description: "Publish an APK only after explicit owner approval"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_apk == true
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
