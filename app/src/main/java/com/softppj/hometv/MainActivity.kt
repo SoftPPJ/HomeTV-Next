@@ -468,6 +468,7 @@ class MainActivity: Activity() {
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
     private var continuousChannelPosition=emptyMap<String,Int>()
+    private var channelSources=emptySet<String>()
     private fun channelKey(c:Channel)=HomeTvPolicies.channelKey(c)
     private fun ensureChannelIndex(){
         if(channelIndexOwner===channels && channelIndexSize==channels.size)return
@@ -477,6 +478,7 @@ class MainActivity: Activity() {
         liveChannelRepresentatives=snapshot.liveRepresentatives
         channelPosition=snapshot.perPlaylistNumbers
         continuousChannelPosition=snapshot.continuousNumbers
+        channelSources=channels.asSequence().map{it.source}.toSet()
         channelIndexOwner=channels
         channelIndexSize=channels.size
         invalidateSurfingCache()
@@ -682,9 +684,14 @@ class MainActivity: Activity() {
         return (channelByKey[channelKey(c)] ?:emptyList()).any{skippedIds.contains(id(channels[it]))}
     }
     private fun selectedPlaylistSource():String?{
-        val selected=prefs.getString("selected_playlist_source",null) ?:return null
-        return selected.takeIf{source->playlists().any{it.enabled && it.name==source} &&
-            channels.any{it.source==source}}
+        ensureChannelIndex()
+        val enabled=playlists().filter{it.enabled}.map{it.name}
+        return HomeTvPolicies.resolvePlaylistSource(
+            prefs.getString("selected_playlist_source",null),
+            channels.getOrNull(active)?.source,
+            enabled,
+            channelSources
+        )
     }
     private fun playlistIndices():List<Int>{
         val selected=selectedPlaylistSource()
@@ -849,7 +856,7 @@ class MainActivity: Activity() {
             val capabilities=manager.getNetworkCapabilities(network) ?:return false
             capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                 capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        }catch(_:Exception){true}
+        }catch(_:Exception){false}
     }
     private var networkRecoveryTask:Runnable?=null
     private fun awaitNetworkRecovery(index:Int,screen:FrameLayout){
@@ -1779,7 +1786,8 @@ class MainActivity: Activity() {
             handler.post{
                 hiddenChannelCheckRunning=false
                 if(isFinishing || isDestroyed || !licenseReady)return@post
-                val results=reachableKeys.filter{key->channels.any{channelKey(it)==key}}.distinct()
+                ensureChannelIndex()
+                val results=reachableKeys.filter{key->channelByKey.containsKey(key)}.distinct()
                 if(results.isEmpty()){
                     if(showResults && appInForeground)Toast.makeText(this,"Hidden channel check complete • No reachable channels found in the current playlists",Toast.LENGTH_LONG).show()
                     return@post
@@ -1797,28 +1805,34 @@ class MainActivity: Activity() {
     }
     private fun showPendingHiddenChannelPrompt(newResults:List<String>?=null){
         if(!appInForeground || isFinishing || isDestroyed)return
+        ensureChannelIndex()
         val pending=(newResults ?: prefs.getStringSet("pending_hidden_channel_results",emptySet()).orEmpty().toList())
-            .filter{key->channels.any{channelKey(it)==key}}
+            .filter{key->channelByKey.containsKey(key)}
             .distinct()
         if(pending.isEmpty())return
         prefs.edit().remove("pending_hidden_channel_results").apply()
         val count=pending.size
         AlertDialog.Builder(this)
-            .setTitle("Working hidden channels found")
-            .setMessage("HomeTV found $count hidden channel(s) whose stream URLs responded. URL response does not guarantee video playback. Would you like to unhide all of them?")
+            .setTitle("Reachable hidden channel URLs found")
+            .setMessage("HomeTV found $count hidden channel(s) whose stream URLs responded. This is a reachability check, not proof of video playback. Unhiding is your choice.")
             .setPositiveButton("Unhide All"){_,_->
+                ensureChannelIndex()
                 val updated=manuallyHiddenIds.toMutableSet()
                 pending.forEach{key->
-                    val matches=channels.filter{channelKey(it)==key}
-                    matches.forEach{channel->
+                    for(index in channelByKey[key].orEmpty()){
+                        val channel=channels.getOrNull(index) ?:continue
                         updated.remove(id(channel));updated.remove(hiddenChannelId(channel))
-                        temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
                     }
+                    temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
                 }
                 prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
                 invalidateSurfingCache()
-                val groupCount=pending.count{key->channels.any{channelKey(it)==key && isGroupHidden(it.group)}}
-                Toast.makeText(this,"Restored $count channel(s)."+if(groupCount>0)" Some remain hidden by group settings." else "",Toast.LENGTH_LONG).show()
+                val groupCount=pending.count{key->
+                    channelByKey[key].orEmpty().any{index->
+                        channels.getOrNull(index)?.let{isGroupHidden(it.group)}==true
+                    }
+                }
+                Toast.makeText(this,"Restored $count reachable channel(s)."+if(groupCount>0)" Some remain hidden by group settings." else "",Toast.LENGTH_LONG).show()
             }
             .setNeutralButton("Review"){_,_->showHiddenChannelReview(pending)}
             .setNegativeButton("Later"){_,_->
@@ -1827,35 +1841,46 @@ class MainActivity: Activity() {
             }.show()
     }
     private fun showHiddenChannelReview(keys:List<String>){
-        val remaining=keys.filter{key->channels.any{channelKey(it)==key}}.toMutableList()
-        val labels=remaining.map{key->channels.first{channelKey(it)==key}.name+"  —  Unhide"}.toMutableList()
+        ensureChannelIndex()
+        val remaining=keys.filter{channelByKey.containsKey(it)}.toMutableList()
+        fun matching(key:String)=channelByKey[key].orEmpty().mapNotNull{channels.getOrNull(it)}
+        val labels=remaining.map{key->matching(key).firstOrNull()?.name.orEmpty()+"  —  Unhide"}.toMutableList()
         val adapter=android.widget.ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,labels)
-        val dialog=AlertDialog.Builder(this).setTitle("Reachable hidden channels • "+remaining.size)
+        val dialog=AlertDialog.Builder(this).setTitle("Reachable hidden channel URLs • "+remaining.size)
             .setAdapter(adapter){_,_->}
             .setPositiveButton("Unhide All"){_,_->
+                ensureChannelIndex()
                 val updated=manuallyHiddenIds.toMutableSet()
-                remaining.forEach{key->channels.filter{channelKey(it)==key}.forEach{c->
-                    updated.remove(id(c));updated.remove(hiddenChannelId(c))
+                remaining.forEach{key->
+                    for(index in channelByKey[key].orEmpty()){
+                        val channel=channels.getOrNull(index) ?:continue
+                        updated.remove(id(channel));updated.remove(hiddenChannelId(channel))
+                    }
                     temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
-                }}
+                }
                 prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
                 invalidateSurfingCache()
-                Toast.makeText(this,"Selected working hidden channels restored",Toast.LENGTH_LONG).show()
+                Toast.makeText(this,"Selected reachable channels restored",Toast.LENGTH_LONG).show()
             }.setNegativeButton("Close",null).create()
         dialog.setOnShowListener{
             dialog.listView?.setOnItemClickListener{_,_,position,_->
                 val key=remaining.getOrNull(position)?:return@setOnItemClickListener
-                val c=channels.firstOrNull{channelKey(it)==key}?:return@setOnItemClickListener
+                ensureChannelIndex()
+                val c=matching(key).firstOrNull()?:return@setOnItemClickListener
                 AlertDialog.Builder(this).setTitle(c.name)
                     .setMessage("The stream URL responded successfully, but video playback is not verified.")
                     .setPositiveButton("Unhide"){_,_->
+                        ensureChannelIndex()
                         val updated=manuallyHiddenIds.toMutableSet()
-                        channels.filter{channelKey(it)==key}.forEach{updated.remove(id(it));updated.remove(hiddenChannelId(it))}
+                        for(index in channelByKey[key].orEmpty()){
+                            val channel=channels.getOrNull(index) ?:continue
+                            updated.remove(id(channel));updated.remove(hiddenChannelId(channel))
+                        }
                         prefs.edit().putStringSet("manually_hidden_channels",updated).apply()
                         temporaryFailureHidden.remove(key);unavailableChannels.remove(key)
                         invalidateSurfingCache()
                         remaining.removeAt(position);labels.removeAt(position);adapter.notifyDataSetChanged()
-                        dialog.setTitle("Reachable hidden channels • "+remaining.size)
+                        dialog.setTitle("Reachable hidden channel URLs • "+remaining.size)
                     }.setNegativeButton("Keep hidden",null).show()
             }
         }
