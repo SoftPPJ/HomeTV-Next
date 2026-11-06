@@ -4251,7 +4251,7 @@ class MainActivity: Activity() {
         val selected=selectedPicturePreset(c)
         var pending=modes.indexOf(selected).coerceAtLeast(0)
         val dialog=AlertDialog.Builder(this).setTitle(c.name+" • Picture mode")
-            .setMessage("Engine Native (Original) keeps the player's original picture with no added correction. Other presets preview while browsing. OK saves; BACK cancels.")
+            .setMessage("Presets are HomeTV-defined starting points, not TV calibration standards, and affect only this channel. Engine Native (Original) adds no HomeTV correction. Other presets preview while browsing. OK saves; BACK cancels.")
             .setSingleChoiceItems(names,pending){_,which->
                 pending=which
                 previewPictureChoice(activeIndex,c,modes[which])
@@ -5293,7 +5293,8 @@ class MainActivity: Activity() {
             "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "This channel aspect ratio: "+screenMode(),
             "Picture quality","Buffering","Audio tracks","Preferred audio language","Subtitles","Sleep timer","Playback engine",
-            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Channel volume"
+            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Channel volume",
+            "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -5314,7 +5315,10 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.END))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,choice,_->
-            close()
+            // Keep the playback-settings drawer underneath option dialogs. This
+            // lets users make several changes without reopening the drawer.
+            // Only destinations that replace the playback screen close it first.
+            if(choice==11 || choice==12)close()
             when(choice){
                 0->selectScreenMode(null)
                 1->selectScreenMode(active.takeIf{it>=0})
@@ -5330,6 +5334,7 @@ class MainActivity: Activity() {
                 11->showHome()
                 12->liveSettings()
                 13->if(active>=0)configureChannelVolume(active)
+                14->if(active>=0)configureChannelPicture(active)
             }
         }
         list.setOnKeyListener{_,code,event->
