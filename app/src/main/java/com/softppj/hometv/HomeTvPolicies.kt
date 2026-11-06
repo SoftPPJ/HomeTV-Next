@@ -9,7 +9,7 @@ internal object HomeTvPolicies {
  }
  fun nextClockValue(values:List<String>,currentIndex:Int):Pair<String,Int>?{
   if(values.isEmpty())return null
-  val index=Math.floorMod(currentIndex,values.size)
+  val index=((currentIndex%values.size)+values.size)%values.size
   return values[index] to ((index+1)%values.size)
  }
 }

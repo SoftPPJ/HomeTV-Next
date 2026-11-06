@@ -229,3 +229,10 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Native YouTube remains best-effort for public HLS livestream manifests; ordinary videos use WebView.
 - Android TV stress/device tests and live Worker/signing-key/activation verification remain outstanding. No Worker deployment, V6 change, licence record, release or prerelease is part of this commit.
 - Home navigation is card/row based rather than a persistent left rail; playback overlay navigation exists.
+
+
+### Additional verification coverage
+- Native YouTube quality preferences now apply to Media3 when a public HLS manifest is found; offline startup bypasses the network resolver and uses WebView fallback.
+- The native discovery screen shows a short status banner during the bounded lookup.
+- Added a signed-cache unit test proving that a far-future non-expiring lease is accepted while the existing seven-day offline grace remains enforced.
+- Worker expiry parsing is split into a pure helper with Node unit tests for unlimited, date-based and invalid expiries.

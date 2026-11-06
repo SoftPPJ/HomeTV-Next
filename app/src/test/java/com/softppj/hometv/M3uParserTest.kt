@@ -1,6 +1,12 @@
 package com.softppj.hometv
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk=[28])
 class M3uParserTest {
  @Test fun parsesAlternateUrlsAndMetadataHeaders(){
   val body="""#EXTM3U

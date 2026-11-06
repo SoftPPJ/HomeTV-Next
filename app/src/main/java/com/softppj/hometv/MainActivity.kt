@@ -5504,6 +5504,18 @@ class MainActivity: Activity() {
         val url=channels.getOrNull(index)?.url ?:return "Best available"
         return prefs.getString("youtube_quality_"+hash(url),"Best available") ?: "Best available"
     }
+    private fun applyYoutubeNativeQuality(exo:ExoPlayer,index:Int){
+        val preference=youtubeQualityPreference(index)
+        val maxHeight=when(preference){
+            "720p"->720
+            "1080p"->1080
+            else->Int.MAX_VALUE
+        }
+        exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
+            .setMaxVideoSize(Int.MAX_VALUE,maxHeight)
+            .setForceHighestSupportedBitrate(preference=="Best available")
+            .build()
+    }
     private fun requestYoutubeEnhancedQuality(viewer:WebView,index:Int,screen:FrameLayout){
         val preference=youtubeQualityPreference(index)
         if(preference=="Auto")return
@@ -6227,7 +6239,7 @@ class MainActivity: Activity() {
         // bounded to eight seconds and never bypasses authentication or access controls.
         // Unsupported, slow or failed attempts fall back to the original WebView page.
         if(youtubeUri!=null && youtubeNativeStreamUrl==null &&
-            youtubeNativeAttemptedUrl!=c.url && routeWebOverride!=true){
+            youtubeNativeAttemptedUrl!=c.url && routeWebOverride!=true && hasNetworkConnection()){
             youtubeNativeAttemptedUrl=c.url
             val attemptGeneration=++youtubeNativeGeneration
             val sourceScreen=screen
@@ -6240,6 +6252,9 @@ class MainActivity: Activity() {
                     playIndex(index)
                 }
             }
+            updateClock()
+            screen.requestFocus()
+            showBanner("Checking YouTube stream…")
             youtubeResolveTimeout=timeout
             handler.postDelayed(timeout,YouTubeStreamResolver.TIMEOUT_MS.toLong())
             thread(name="HomeTV-youtube-resolver"){
@@ -6431,6 +6446,7 @@ class MainActivity: Activity() {
             exo.volume=1f
             player=exo
             applyQuality()
+            if(youtubeNativeStreamUrl!=null)applyYoutubeNativeQuality(exo,index)
             applySubtitlePreference(c)
             val view=PlayerView(this).apply{
                 player=exo

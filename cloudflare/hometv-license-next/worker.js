@@ -1,3 +1,5 @@
+import { expiryTimestamp } from "./expiry.mjs";
+
 // Next V1 signing gateway. V6 remains the authoritative licensing backend.
 // This Worker delegates all activation, device, admin and playlist operations to
 // the existing V6 Worker. It only re-signs successful validation leases with the
@@ -20,28 +22,9 @@ async function signedLease(env, body, upstreamData) {
   }
   const expiry = String(upstreamData.expiry || "").trim();
   const now = Date.now();
-  let expiresAt;
-  if (expiry.toLowerCase() === "unlimited") {
-    // Keep the signed lease finite for Android's Long parser while making
-    // the entitlement non-expiring. The separate seven-day offline ceiling
-    // still requires periodic online revalidation.
-    expiresAt = Date.parse("9999-12-31T23:59:59Z");
-  } else {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
-      return json({ error: "Licensing backend returned an invalid expiry" }, 502);
-    }
-    // Validate the calendar date in UTC before applying the UAE (+04:00)
-    // boundary. Converting UAE midnight to UTC yields the previous UTC date.
-    const calendarCheck = Date.parse(expiry + "T00:00:00Z");
-    if (!Number.isFinite(calendarCheck) ||
-        new Date(calendarCheck).toISOString().slice(0, 10) !== expiry) {
-      return json({ error: "Licensing backend returned an invalid expiry" }, 502);
-    }
-    const midnight = Date.parse(expiry + "T00:00:00+04:00");
-    if (!Number.isFinite(midnight)) {
-      return json({ error: "Licensing backend returned an invalid expiry" }, 502);
-    }
-    expiresAt = midnight + 24 * 60 * 60 * 1000;
+  const expiresAt = expiryTimestamp(expiry);
+  if (expiresAt == null) {
+    return json({ error: "Licensing backend returned an invalid expiry" }, 502);
   }
   if (expiresAt <= now) return json({ error: "License expired" }, 403);
 
