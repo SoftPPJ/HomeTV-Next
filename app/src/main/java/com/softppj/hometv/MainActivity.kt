@@ -594,12 +594,19 @@ class MainActivity: Activity() {
     private var retryCount=0
     private var retryUrl:String?=null
     private var retryTask:Runnable?=null
+    private fun isFavorite(c:Channel):Boolean{
+        ensureChannelIndex()
+        return (channelByKey[channelKey(c)] ?: emptyList()).any{favoriteIds.contains(id(channels[it]))}
+    }
     private fun favorite(c:Channel){
+        ensureChannelIndex()
+        val variants=channelByKey[channelKey(c)] ?: listOfNotNull(channels.indexOf(c).takeIf{it>=0})
         val set=favoriteIds.toMutableSet()
-        if(!set.add(id(c)))set.remove(id(c))
+        val wasFavorite=variants.any{set.contains(id(channels[it]))}
+        if(wasFavorite)variants.forEach{set.remove(id(channels[it]))} else set.add(id(c))
         prefs.edit().putStringSet(viewerKey("favorites"),set).apply()
         invalidateSurfingCache()
-        Toast.makeText(this,if(set.contains(id(c)))"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
+        Toast.makeText(this,if(!wasFavorite)"Added to Favorites" else "Removed from Favorites",Toast.LENGTH_SHORT).show()
     }
     private val skippedIds get()=prefs.getStringSet("skip_channel_surfing",emptySet()) ?: emptySet()
     private fun isSkipped(c:Channel):Boolean{
@@ -651,7 +658,7 @@ class MainActivity: Activity() {
             !temporaryFailureHidden.contains(channelKey(channels[it])) &&
             !unavailableChannels.contains(channelKey(channels[it]))
         }
-        val filtered=if(favoritesOnly)base.filter{favoriteIds.contains(id(channels[it]))} else base
+        val filtered=if(favoritesOnly)base.filter{isFavorite(channels[it])} else base
         val result=orderedChannelIndices(if(favoritesOnly)"Favorites" else "All channels",filtered)
         // Build the key-to-position lookup once. DPAD Up/Down then advances
         // directly through the cached sequence instead of scanning 10k+ entries
@@ -1145,7 +1152,7 @@ class MainActivity: Activity() {
     }
     private fun channelLabel(index:Int):String{
         val c=channels[index]
-        val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if((channelByKey[channelKey(c)] ?:emptyList()).any{favoriteIds.contains(id(channels[it]))})"★ " else "")
+        val marks=(if(isLocked(c))"🔒 " else "")+(if(isSkipped(c))"🙈 " else "")+(if(isFavorite(c))"★ " else "")
         val hidden=if(isManuallyHidden(c) || isGroupHidden(c.group))"🙈 HIDDEN · " else ""
         return hidden+marks+numberFor(index)+". "+c.name
     }
@@ -1174,7 +1181,7 @@ class MainActivity: Activity() {
         prefs.edit().putString(viewerKey("recent_channels"),updated.toString()).apply()
     }
     private fun recentlyWatched(){
-        val saved=JSONArray(prefs.getString("recent_channels","[]"))
+        val saved=JSONArray(prefs.getString(viewerKey("recent_channels"),"[]"))
         val keys=(0 until saved.length()).map{saved.optString(it)}
         val indices=keys.mapNotNull{key->
             visibleIndices().firstOrNull{channelKey(channels[it])==key}
@@ -1799,7 +1806,7 @@ class MainActivity: Activity() {
     }
     private fun favorites(){
         prefs.edit().putBoolean("favorites_surfing",true).apply()
-        channelCollection("Favorites",visibleIndices().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && favoriteIds.contains(id(channels[it]))})
+        channelCollection("Favorites",visibleIndices().filter{!isManuallyHidden(channels[it]) && !isGroupHidden(channels[it].group) && isFavorite(channels[it])})
     }
     // User-defined ordering is stored independently for Favorites and each channel list.
     // The stable source + channel + URL identifier avoids mixing different playlists.
@@ -3591,7 +3598,9 @@ class MainActivity: Activity() {
         // Invalidate an in-flight network refresh so it cannot re-add this source.
         refreshGeneration++
         val items=playlists()
-        val removed=items.firstOrNull{it.name==name} ?:return
+        val removedIndex=items.indexOfFirst{it.name==name}
+        if(removedIndex<0)return
+        val removed=items[removedIndex]
         val wasPlaying=channels.getOrNull(active)?.source==name
         if(wasPlaying)stopPlayback()
         savePlaylists(items.filterNot{it.name==name})
@@ -3603,7 +3612,11 @@ class MainActivity: Activity() {
         channelIndexSize=-1
         invalidateSurfingCache()
         val selected=prefs.getString("selected_playlist_source",null)
-        val next=items.firstOrNull{it.name!=name && it.enabled && channels.any{c->c.source==it.name}}?.name
+        // Continue forward from the deleted playlist's former position, wrapping
+        // once, and skip disabled/empty playlists. This preserves playlist order.
+        val next=(1 until items.size).asSequence()
+            .map{items[(removedIndex+it)%items.size]}
+            .firstOrNull{it.enabled && channels.any{c->c.source==it.name}}?.name
         if(selected==name || wasPlaying){
             prefs.edit().apply{
                 if(next==null)remove("selected_playlist_source") else putString("selected_playlist_source",next)
@@ -4224,10 +4237,15 @@ class MainActivity: Activity() {
     }
     @UnstableApi
     private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
+        // Standard means native Media3 rendering. Do not install an empty
+        // video-effect chain: some TV decoders freeze when it is attached.
+        if(selectedPicturePreset(c)=="Standard")return
         try{
-            if(selectedPicturePreset(c)=="Standard")exo.setVideoEffects(emptyList())
-            else exo.setVideoEffects(media3PictureEffects(c))
-        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)}
+            exo.setVideoEffects(media3PictureEffects(c))
+        }catch(e:Exception){
+            // Keep the decoder's native surface path on adjustment failure.
+            HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)
+        }
     }
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
@@ -4626,7 +4644,7 @@ class MainActivity: Activity() {
             numericOverlay=this
         }
         val typed=channelDigits.toIntOrNull()
-        val channel=typed?.let{number->channelNumbers().getOrNull(number-1)}?.let{channels.getOrNull(it)}
+        val channel=typed?.let{number->numericChannelIndices().getOrNull(number-1)}?.let{channels.getOrNull(it)}
         view.text=if(channel!=null) channelDigits+". "+channel.name else "Channel "+channelDigits
         view.bringToFront()
     }
@@ -7111,6 +7129,34 @@ class MainActivity: Activity() {
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
             if(!drawerOpen){
                 val media=channels.getOrNull(active)?.mediaType
+                // Live streams may expose a seekable DVR window. Only consume
+                // LEFT/RIGHT when the active stream actually supports seeking.
+                if(media=="live" && (event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)){
+                    val exo=player
+                    val vlc=vlcPlayer
+                    if(exo?.isCurrentMediaItemSeekable==true || vlc?.isSeekable==true){
+                        val delta=if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)10_000L else -10_000L
+                        if(exo?.isCurrentMediaItemSeekable==true){
+                            val target=(exo.currentPosition+delta).coerceAtLeast(0L)
+                            exo.seekTo(if(exo.duration>0)target.coerceAtMost(exo.duration) else target)
+                        }else if(vlc?.isSeekable==true){
+                            val target=(vlc.time+delta).coerceAtLeast(0L)
+                            vlc.time=if(vlc.length>0)target.coerceAtMost(vlc.length) else target
+                        }
+                        return true
+                    }
+                }
+                if(media=="live" && event.keyCode in setOf(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE)){
+                    when(event.keyCode){
+                        KeyEvent.KEYCODE_MEDIA_PLAY->{player?.play();vlcPlayer?.play()}
+                        KeyEvent.KEYCODE_MEDIA_PAUSE->{player?.pause();vlcPlayer?.pause()}
+                        else->{
+                            player?.let{if(it.isPlaying)it.pause() else it.play()}
+                            vlcPlayer?.let{if(it.isPlaying)it.pause() else it.play()}
+                        }
+                    }
+                    return true
+                }
                 if(media in setOf("movie","series","music")){
                     if(isActiveYoutubeMedia()){
                         when(event.keyCode){
