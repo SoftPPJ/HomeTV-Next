@@ -49,6 +49,10 @@ class MainActivity: Activity() {
     private var hiddenChannelCheckRunning=false
     private var licenseOperationGeneration=0
     private var safeStartupMode=false
+    private val exportBackupRequest=7102
+    private val exportDiagnosticsRequest=7103
+    private val importBackupRequest=7104
+    private var pendingTextExport:String?=null
     private class LicenseHttpException(val statusCode:Int,message:String):IllegalStateException(message)
     private fun saveLicenseExpiry(response:JSONObject){
         response.optString("expiry","").takeIf{it.isNotBlank()}?.let{prefs.edit().putString("license_expiry",it).apply()}
@@ -2187,7 +2191,6 @@ class MainActivity: Activity() {
             // stopPlayback saves VOD progress and releases Media3, LibVLC and WebView.
             stopPlayback()
         }
-        HomeTvDiagnostics.markCleanExit(this)
         super.onPause()
     }
     private fun migrateLegacyIJKPreferences(){
@@ -2750,6 +2753,33 @@ class MainActivity: Activity() {
     }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
         super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==exportBackupRequest || requestCode==exportDiagnosticsRequest){
+            val payload=pendingTextExport
+            pendingTextExport=null
+            if(resultCode!=RESULT_OK || data?.data==null || payload==null)return
+            try{
+                contentResolver.openOutputStream(data.data!!,"wt")?.bufferedWriter(Charsets.UTF_8)?.use{it.write(payload)}
+                    ?:throw IllegalStateException("Cannot write to the selected destination")
+                Toast.makeText(this,"Saved successfully.",Toast.LENGTH_LONG).show()
+            }catch(e:Exception){
+                Toast.makeText(this,"Save failed: "+e.message,Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+        if(requestCode==importBackupRequest){
+            if(resultCode!=RESULT_OK)return
+            val uri=data?.data ?:return
+            thread{
+                try{
+                    val raw=contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use{it.readText()}
+                        ?:throw IllegalArgumentException("Cannot read selected backup")
+                    runOnUiThread{restoreSettingsFromText(raw)}
+                }catch(e:Exception){
+                    runOnUiThread{Toast.makeText(this,"Backup could not be opened: "+e.message,Toast.LENGTH_LONG).show()}
+                }
+            }
+            return
+        }
         if(requestCode!=importPlaylistRequest || resultCode!=RESULT_OK)return
         val uri=data?.data ?:return
         thread{
@@ -6618,6 +6648,18 @@ class MainActivity: Activity() {
             }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
     }
+    private fun launchTextExport(fileName:String,mime:String,payload:String,requestCode:Int){
+        pendingTextExport=payload
+        val intent=Intent(Intent.ACTION_CREATE_DOCUMENT).apply{
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type=mime
+            putExtra(Intent.EXTRA_TITLE,fileName)
+        }
+        try{startActivityForResult(intent,requestCode)}catch(e:Exception){
+            pendingTextExport=null
+            Toast.makeText(this,"Unable to open the TV file picker: "+e.message,Toast.LENGTH_LONG).show()
+        }
+    }
     private fun exportSettings(){
         val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
         val data=JSONObject()
@@ -6635,11 +6677,7 @@ class MainActivity: Activity() {
             }
         }
         val payload=JSONObject().put("format","HomeTV-settings-v1").put("settings",data).toString(2)
-        val intent=Intent(Intent.ACTION_SEND).apply{
-            type="text/plain";putExtra(Intent.EXTRA_SUBJECT,"HomeTV settings backup")
-            putExtra(Intent.EXTRA_TEXT,payload)
-        }
-        startActivity(Intent.createChooser(intent,"Export HomeTV settings"))
+        launchTextExport("HomeTV-settings-backup.json","application/json",payload,exportBackupRequest)
     }
     private fun mergePlaylistBackup(incoming:String):String{
         val merged=linkedMapOf<String,JSONObject>()
@@ -6669,90 +6707,86 @@ class MainActivity: Activity() {
         return JSONArray().apply{values.forEach{put(it)}}.toString()
     }
     private fun importSettings(){
-        val input=EditText(this).apply{
-            hint="Paste HomeTV-settings-v1 JSON backup"
-            minLines=6;maxLines=12;setSingleLine(false)
+        val intent=Intent(Intent.ACTION_OPEN_DOCUMENT).apply{
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type="application/json"
+            putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("application/json","text/plain","application/octet-stream"))
         }
-        AlertDialog.Builder(this).setTitle("Restore settings (not license or PIN)")
-            .setView(input).setPositiveButton("Continue"){_,_->
-                try{
-                    val backup=JSONObject(input.text.toString())
-                    require(backup.optString("format")=="HomeTV-settings-v1")
-                    val values=backup.getJSONObject("settings")
-                    // Validate the complete backup before offering either restore mode.
-                    val staged=mutableListOf<Pair<String,Any>>()
-                    val iterator=values.keys()
-                    while(iterator.hasNext()){
-                        val key=iterator.next()
-                        if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
-                            key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
-                            key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
-                        val item=values.getJSONObject(key)
-                        val value:Any=when(item.getString("type")){
-                            "string"->item.getString("value")
-                            "boolean"->item.getBoolean("value")
-                            "int"->item.getInt("value")
-                            "long"->item.getLong("value")
-                            "float"->item.getDouble("value").toFloat()
-                            "strings"->{
-                                val arr=item.getJSONArray("value")
-                                (0 until arr.length()).map{arr.getString(it)}.toSet()
-                            }
-                            else->throw IllegalArgumentException("Unsupported setting type for "+key)
-                        }
-                        staged.add(key to value)
+        try{startActivityForResult(intent,importBackupRequest)}catch(e:Exception){
+            Toast.makeText(this,"Unable to open the TV file picker: "+e.message,Toast.LENGTH_LONG).show()
+        }
+    }
+    private fun restoreSettingsFromText(raw:String){
+        try{
+            val backup=JSONObject(raw)
+            require(backup.optString("format")=="HomeTV-settings-v1")
+            val values=backup.getJSONObject("settings")
+            val staged=mutableListOf<Pair<String,Any>>()
+            val iterator=values.keys()
+            while(iterator.hasNext()){
+                val key=iterator.next()
+                if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
+                    key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
+                    key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
+                val item=values.getJSONObject(key)
+                val value:Any=when(item.getString("type")){
+                    "string"->item.getString("value")
+                    "boolean"->item.getBoolean("value")
+                    "int"->item.getInt("value")
+                    "long"->item.getLong("value")
+                    "float"->item.getDouble("value").toFloat()
+                    "strings"->{
+                        val arr=item.getJSONArray("value")
+                        (0 until arr.length()).map{arr.getString(it)}.toSet()
                     }
-                    val incomingKeys=staged.map{it.first}.toSet()
-                    AlertDialog.Builder(this).setTitle("Choose restore method")
-                        .setItems(arrayOf("Merge with existing settings","Replace existing settings")){_,mode->
-                            try{
-                                val edit=prefs.edit()
-                                if(mode==1){
-                                    // Replace only restorable app settings. Never remove
-                                    // activation, installation identity, parental PIN or credentials.
-                                    prefs.all.keys.filter{key->
-                                        key !in incomingKeys && key!="pin" && key!="last_url" &&
-                                            !key.startsWith("license_") &&
-                                            !key.contains("password",ignoreCase=true) &&
-                                            !key.contains("secret",ignoreCase=true) &&
-                                            !key.contains("token",ignoreCase=true) &&
-                                            !key.contains("credential",ignoreCase=true)
-                                    }.forEach{edit.remove(it)}
-                                }
-                                staged.forEach{(key,incoming)->
-                                    val value:Any=when{
-                                        mode==0 && key=="playlists" && incoming is String->
-                                            mergePlaylistBackup(incoming)
-                                        mode==0 && (key=="viewer_profiles" || key=="recent_channels" ||
-                                            (key.startsWith("viewer_") && key.endsWith("_recent_channels"))) &&
-                                            incoming is String->mergeStringArrayBackup(key,incoming)
-                                        mode==0 && incoming is Set<*>->
-                                            (prefs.getStringSet(key,emptySet()) ?: emptySet()) +
-                                                incoming.filterIsInstance<String>()
-                                        else->incoming
-                                    }
-                                    when(value){
-                                        is String->edit.putString(key,value)
-                                        is Boolean->edit.putBoolean(key,value)
-                                        is Int->edit.putInt(key,value)
-                                        is Long->edit.putLong(key,value)
-                                        is Float->edit.putFloat(key,value)
-                                        is Set<*>->edit.putStringSet(key,value.filterIsInstance<String>().toSet())
-                                    }
-                                }
-                                edit.apply()
-                                Toast.makeText(this,
-                                    (if(mode==0)"Merged " else "Replaced with ")+staged.size+
-                                        " settings. License and parental PIN were kept.",
-                                    Toast.LENGTH_LONG).show()
-                            }catch(e:Exception){
-                                Toast.makeText(this,"Restore failed: "+e.message,Toast.LENGTH_LONG).show()
-                            }
-                        }.setNegativeButton("Cancel",null).show()
-                }catch(e:Exception){
-                    Toast.makeText(this,"Invalid backup: "+e.message,Toast.LENGTH_LONG).show()
+                    else->throw IllegalArgumentException("Unsupported setting type for "+key)
                 }
-            }.setNegativeButton("Cancel",null).show()
+                staged.add(key to value)
+            }
+            val incomingKeys=staged.map{it.first}.toSet()
+            AlertDialog.Builder(this).setTitle("Choose restore method")
+                .setItems(arrayOf("Merge with existing settings","Replace existing settings")){_,mode->
+                    try{
+                        val edit=prefs.edit()
+                        if(mode==1){
+                            prefs.all.keys.filter{key->
+                                key !in incomingKeys && key!="pin" && key!="last_url" &&
+                                    !key.startsWith("license_") &&
+                                    !key.contains("password",ignoreCase=true) &&
+                                    !key.contains("secret",ignoreCase=true) &&
+                                    !key.contains("token",ignoreCase=true) &&
+                                    !key.contains("credential",ignoreCase=true)
+                            }.forEach{edit.remove(it)}
+                        }
+                        staged.forEach{(key,incoming)->
+                            val value:Any=when{
+                                mode==0 && key=="playlists" && incoming is String->mergePlaylistBackup(incoming)
+                                mode==0 && (key=="viewer_profiles" || key=="recent_channels" ||
+                                    (key.startsWith("viewer_") && key.endsWith("_recent_channels"))) &&
+                                    incoming is String->mergeStringArrayBackup(key,incoming)
+                                mode==0 && incoming is Set<*>->
+                                    (prefs.getStringSet(key,emptySet()) ?: emptySet()) + incoming.filterIsInstance<String>()
+                                else->incoming
+                            }
+                            when(value){
+                                is String->edit.putString(key,value)
+                                is Boolean->edit.putBoolean(key,value)
+                                is Int->edit.putInt(key,value)
+                                is Long->edit.putLong(key,value)
+                                is Float->edit.putFloat(key,value)
+                                is Set<*>->edit.putStringSet(key,value.filterIsInstance<String>().toSet())
+                            }
+                        }
+                        edit.apply()
+                        Toast.makeText(this,(if(mode==0)"Merged " else "Replaced with ")+staged.size+
+                            " settings. License and parental PIN were kept.",Toast.LENGTH_LONG).show()
+                    }catch(e:Exception){
+                        Toast.makeText(this,"Restore failed: "+e.message,Toast.LENGTH_LONG).show()
+                    }
+                }.setNegativeButton("Cancel",null).show()
+        }catch(e:Exception){
+            Toast.makeText(this,"Invalid backup: "+e.message,Toast.LENGTH_LONG).show()
+        }
     }
     private fun showDiagnosticLogs(){
         val report=HomeTvDiagnostics.readReport()
@@ -6767,12 +6801,8 @@ class MainActivity: Activity() {
             Toast.makeText(this,"No diagnostic logs are available yet.",Toast.LENGTH_SHORT).show()
             return
         }
-        val intent=Intent(Intent.ACTION_SEND).apply{
-            type="text/plain"
-            putExtra(Intent.EXTRA_SUBJECT,"HomeTV diagnostic report")
-            putExtra(Intent.EXTRA_TEXT,report.takeLast(200_000))
-        }
-        startActivity(Intent.createChooser(intent,"Share HomeTV diagnostic report"))
+        val stamp=java.text.SimpleDateFormat("yyyyMMdd-HHmm",java.util.Locale.ROOT).format(java.util.Date())
+        launchTextExport("HomeTV-diagnostics-"+stamp+".txt","text/plain",report.takeLast(200_000),exportDiagnosticsRequest)
     }
     private fun showPlaybackDiagnostics(){
         val current=channels.getOrNull(active)
@@ -7200,7 +7230,7 @@ class MainActivity: Activity() {
         failedUrlsThisSession.clear()
         initialTried.clear()
         alternativeAttempted.clear()
-        HomeTvDiagnostics.markCleanExit(this)
+        if(isFinishing)HomeTvDiagnostics.markCleanExit(this)
         super.onDestroy()
     }
 }
