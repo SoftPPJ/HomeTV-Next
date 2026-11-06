@@ -467,28 +467,15 @@ class MainActivity: Activity() {
     private var channelByKey=emptyMap<String,List<Int>>()
     private var channelPosition=emptyMap<String,Int>()
     private var continuousChannelPosition=emptyMap<String,Int>()
-    private fun channelKey(c:Channel)=c.mediaType+"|"+c.source.trim().lowercase(java.util.Locale.ROOT)+"|"+
-        c.name.trim().lowercase(java.util.Locale.ROOT)+"|"+c.group.trim().lowercase(java.util.Locale.ROOT)
+    private fun channelKey(c:Channel)=HomeTvPolicies.channelKey(c)
     private fun ensureChannelIndex(){
         if(channelIndexOwner===channels && channelIndexSize==channels.size)return
-        val groups=linkedMapOf<String,MutableList<Int>>()
-        channels.forEachIndexed{i,c->groups.getOrPut(channelKey(c)){mutableListOf()}.add(i)}
-        channelByKey=groups
-        channelRepresentatives=groups.values.map{it.first()}
-        liveChannelRepresentatives=channelRepresentatives.filter{channels[it].mediaType=="live"}
-        // Channel numbers refer to live logical channels only, never VOD
-        // entries or additional URLs for the same channel.
-        // Each playlist starts at channel 1. Alternate URLs share one logical number.
-        val perPlaylist=mutableMapOf<String,Int>()
-        channelPosition=liveChannelRepresentatives.associate{index->
-            val source=channels[index].source
-            val next=(perPlaylist[source] ?: 0)+1
-            perPlaylist[source]=next
-            channelKey(channels[index]) to next
-        }
-        continuousChannelPosition=liveChannelRepresentatives.mapIndexed{position,index->
-            channelKey(channels[index]) to (position+1)
-        }.toMap()
+        val snapshot=HomeTvPolicies.buildChannelIndex(channels)
+        channelByKey=snapshot.indicesByKey
+        channelRepresentatives=snapshot.representatives
+        liveChannelRepresentatives=snapshot.liveRepresentatives
+        channelPosition=snapshot.perPlaylistNumbers
+        continuousChannelPosition=snapshot.continuousNumbers
         channelIndexOwner=channels
         channelIndexSize=channels.size
         invalidateSurfingCache()
@@ -6238,8 +6225,12 @@ class MainActivity: Activity() {
         // Try a publicly exposed HLS livestream natively first. The resolver is
         // bounded to eight seconds and never bypasses authentication or access controls.
         // Unsupported, slow or failed attempts fall back to the original WebView page.
-        if(youtubeUri!=null && youtubeNativeStreamUrl==null &&
-            youtubeNativeAttemptedUrl!=c.url && routeWebOverride!=true && hasNetworkConnection()){
+        if(HomeTvPolicies.shouldAttemptNativeYoutube(
+                eligibleVideo=youtubeUri!=null && hasNetworkConnection(),
+                alreadyAttempted=youtubeNativeAttemptedUrl==c.url,
+                hasResolvedStream=youtubeNativeStreamUrl!=null,
+                forceWeb=routeWebOverride==true
+            )){
             youtubeNativeAttemptedUrl=c.url
             val attemptGeneration=++youtubeNativeGeneration
             val sourceScreen=screen
@@ -6546,7 +6537,11 @@ class MainActivity: Activity() {
         }
     }
     private fun fallbackYouTubeNativeToWeb(index:Int,screen:FrameLayout):Boolean{
-        if(youtubeNativeStreamUrl==null || active!=index || videoScreen!==screen)return false
+        if(!HomeTvPolicies.shouldFallbackNativeYoutube(
+                hasResolvedStream=youtubeNativeStreamUrl!=null,
+                isCurrentChannel=active==index,
+                isSameScreen=videoScreen===screen
+            ))return false
         youtubeNativeStreamUrl=null
         youtubeNativeGeneration++
         youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
