@@ -3533,7 +3533,7 @@ class MainActivity: Activity() {
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
         val deletedGroups=prefs.getStringSet("deleted_groups",emptySet()) ?: emptySet()
-        val parsed=M3uParser.parse(body,source,deletedGroups)
+        val parsed=M3uParser.parse(body,source,deletedGroups).toMutableList()
         addSavedWebTv(parsed)
         return parsed
     }
