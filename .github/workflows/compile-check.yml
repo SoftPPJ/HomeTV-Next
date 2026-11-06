@@ -1,9 +1,6 @@
 name: MyTV V1 compile and test only
 
 on:
-  push:
-    branches:
-      - new-app-v1-development
   workflow_dispatch:
 
 permissions:
