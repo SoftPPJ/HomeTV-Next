@@ -17,9 +17,19 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_apk == true
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      # The final build must use the approved Cloudflare Worker Master.m3u URL.
+      MASTER_PLAYLIST_URL: ${{ vars.MASTER_PLAYLIST_URL }}
     steps:
       - name: Check out selected branch
         uses: actions/checkout@v7
+      - name: Verify approved playlist endpoint
+        run: |
+          if [ -z "$MASTER_PLAYLIST_URL" ]; then
+            echo "::error::Set the repository variable MASTER_PLAYLIST_URL to the approved Cloudflare Worker Master.m3u URL before building."
+            exit 1
+          fi
+          echo "Approved playlist endpoint is configured."
       - name: Set up Java 17
         uses: actions/setup-java@v6
         with:
