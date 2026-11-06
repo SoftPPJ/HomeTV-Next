@@ -5347,8 +5347,9 @@ class MainActivity: Activity() {
     }
     // Per-channel gain is separate from Android/TV master volume. 100% is
     // the original stream level; 200% can boost quiet PCM streams.
+    private fun channelVolumeKey(c:Channel)="channel_volume_"+hash(channelKey(c))
     private fun channelVolumeGain(c:Channel):Float =
-        prefs.getInt("channel_volume_"+hash(c.url),20).coerceIn(0,200)/100f
+        prefs.getInt(channelVolumeKey(c),20).coerceIn(0,200)/100f
     private fun applyChannelVolume(){
         val c=channels.getOrNull(active) ?:return
         val gain=channelVolumeGain(c)
@@ -5361,7 +5362,7 @@ class MainActivity: Activity() {
     private fun configureChannelVolume(index:Int){
         val context:Context=this
         val c=channels.getOrNull(index) ?:return
-        val key="channel_volume_"+hash(c.url)
+        val key=channelVolumeKey(c)
         val level=SeekBar(context).apply{
             max=200
             progress=prefs.getInt(key,20).coerceIn(0,200)
