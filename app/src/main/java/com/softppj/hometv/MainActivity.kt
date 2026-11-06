@@ -5359,19 +5359,20 @@ class MainActivity: Activity() {
         web?.evaluateJavascript("try{var v=document.querySelector('video');if(v)v.volume="+webGain+";}catch(e){}",null)
     }
     private fun configureChannelVolume(index:Int){
+        val context:Context=this
         val c=channels.getOrNull(index) ?:return
         val key="channel_volume_"+hash(c.url)
-        val level=SeekBar(this).apply{
+        val level=SeekBar(context).apply{
             max=200
             progress=prefs.getInt(key,20).coerceIn(0,200)
         }
-        val label=TextView(this).apply{text="Channel volume: "+level.progress+"%";textSize=20f}
-        val layout=LinearLayout(this).apply{
+        val label=TextView(context).apply{text="Channel volume: "+level.progress+"%";textSize=20f}
+        val layout=LinearLayout(context).apply{
             orientation=LinearLayout.VERTICAL
             setPadding(30,20,30,20)
             addView(label)
             addView(level)
-            addView(TextView(this@MainActivity).apply{
+            addView(TextView(context).apply{
                 text="20% is the quiet default. 100% is the stream's original level; up to 200% can boost quiet channels. TV/soundbar master volume remains separate."
                 textSize=14f
             })
@@ -5390,7 +5391,7 @@ class MainActivity: Activity() {
             override fun onStartTrackingTouch(bar:SeekBar?){}
             override fun onStopTrackingTouch(bar:SeekBar?){}
         })
-        AlertDialog.Builder(this).setTitle(c.name+" channel volume").setView(layout)
+        AlertDialog.Builder(context).setTitle(c.name+" channel volume").setView(layout)
             .setPositiveButton("Save"){_,_->
                 prefs.edit().putInt(key,level.progress).apply()
                 if(active==index)applyChannelVolume()
