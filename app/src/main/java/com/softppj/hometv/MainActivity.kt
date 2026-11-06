@@ -6686,7 +6686,7 @@ class MainActivity: Activity() {
         }
     }
     private fun exportSettings(){
-        val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
+        val excluded=setOf("license_key","license_device","license_expiry","pin","last_url","startup_in_progress","startup_crash_count","safe_startup_mode","last_processed_exit_timestamp")
         val data=JSONObject()
         prefs.all.forEach{(key,value)->
             if(key in excluded || key.startsWith("license_") || key.startsWith("signed_license_") ||
@@ -6754,7 +6754,7 @@ class MainActivity: Activity() {
             val iterator=values.keys()
             while(iterator.hasNext()){
                 val key=iterator.next()
-                if(key=="pin" || key=="last_url" || key.startsWith("license_") || key.startsWith("signed_license_") ||
+                if(key=="pin" || key=="last_url" || key in setOf("startup_in_progress","startup_crash_count","safe_startup_mode","last_processed_exit_timestamp") || key.startsWith("license_") || key.startsWith("signed_license_") ||
                     key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
                     key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
                 val item=values.getJSONObject(key)
@@ -6779,7 +6779,7 @@ class MainActivity: Activity() {
                         val edit=prefs.edit()
                         if(mode==1){
                             prefs.all.keys.filter{key->
-                                key !in incomingKeys && key!="pin" && key!="last_url" &&
+                                key !in incomingKeys && key!="pin" && key!="last_url" && key !in setOf("startup_in_progress","startup_crash_count","safe_startup_mode","last_processed_exit_timestamp") &&
                                     !key.startsWith("license_") && !key.startsWith("signed_license_") &&
                                     !key.contains("password",ignoreCase=true) &&
                                     !key.contains("secret",ignoreCase=true) &&
