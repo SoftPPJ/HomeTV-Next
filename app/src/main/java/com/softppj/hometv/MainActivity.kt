@@ -1023,6 +1023,12 @@ class MainActivity: Activity() {
     // Recovery never changes either; only a viewer action may replace them.
     private fun handleEngineFailure(index:Int,screen:FrameLayout):Boolean{
         if(index !in channels.indices || active!=index || videoScreen!==screen)return true
+        // Do not mark a channel/URL as broken just because the TV lost internet.
+        // Wait for connectivity, then retry the same selected channel and engine.
+        if(prefs.getBoolean("auto_reconnect",true) && !hasNetworkConnection()){
+            awaitNetworkRecovery(index,screen)
+            return true
+        }
         val c=channels[index]
         val key=channelKey(c)
         val current=if(vlcPlayer!=null)"LibVLC" else "Media3"
