@@ -213,3 +213,19 @@ No final APK, prerelease, or release is approved or created by this audit.
 - YouTube native-first playback was not enabled: the current WebView compatibility route is intentionally retained until its audio/playback behaviour can be tested and approved. The resolver remains present but is not invoked by MainActivity.
 - The compile-check workflow remains manual-only. A new compile/test run has not yet been triggered for these latest playlist-source changes; the previous successful run does not validate these new commits.
 - Physical Android TV tests, 10k+ playlist stress testing, production signing/release preparation, and release compliance review remain outstanding.
+
+
+## Source compliance audit and corrections — 2026-11-06
+
+- Extracted M3U parsing into a pure component and added tests for alternate URLs, metadata, headers, deleted groups and 10,000 entries.
+- Fixed local `file:` playlist refresh so imported USB/device M3U files are parsed and cached rather than treated as HTTP connections.
+- Added a dedicated YouTube home section and a bounded native-first attempt for publicly exposed HLS livestream manifests, with WebView fallback for unsupported, slow or failed attempts.
+- Added licence revalidation when validated connectivity returns, plus a visible no-internet activation state. Transient network errors do not revoke a still-valid signed cache.
+- Fixed the Next V1 gateway's handling of `unlimited` licences; the signed lease is non-expiring but still subject to the seven-day offline revalidation ceiling.
+- Changed automatic skipping of unavailable channels to OFF by default.
+- Added tests for hidden-channel decisions, EPG ID/name matching and date/time/day rotation.
+- Confirmed from source: separate package/storage, cached startup/background refresh, bounded playlist parsing, indexed/virtualized channel list, per-playlist and optional combined numbering, playlist deletion successor, Media3/LibVLC, XMLTV guide/scheduling, signed lease cache, diagnostics and backup exclusion of licence/PIN.
+- Not integrated: an independent third IJK/FFmpeg player engine. The FFmpeg dependency is a Media3 decoder extension; GPLv3 distribution obligations and device compatibility need review before it can be called a supported third engine.
+- Native YouTube remains best-effort for public HLS livestream manifests; ordinary videos use WebView.
+- Android TV stress/device tests and live Worker/signing-key/activation verification remain outstanding. No Worker deployment, V6 change, licence record, release or prerelease is part of this commit.
+- Home navigation is card/row based rather than a persistent left rail; playback overlay navigation exists.

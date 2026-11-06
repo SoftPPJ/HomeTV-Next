@@ -48,6 +48,8 @@ class MainActivity: Activity() {
     private var startupHiddenScanScheduled=false
     private var hiddenChannelCheckRunning=false
     private var licenseOperationGeneration=0
+    private var licenseNetworkManager:android.net.ConnectivityManager?=null
+    private var licenseNetworkCallback:android.net.ConnectivityManager.NetworkCallback?=null
     private var safeStartupMode=false
     private val exportBackupRequest=7102
     private val exportDiagnosticsRequest=7103
@@ -132,6 +134,74 @@ class MainActivity: Activity() {
     }
     private fun signedLicenseCache(token:String)=SignedLicenseCache(prefs,installationId(),token)
 
+    private fun registerLicenseNetworkCallback(){
+        if(licenseNetworkCallback!=null)return
+        val manager=getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?:return
+        val callback=object:android.net.ConnectivityManager.NetworkCallback(){
+            override fun onAvailable(network:android.net.Network){handler.post{onLicenseNetworkAvailable()}}
+            override fun onCapabilitiesChanged(network:android.net.Network,capabilities:android.net.NetworkCapabilities){
+                if(capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)){
+                    handler.post{onLicenseNetworkAvailable()}
+                }
+            }
+        }
+        try{
+            manager.registerNetworkCallback(
+                android.net.NetworkRequest.Builder()
+                    .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET).build(),
+                callback
+            )
+            licenseNetworkManager=manager
+            licenseNetworkCallback=callback
+        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Unable to register licence connectivity callback",e)}
+    }
+    private fun unregisterLicenseNetworkCallback(){
+        val manager=licenseNetworkManager
+        val callback=licenseNetworkCallback
+        if(manager!=null && callback!=null)try{manager.unregisterNetworkCallback(callback)}catch(_:Exception){}
+        licenseNetworkManager=null
+        licenseNetworkCallback=null
+    }
+    private fun onLicenseNetworkAvailable(){
+        if(!hasNetworkConnection() || isFinishing || isDestroyed || licenseChecking)return
+        val token=prefs.getString("license_token",null)?.takeIf{it.isNotBlank()} ?:return
+        if(!licenseReady){beginLicensedSession();return}
+        val cache=signedLicenseCache(token)
+        val cached=cache.status()
+        if(!cached.allowed){beginLicensedSession();return}
+        if(!cached.needsRevalidation)return
+        licenseChecking=true
+        val operation=++licenseOperationGeneration
+        thread(name="HomeTV-license-revalidation"){
+            var rejected=false
+            val response=try{licenseRequest("/validate",licensePayload())}
+            catch(e:LicenseHttpException){rejected=e.statusCode in 400..499 && e.statusCode!=429;null}
+            catch(_:Exception){null}
+            val saved=response?.let{cache.saveVerified(it)} ?:false
+            runOnUiThread{
+                if(operation!=licenseOperationGeneration || isFinishing || isDestroyed)return@runOnUiThread
+                licenseChecking=false
+                if(response!=null && saved){
+                    saveLicenseExpiry(response)
+                    prefs.edit().putBoolean("license_last_verified",true)
+                        .putBoolean("license_validation_blocked",false)
+                        .putLong("license_verified_at",System.currentTimeMillis())
+                        .putString("license_verified_device",installationId())
+                        .putString("license_verified_token",token).apply()
+                    HomeTvDiagnostics.i("HomeTV","Signed licence revalidated after network availability")
+                }else if(response!=null || rejected){
+                    cache.clear()
+                    licenseReady=false
+                    showLicenseScreen(if(rejected)
+                        "The license server rejected this activation. Please reactivate or contact support."
+                    else "The license server returned an invalid signed lease. Please retry activation.")
+                }else{
+                    HomeTvDiagnostics.w("HomeTV","Licence revalidation deferred after a transient network failure")
+                }
+            }
+        }
+    }
     private fun beginLicensedSession(){
         if(licenseChecking)return
         val token=prefs.getString("license_token",null)
@@ -327,7 +397,12 @@ class MainActivity: Activity() {
             }
         }
         root.addView(activate)
-        root.addView(label("An internet connection is required for activation and license checks."))
+        if(!hasNetworkConnection()){
+            root.addView(label("NO INTERNET CONNECTION"))
+            root.addView(label("Connect this TV to the internet. A valid cached licence can continue offline for up to seven days; a new activation or expired cache needs internet access."))
+        }else{
+            root.addView(label("An internet connection is required for activation and license checks."))
+        }
     }
     private fun surrenderLicense(){
         AlertDialog.Builder(this).setTitle("Surrender License")
@@ -376,6 +451,7 @@ class MainActivity: Activity() {
     private var youtubeNativeAttemptedUrl:String?=null
     private var youtubeNativeStreamUrl:String?=null
     private var youtubeNativeGeneration=0
+    private var youtubeNativeTransition=false
     private var youtubeResolveTimeout:Runnable?=null
     private var active=-1
     private var previousChannelUrl:String?=null
@@ -490,7 +566,11 @@ class MainActivity: Activity() {
         if(recoveredUnavailable || recoveredTemporary)invalidateSurfingCache()
         // Auto-unhide is deliberately tied to a real foreground Playing event,
         // never to an HTTP 200 response or a timeout-based reachability probe.
-        if(prefs.getBoolean("auto_unhide_working_channels",false) && isManuallyHidden(c)){
+        if(HomeTvPolicies.shouldAutoUnhide(
+                prefs.getBoolean("auto_unhide_working_channels",false),
+                isManuallyHidden(c),
+                playbackConfirmed=true
+            )){
             ensureChannelIndex()
             val updated=manuallyHiddenIds.toMutableSet()
             (channelByKey[channelKey(c)] ?:emptyList()).forEach{updated.remove(id(channels[it]))}
@@ -779,7 +859,8 @@ class MainActivity: Activity() {
         return try{
             val network=manager.activeNetwork ?:return false
             val capabilities=manager.getNetworkCapabilities(network) ?:return false
-            capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
         }catch(_:Exception){true}
     }
     private var networkRecoveryTask:Runnable?=null
@@ -1093,7 +1174,7 @@ class MainActivity: Activity() {
             handler.postDelayed(task,1000L)
             return true
         }
-        if(prefs.getBoolean("auto_skip_nonworking",true)){
+        if(prefs.getBoolean("auto_skip_nonworking",false)){
             // Capture order before excluding the failed channel. Rebuilding the
             // cache first loses its old position and can send recovery to channel 1.
             val previousSequence=surfingIndices()
@@ -1349,7 +1430,7 @@ class MainActivity: Activity() {
     private fun programmeList(c:Channel):List<EpgProgramme> {
         val id=c.epgId.trim().lowercase(java.util.Locale.ROOT)
         val name=c.name.trim().lowercase(java.util.Locale.ROOT)
-        val raw=epgGuide[id]?.takeIf{it.isNotEmpty()} ?:epgGuide[name] ?:emptyList()
+        val raw=HomeTvPolicies.matchEpg(epgGuide,id,name)
         val global=prefs.getInt("epg_offset_minutes",0)
         val source=prefs.getInt("epg_offset_source_"+c.source.hashCode(),0)
         val shift=(global+source).coerceIn(-1440,1440)*60000L
@@ -1698,7 +1779,7 @@ class MainActivity: Activity() {
                                 }
                                 val code=connection.responseCode
                                 val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
-                                code in 200..299 && !contentType.contains("text/html")
+                                HomeTvPolicies.isReachableHttpResponse(code,contentType)
                             }finally{connection.disconnect()}
                         }catch(_:Exception){false}
                     }
@@ -2187,6 +2268,7 @@ class MainActivity: Activity() {
     override fun onResume(){
         super.onResume()
         appInForeground=true
+        if(licenseReady)onLicenseNetworkAvailable()
         if(licenseReady){
             showPendingHiddenChannelPrompt()
             scheduleStartupHiddenChannelScan()
@@ -2252,6 +2334,7 @@ class MainActivity: Activity() {
         root.setBackgroundColor(0xFF101E31.toInt())
         setContentView(android.widget.ScrollView(this).apply{isFillViewport=true;addView(root)})
         beginLicensedSession()
+        registerLicenseNetworkCallback()
     }
     private fun label(s:String)=TextView(this).apply { text=s; textSize=23f; setPadding(18,16,18,16); setTextColor(android.graphics.Color.WHITE) }
     private fun button(s:String, action:()->Unit)=Button(this).apply {
@@ -2370,6 +2453,14 @@ class MainActivity: Activity() {
                 }
             }catch(_:Exception){}finally{posterLoading.remove(url)}
         }
+    }
+    private fun youtubeLibrary(){
+        val items=channels.indices.filter{isYoutubeChannel(it)}
+        if(items.isEmpty()){
+            channelCollection("YouTube",emptyList())
+            return
+        }
+        mediaRows("YouTube",items)
     }
     private fun mediaSeries(){
         val items=mediaItems("series")
@@ -2643,6 +2734,10 @@ class MainActivity: Activity() {
             tvCard("▤","Series","Episodes and shows"){mediaSeries()},
             tvCard("♫","Music","Music library"){mediaMusic()},
             tvCard("◉","Web TV","Web channels"){mediaLibrary("web")}
+        ))
+        root.addView(tvSection("YOUTUBE"))
+        root.addView(tvRow(
+            tvCard("▶","YouTube","Videos and live streams"){youtubeLibrary()}
         ))
         root.addView(tvSection("DISCOVER"))
         root.addView(tvRow(
@@ -3012,6 +3107,17 @@ class MainActivity: Activity() {
                             val parsed:List<Channel>
                             if(p.url==licensedPlaylist){
                                 val body=licensedM3u()
+                                parsed=parseM3u(body,p.name)
+                                if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
+                                val temp=java.io.File(file.absolutePath+".tmp")
+                                temp.writeText(body)
+                                if(!temp.renameTo(file)){temp.copyTo(file,overwrite=true);temp.delete()}
+                                refreshed[index]=true
+                                checked[index]=true
+                            }else if(p.url.startsWith("file:",true)){
+                                val localFile=java.io.File(java.net.URI(p.url))
+                                if(!localFile.isFile)throw java.io.IOException("Imported playlist file is missing")
+                                val body=localFile.inputStream().use{readPlaylistText(it)}
                                 parsed=parseM3u(body,p.name)
                                 if(parsed.isEmpty())throw IllegalStateException("No valid channels in "+p.name)
                                 val temp=java.io.File(file.absolutePath+".tmp")
@@ -3389,77 +3495,10 @@ class MainActivity: Activity() {
         return found.values.toList()
     }
     private fun parseM3u(body:String,source:String):List<Channel>{
-        val out=mutableListOf<Channel>()
-        var name="";var group="Other";var logo="";var epgId="";var webChannel=""
-        var mediaType="live";var year="";var genre="";var artist="";var album="";var season="";var episode="";var description=""
-        var headers=mutableMapOf<String,String>()
-        // Compile attribute patterns once per playlist, not once per channel field.
-        val attributes=listOf("group-title","tvg-logo","tvg-id","web-channel","user-agent","referrer","media-type","year","genre","artist","album","season","episode","series-name","description")
-            .associateWith{key->Regex(Regex.escape(key)+"""="([^"]*)" """.trim())}
-        fun attr(line:String,key:String)=attributes[key]?.find(line)?.groupValues?.get(1)?:""
-        fun applyHeader(key:String,value:String){
-            val normalized=when(key.lowercase()){
-                "http-user-agent","user-agent"->"User-Agent"
-                "http-referrer","http-referer","referer","referrer"->"Referer"
-                "http-origin","origin"->"Origin"
-                else->return
-            }
-            if(value.isNotBlank())headers[normalized]=value.trim()
-        }
-        body.lineSequence().forEach{raw->
-            val line=raw.trim()
-            when{
-                line.startsWith("#EXTINF",true)->{
-                    // EXTINF display names may themselves contain commas.
-                    name=line.substringAfter(",","").trim()
-                    group=attr(line,"group-title").ifBlank{"Other"}
-                    logo=attr(line,"tvg-logo")
-                    epgId=attr(line,"tvg-id")
-                    webChannel=attr(line,"web-channel")
-                    mediaType=attr(line,"media-type").trim().lowercase(java.util.Locale.ROOT).ifBlank{if(webChannel.isNotBlank() && !webChannel.equals("no",true))"web" else "live"}
-                    if(mediaType !in setOf("live","movie","series","music","web"))mediaType="live"
-                    year=attr(line,"year");genre=attr(line,"genre");artist=attr(line,"artist");album=attr(line,"album")
-                    season=attr(line,"season");episode=attr(line,"episode");description=attr(line,"description")
-                    if(mediaType=="series" && attr(line,"series-name").isNotBlank())group=attr(line,"series-name")
-                    headers=mutableMapOf()
-                    applyHeader("user-agent",attr(line,"user-agent"))
-                    applyHeader("referer",attr(line,"referrer"))
-                }
-                line.startsWith("#EXTVLCOPT:",true)->{
-                    val pair=line.substringAfter(":").split("=",limit=2)
-                    if(pair.size==2)applyHeader(pair[0],pair[1])
-                }
-                line.startsWith("#EXTHTTP:",true)->{
-                    val rawHeaders=line.substringAfter(":").trim()
-                    try{
-                        val obj=JSONObject(rawHeaders)
-                        obj.keys().forEach{key->applyHeader(key,obj.optString(key))}
-                    }catch(_:Exception){}
-                }
-                line.isNotEmpty() && !line.startsWith("#") && name.isNotEmpty()->{
-                    val parts=line.split("|",limit=2)
-                    val url=parts[0].trim()
-                    val localHeaders=headers.toMutableMap()
-                    if(parts.size==2)parts[1].split("&").forEach{kv->
-                        val pair=kv.split("=",limit=2)
-                        if(pair.size==2)applyHeaderTo(localHeaders,pair[0],pair[1])
-                    }
-                    // Some IPTV files contain comments or junk between stream
-                    // URLs. Only recognized live-stream protocols are channels.
-                    // Keep the EXTINF metadata active for multiple URLs under
-                    // the same logical channel.
-                    val scheme=url.substringBefore("://","").lowercase(java.util.Locale.ROOT)
-                    if("://" in url && scheme in setOf(
-                            "http","https","rtmp","rtmps","rtsp","rtp","udp","mmsh","mms")){
-                        val deletedGroups=prefs.getStringSet("deleted_groups",emptySet()) ?: emptySet()
-                        if(source+"|"+group !in deletedGroups)
-                            out.add(Channel(name,url,group,logo,source,localHeaders,epgId,webChannel,mediaType,year,genre,artist,album,season,episode,description))
-                    }
-                }
-            }
-        }
-        addSavedWebTv(out)
-        return out
+        val deletedGroups=prefs.getStringSet("deleted_groups",emptySet()) ?: emptySet()
+        val parsed=M3uParser.parse(body,source,deletedGroups)
+        addSavedWebTv(parsed)
+        return parsed
     }
     private fun applyHeaderTo(map:MutableMap<String,String>,key:String,value:String){
         val name=when(key.lowercase()){
@@ -4462,8 +4501,9 @@ class MainActivity: Activity() {
             if(prefs.getBoolean("clock_show_day",true))
                 values.add(java.text.SimpleDateFormat("EEEE",java.util.Locale.getDefault()).format(now))
             if(values.isEmpty())return
-            val value=values[pageIndex % values.size]
-            pageIndex=(pageIndex+1) % values.size
+            val rotation=HomeTvPolicies.nextClockValue(values,pageIndex) ?: return
+            val value=rotation.first
+            pageIndex=rotation.second
             if(!animate || values.size==1){
                 clock.text=value
                 clock.alpha=1f
@@ -6183,9 +6223,47 @@ class MainActivity: Activity() {
             (u.scheme=="http" || u.scheme=="https") &&
                 (routeWebOverride ?: isWebTv(c))
         }catch(_:Exception){false}
-        // Match V6: always use the original YouTube watch page in WebView.
-        // Do not extract a native stream; that route changes YouTube audio behaviour.
-        if(youtubeUri!=null || webPage){
+        // Try a publicly exposed HLS livestream natively first. The resolver is
+        // bounded to eight seconds and never bypasses authentication or access controls.
+        // Unsupported, slow or failed attempts fall back to the original WebView page.
+        if(youtubeUri!=null && youtubeNativeStreamUrl==null &&
+            youtubeNativeAttemptedUrl!=c.url && routeWebOverride!=true){
+            youtubeNativeAttemptedUrl=c.url
+            val attemptGeneration=++youtubeNativeGeneration
+            val sourceScreen=screen
+            val timeout=Runnable{
+                if(attemptGeneration==youtubeNativeGeneration && active==index &&
+                    videoScreen===sourceScreen && youtubeNativeStreamUrl==null){
+                    youtubeResolveTimeout=null
+                    HomeTvDiagnostics.i("HomeTV","YouTube native discovery timed out; using WebView fallback")
+                    youtubeNativeTransition=true
+                    playIndex(index)
+                }
+            }
+            youtubeResolveTimeout=timeout
+            handler.postDelayed(timeout,YouTubeStreamResolver.TIMEOUT_MS.toLong())
+            thread(name="HomeTV-youtube-resolver"){
+                val stream=try{YouTubeStreamResolver.resolve(c.url)}catch(e:Exception){
+                    HomeTvDiagnostics.w("HomeTV","YouTube native discovery failed",e);null
+                }
+                runOnUiThread{
+                    if(attemptGeneration!=youtubeNativeGeneration || active!=index ||
+                        videoScreen!==sourceScreen || isFinishing || isDestroyed)return@runOnUiThread
+                    youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
+                    youtubeResolveTimeout=null
+                    if(stream!=null){
+                        youtubeNativeStreamUrl=stream.url
+                        HomeTvDiagnostics.i("HomeTV","Public YouTube HLS manifest found; starting native Media3 playback")
+                    }else{
+                        HomeTvDiagnostics.i("HomeTV","No eligible public YouTube HLS manifest; using WebView fallback")
+                    }
+                    youtubeNativeTransition=true
+                    playIndex(index)
+                }
+            }
+            return
+        }
+        if((youtubeUri!=null && youtubeNativeStreamUrl==null) || webPage){
             // Use the original YouTube watch page inside WebView.
             // Keep regular IPTV streams on their existing Media3/LibVLC path.
             val viewer=WebView(this)
@@ -6458,6 +6536,7 @@ class MainActivity: Activity() {
         youtubeResolveTimeout?.let{handler.removeCallbacks(it)}
         youtubeResolveTimeout=null
         showBanner("Native YouTube playback unavailable. Opening YouTube player…")
+        youtubeNativeTransition=true
         playIndexResolved(index,true)
         return true
     }
@@ -6982,9 +7061,9 @@ class MainActivity: Activity() {
         root.addView(button("Buffering profile: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
         root.addView(settingsToggle("Check alternative stream links in background","background_url_checks",false){startBackgroundChannelChecks()})
-        root.addView(label("YouTube player: Compatibility mode"))
-        root.addView(settingsToggle("Skip unavailable channels automatically","auto_skip_nonworking",true))
-        root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
+        root.addView(label("YouTube: Native HLS first when publicly available; WebView fallback for other videos."))
+        root.addView(settingsToggle("Skip unavailable channels automatically","auto_skip_nonworking",false))
+        root.addView(label("OFF by default: stay on a channel during interruptions. Turn ON only if you want HomeTV to move automatically after all URLs and both players fail."))
         root.addView(settingsToggle("Reconnect interrupted streams","auto_reconnect",true))
         root.addView(tvSection("PARENTAL & ACCESS CONTROL"))
         root.addView(button("Manage protected channels & groups"){manageLockedChannels()})
@@ -7251,6 +7330,13 @@ class MainActivity: Activity() {
         // A pending HTTP classification must never restart playback after BACK,
         // channel exit, or switching to the Home screen.
         httpRouteGeneration++
+        val preserveYoutubeRoute=youtubeNativeTransition
+        youtubeNativeTransition=false
+        if(!preserveYoutubeRoute){
+            youtubeNativeGeneration++
+            youtubeNativeAttemptedUrl=null
+            youtubeNativeStreamUrl=null
+        }
         saveCurrentMediaProgress()
         networkRecoveryTask?.let{handler.removeCallbacks(it)}
         networkRecoveryTask=null
@@ -7318,6 +7404,7 @@ class MainActivity: Activity() {
         initialTried.clear()
         alternativeAttempted.clear()
         if(isFinishing)HomeTvDiagnostics.markCleanExit(this)
+        unregisterLicenseNetworkCallback()
         super.onDestroy()
     }
 }
