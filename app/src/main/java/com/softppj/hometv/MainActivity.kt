@@ -432,6 +432,7 @@ class MainActivity: Activity() {
     }
 
     private var player:ExoPlayer?=null
+    private var activeChannelGainProcessor:ChannelGainAudioProcessor?=null
     private var vlcCore:LibVLC?=null
     private var vlcPlayer:VlcPlayer?=null
     private var vlcAttempted=false
@@ -5319,40 +5320,52 @@ class MainActivity: Activity() {
         }
         list.requestFocus()
     }
-    // Uses Android's music stream so all playback engines share the same volume.
-    // Fixed-volume TV outputs must be controlled using the TV/soundbar remote.
+    // Per-channel gain is separate from Android/TV master volume. 100% is
+    // the original stream level; 200% can boost quiet PCM streams.
+    private fun channelVolumeGain(c:Channel):Float =
+        prefs.getInt("channel_volume_"+hash(c.url),20).coerceIn(0,200)/100f
     private fun applyChannelVolume(){
         val c=channels.getOrNull(active) ?:return
-        val gain=(prefs.getInt("channel_volume_"+hash(c.url),100).coerceIn(0,100))/100f
-        player?.volume=gain
-        try{vlcPlayer?.volume=(gain*100).toInt()}catch(_:Exception){}
-        
+        val gain=channelVolumeGain(c)
+        activeChannelGainProcessor?.gain=gain
+        player?.volume=1f
+        try{vlcPlayer?.volume=(gain*100).toInt().coerceIn(0,200)}catch(_:Exception){}
+        val webGain=gain.coerceAtMost(1f)
+        web?.evaluateJavascript("try{var v=document.querySelector('video');if(v)v.volume="+webGain+";}catch(e){}",null)
     }
     private fun configureChannelVolume(index:Int){
         val c=channels.getOrNull(index) ?:return
         val key="channel_volume_"+hash(c.url)
-        val level=SeekBar(this).apply{max=100;progress=prefs.getInt(key,100)}
+        val level=SeekBar(this).apply{
+            max=200
+            progress=prefs.getInt(key,20).coerceIn(0,200)
+        }
         val label=TextView(this).apply{text="Channel volume: "+level.progress+"%";textSize=20f}
         val layout=LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL
             setPadding(30,20,30,20)
             addView(label)
             addView(level)
+            addView(TextView(this).apply{
+                text="20% is the quiet default. 100% is the stream's original level; up to 200% can boost quiet channels. TV/soundbar master volume remains separate."
+                textSize=14f
+            })
         }
         level.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
             override fun onProgressChanged(bar:SeekBar?,value:Int,fromUser:Boolean){
                 label.text="Channel volume: "+value+"%"
                 if(fromUser && active==index){
-                    val gain=value.coerceIn(0,100)/100f
-                    player?.volume=gain
-                    try{vlcPlayer?.volume=value}catch(_:Exception){}
-                    
+                    val gain=value.coerceIn(0,200)/100f
+                    activeChannelGainProcessor?.gain=gain
+                    player?.volume=1f
+                    try{vlcPlayer?.volume=value.coerceIn(0,200)}catch(_:Exception){}
+                    web?.evaluateJavascript("try{var v=document.querySelector('video');if(v)v.volume="+gain.coerceAtMost(1f)+";}catch(e){}",null)
                 }
             }
             override fun onStartTrackingTouch(bar:SeekBar?){}
             override fun onStopTrackingTouch(bar:SeekBar?){}
         })
-        AlertDialog.Builder(this).setTitle(c.name+" volume").setView(layout)
+        AlertDialog.Builder(this).setTitle(c.name+" channel volume").setView(layout)
             .setPositiveButton("Save"){_,_->
                 prefs.edit().putInt(key,level.progress).apply()
                 if(active==index)applyChannelVolume()
@@ -6478,8 +6491,12 @@ class MainActivity: Activity() {
             val buffer=bufferValues()
             val loadControl=DefaultLoadControl.Builder()
                 .setBufferDurationsMs(buffer[0],buffer[1],buffer[2],buffer[3]).build()
-            val exo=ExoPlayer.Builder(this, DefaultRenderersFactory(this)
-                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)).setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
+            val gainProcessor=ChannelGainAudioProcessor(channelVolumeGain(c))
+            activeChannelGainProcessor=gainProcessor
+            val renderersFactory=HomeTvRenderersFactory(this,gainProcessor)
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            val exo=ExoPlayer.Builder(this,renderersFactory)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
@@ -6621,6 +6638,7 @@ class MainActivity: Activity() {
             val vlc=VlcPlayer(core)
             vlcCore=core
             vlcPlayer=vlc
+            try{vlc.volume=(channelVolumeGain(c)*100).toInt().coerceIn(0,200)}catch(_:Exception){}
             applyLibVlcPicturePreset(vlc,c)
             val surface=SurfaceView(this)
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
@@ -7427,6 +7445,7 @@ class MainActivity: Activity() {
         qualityUpgradeTask=null
         bannerTask=null;banner=null;videoScreen=null;currentPlayerView=null
         player?.release();player=null
+        activeChannelGainProcessor=null
         vlcPlayer?.let{v->
             try{v.stop();v.vlcVout.detachViews();v.release()}catch(_:Exception){}
         }
