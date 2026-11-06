@@ -247,7 +247,7 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Per-playlist numbering now normalizes source names consistently, including case variants.
 - Corrected the Next V1 Worker mapping for an `unlimited` entitlement: it now expires at the exclusive UAE boundary after **31 December 2100**, matching the agreed policy. Updated Node and Android licence tests accordingly.
 - Recorded the source compliance matrix and remaining release/device gates in this progress file.
-- Still pending: fresh compile/test/APK build against this updated source head; live Worker configuration and activation verification; actual Android TV acceptance tests. No release or prerelease is part of this work.
+- The updated source compiled, all Kotlin unit tests passed, the Node licence-expiry tests passed, APK assembly and package identity checks passed, and the debug test APK was uploaded in Build run [42267372891](https://github.com/ppj1981/HomeTV-Build/actions/runs/42267372891). The APK was built from source commit `f9a58ded6252db3667fe85d73edae2b3b62937f7`; artifact `HomeTV-Next-V1-debug-test` expires 13 November 2026. Live Worker configuration/activation and actual Android TV acceptance tests remain pending. No release or prerelease is part of this work.
 
 
 ## Next V1 source compliance matrix — 2026-11-06
@@ -317,3 +317,12 @@ A successful debug build and automated test run are necessary but not sufficient
 5. **Known partials:** LibVLC subtitle selection is not exposed in the current UI; imported local-file playlist contents are not embedded in JSON backups; WebView channel gain cannot boost above 100%.
 
 No production APK, prerelease, or public release is approved by this audit. The user must approve any licensing-backend isolation/deployment or release action.
+
+
+## Debug APK verification — 2026-11-06
+
+- Build run: [42267372891](https://github.com/ppj1981/HomeTV-Build/actions/runs/42267372891) — **success**.
+- Source commit: `f9a58ded6252db3667fe85d73edae2b3b62937f7`.
+- Checks passed: source revision, Node licence-expiry tests, Kotlin compilation, Kotlin unit tests, debug APK assembly, package/application label verification, and artifact upload.
+- Artifact: `HomeTV-Next-V1-debug-test` (about 91 MB), available until 13 November 2026. Debug test artifact only; no release or prerelease created.
+- Remaining gates: live Next V1 licence Worker configuration and real activation/validation/device-release testing; actual Android TV acceptance tests.
