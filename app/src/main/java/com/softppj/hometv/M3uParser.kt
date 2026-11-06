@@ -1,7 +1,7 @@
 package com.softppj.hometv
 import org.json.JSONObject
 internal object M3uParser {
- fun parse(body:String,source:String,deletedGroups:Set<String> = emptySet()):List<Channel>{
+ fun parse(body:String,source:String,deletedGroups:Set<String> = emptySet()):MutableList<Channel>{
   val out=mutableListOf<Channel>()
   var name="";var group="Other";var logo="";var epgId="";var webChannel=""
   var mediaType="live";var year="";var genre="";var artist="";var album="";var season="";var episode="";var description=""
