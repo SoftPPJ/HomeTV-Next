@@ -326,3 +326,11 @@ No production APK, prerelease, or public release is approved by this audit. The 
 - Checks passed: source revision, Node licence-expiry tests, Kotlin compilation, Kotlin unit tests, debug APK assembly, package/application label verification, and artifact upload.
 - Artifact: `HomeTV-Next-V1-debug-test` (about 91 MB), available until 13 November 2026. Debug test artifact only; no release or prerelease created.
 - Remaining gates: live Next V1 licence Worker configuration and real activation/validation/device-release testing; actual Android TV acceptance tests.
+
+## Licensing architecture clarification — 2026-11-06
+
+- This clarification supersedes earlier notes asking the user to choose between shared and isolated licensing. The user explicitly approved a dedicated Next V1 Worker/signing key while reusing the existing V6 licensing backend and device/licence records (2026-11-05).
+- Read-only Cloudflare verification confirms the deployed Worker `hometv-license-next` exists, is routed at 100% to version `aa4385cb-43ac-4d28-ba21-80677ec46f66`, and has the expected bindings: `LICENSE_SIGNING_PRIVATE_JWK` (secret; value not exposed) and `UPSTREAM_BASE=https://hometv-license.prasanthpjoy.workers.dev`.
+- This matches the approved shared-backend design. The Next V1 app still keeps its own package, app data, cached signed lease, and pinned public key. No V6 Worker source, V6 app, or licence records were changed by this verification.
+- Still outstanding: use a designated test activation to verify that the live Next V1 Worker produces a signature accepted by the APK's pinned public key, then test activation, surrender, expiry, seven-day offline grace, clock rollback, and cache-clear behaviour. Do not use a production licence for a test activation.
+- The current debug APK build was independently rechecked: Build run [42267495099](https://github.com/ppj1981/HomeTV-Build/actions/runs/42267495099) checked out source `58f981dd91733f772f6f2a2da21defcd4c1e2661`, passed Node licence-expiry tests, Kotlin compilation, Kotlin unit tests, debug APK assembly, package/label checks, and artifact upload. The APK SHA-256 is `ef03ea3ee1ef816fce5715b42dc80e97f35563903cbd1740f653a9494358cc14`; artifact ZIP SHA-256 is `7ab127af0c77ea15618a648a527437fd28bbc4a2267861c60b8bcc4d56a0cb3a`.

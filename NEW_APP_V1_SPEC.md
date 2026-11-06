@@ -2,7 +2,7 @@
 
 ## Project direction and safety
 - This is a new Android TV application, developed on the isolated branch `new-app-v1-development`.
-- It must install alongside the existing My Home TV V6. Use a distinct application ID (planned: `com.softppj.myhometv.next`) and independent app storage, preferences, cache, licence state, and databases.
+- It must install alongside the existing My Home TV V6. Use a distinct application ID (`com.softppj.myhometv.next`) and separate app-private storage, preferences, cache, and signed-lease cache. Per the user's explicit approval on 2026-11-05, the Next V1 gateway uses its own signing key but delegates activation/device records to the existing V6 licensing backend. Do not change the V6 Worker source or existing licence records.
 - Do not modify the existing V6 branch, existing releases, or existing installed app data.
 - Do not publish an APK, prerelease, or release until the user explicitly approves.
 - Preserve the PPJSoft / My Home TV identity unless the user requests a new name or logo.
