@@ -1236,7 +1236,12 @@ class MainActivity: Activity() {
         val upcoming=(0 until saved.length()).mapNotNull{saved.optJSONObject(it)}
             .filter{it.optLong("start")>now-120000L}
             .minByOrNull{it.optLong("start")} ?:return
-        val delay=(upcoming.optLong("start")-now).coerceAtLeast(0L).coerceAtMost(60000L)
+        val start=upcoming.optLong("start")
+        // If a scheduled event becomes due while HomeTV is backgrounded,
+        // retain it for the short delivery window and poll at one-minute
+        // intervals. A zero-delay loop here would spin continuously in background.
+        val delay=if(start<=now && !appInForeground)60_000L
+            else (start-now).coerceAtLeast(0L).coerceAtMost(60_000L)
         val task=Runnable{checkEpgTune()}
         epgTuneTask=task
         handler.postDelayed(task,delay)
