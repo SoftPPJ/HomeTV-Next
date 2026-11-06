@@ -2693,8 +2693,58 @@ class MainActivity: Activity() {
     private fun showHome(){
         reset("My Home TV  •  HOME")
         homeScreenVisible=true
-        root.removeAllViews()
-        root.setPadding(tvDp(27),tvDp(18),tvDp(27),tvDp(24))
+
+        // A fixed navigation rail stays visible while the cinematic home rows scroll.
+        val homeLayout=LinearLayout(this).apply{
+            orientation=LinearLayout.HORIZONTAL
+            setBackgroundColor(0xFF091421.toInt())
+        }
+        val navigation=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            gravity=Gravity.TOP
+            setPadding(tvDp(12),tvDp(18),tvDp(12),tvDp(16))
+            setBackgroundColor(0xFF0B1B2B.toInt())
+        }
+        navigation.addView(tvText("PPJSoft",16f,0xFF9CB4C9.toInt()).apply{
+            setPadding(tvDp(10),tvDp(8),tvDp(8),0)
+        })
+        navigation.addView(tvText("MY HOME TV",21f,0xFF92E9FF.toInt()).apply{
+            setPadding(tvDp(10),0,tvDp(8),tvDp(18))
+        })
+        fun navigationButton(title:String,action:()->Unit){
+            val item=button(title,action).apply{
+                textSize=15f
+                minHeight=tvDp(48)
+                gravity=Gravity.CENTER_VERTICAL
+            }
+            navigation.addView(item,LinearLayout.LayoutParams(-1,-2).apply{
+                bottomMargin=tvDp(6)
+            })
+        }
+        navigationButton("⌂  Home"){showHome()}
+        navigationButton("▦  Live TV"){allChannels()}
+        navigationButton("★  Favorites"){favorites()}
+        navigationButton("▤  TV Guide"){showEpg()}
+        navigationButton("▣  Movies"){mediaLibrary("movie")}
+        navigationButton("▤  Series"){mediaSeries()}
+        navigationButton("◉  Web TV"){mediaLibrary("web")}
+        navigationButton("▶  YouTube"){youtubeLibrary()}
+        navigationButton("＋  Playlists"){managePlaylists()}
+        navigationButton("⚙  Settings"){settings()}
+
+        val homeContent=LinearLayout(this).apply{
+            orientation=LinearLayout.VERTICAL
+            setPadding(tvDp(27),tvDp(18),tvDp(27),tvDp(24))
+        }
+        val contentScroll=android.widget.ScrollView(this).apply{
+            isFillViewport=true
+            isFocusable=false
+            addView(homeContent)
+        }
+        homeLayout.addView(navigation,LinearLayout.LayoutParams(tvDp(190),-1))
+        homeLayout.addView(contentScroll,LinearLayout.LayoutParams(0,-1,1f))
+        setContentView(homeLayout)
+
         val hero=LinearLayout(this).apply{
             orientation=LinearLayout.VERTICAL
             setPadding(tvDp(24),tvDp(20),tvDp(24),tvDp(20))
@@ -2707,40 +2757,40 @@ class MainActivity: Activity() {
             addView(tvText(actualChannelCount().toString()+" LIVE CHANNELS   •   "+viewerId().uppercase(),14f,0xFF5FE6CC.toInt()))
             addView(tvText("BY PPJSoft",12f,0xFFB7C8D8.toInt()).apply{gravity=Gravity.RIGHT})
         }
-        root.addView(hero)
-        root.addView(tvSection("WATCH NOW"))
-        root.addView(tvRow(
+        homeContent.addView(hero)
+        homeContent.addView(tvSection("WATCH NOW"))
+        homeContent.addView(tvRow(
             tvCard("▶","Continue TV","Resume last channel"){if(channels.isEmpty())refresh({resumeLast()})else resumeLast()},
             tvCard("▦","Live channels","Browse all channels"){allChannels()},
             tvCard("★","Favorites","Your saved channels"){favorites()},
             tvCard("▤","TV guide","Programmes and reminders"){showEpg()}
         ))
-        root.addView(tvSection("EXPLORE"))
-        root.addView(tvRow(
+        homeContent.addView(tvSection("EXPLORE"))
+        homeContent.addView(tvRow(
             tvCard("▣","Movies","Movie library"){mediaLibrary("movie")},
             tvCard("▤","Series","Episodes and shows"){mediaSeries()},
             tvCard("♫","Music","Music library"){mediaMusic()},
             tvCard("◉","Web TV","Web channels"){mediaLibrary("web")}
         ))
-        root.addView(tvSection("YOUTUBE"))
-        root.addView(tvRow(
+        homeContent.addView(tvSection("YOUTUBE"))
+        homeContent.addView(tvRow(
             tvCard("▶","YouTube","Videos and live streams"){youtubeLibrary()}
         ))
-        root.addView(tvSection("DISCOVER"))
-        root.addView(tvRow(
+        homeContent.addView(tvSection("DISCOVER"))
+        homeContent.addView(tvRow(
             tvCard("⌕","Search","Find channels"){searchChannels()},
             tvCard("☷","Categories","Channel groups"){showChannels()},
             tvCard("◷","History","Recently watched"){recentlyWatched()},
             tvCard("▶","Continue media","Resume films and series"){continueMedia()}
         ))
-        root.addView(tvSection("TOOLS"))
-        root.addView(tvRow(
+        homeContent.addView(tvSection("TOOLS"))
+        homeContent.addView(tvRow(
             tvCard("＋","Playlists","Manage sources"){managePlaylists()},
             tvCard("↻","Refresh","Rebuild playlists"){refresh({showHome()},true)},
             tvCard("⚙","Settings","Personalize HomeTV"){settings()},
             tvCard("🙈","Hidden","Hidden channels"){hiddenChannels()}
         ))
-        root.post{(root.getChildAt(2) as? LinearLayout)?.getChildAt(0)?.requestFocus()}
+        homeContent.post{(homeContent.getChildAt(2) as? LinearLayout)?.getChildAt(0)?.requestFocus()}
     }
     private val importPlaylistRequest=7291
     private fun importLocalPlaylist(){
