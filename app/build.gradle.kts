@@ -9,10 +9,6 @@ android {
     buildFeatures { buildConfig = true }
 
     defaultConfig {
-        // Optional private playlist URL supplied only through the build environment.
-        val masterPlaylistUrl = providers.environmentVariable("MASTER_PLAYLIST_URL").orElse("").get()
-        val escapedMasterPlaylistUrl = masterPlaylistUrl.replace("\\", "\\\\").replace("\"", "\\\"")
-        buildConfigField("String", "MASTER_PLAYLIST_URL", "\"${escapedMasterPlaylistUrl}\"")
         // Separate application ID: installs beside V6 without sharing app data.
         applicationId = "com.softppj.myhometv.next"
         minSdk = 23
