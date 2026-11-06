@@ -3746,9 +3746,9 @@ class MainActivity: Activity() {
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
-                // A selected-row callback that paints item backgrounds leaves
-                // previously selected rows blue when Android recycles the views.
-                // Use the native focused/selected drawable instead.
+                // Preserve the dialog's native choice mode. Single-choice setting
+                // dialogs need CHOICE_MODE_SINGLE for DPAD focus to track previews;
+                // ordinary action lists remain in their default non-choice mode.
                 selector=android.graphics.drawable.StateListDrawable().apply{
                     addState(intArrayOf(android.R.attr.state_pressed),
                         android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
@@ -3759,8 +3759,6 @@ class MainActivity: Activity() {
                     addState(intArrayOf(),
                         android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
                 }
-                choiceMode=android.widget.ListView.CHOICE_MODE_NONE
-                clearChoices()
                 isFocusable=true
                 isFocusableInTouchMode=true
             }
@@ -4258,10 +4256,10 @@ class MainActivity: Activity() {
             .setNeutralButton("Manual adjustments",null)
             .setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
-            val list=dialog.listView
-            list?.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
-            list?.setItemChecked(pending,true);list?.setSelection(pending)
-            list?.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(pending,true);list.setSelection(pending)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
                 override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
                     pending=position
                     list.setItemChecked(position,true)
@@ -5520,10 +5518,10 @@ class MainActivity: Activity() {
             }
             .setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
-            val list=dialog.listView
-            list?.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
-            list?.setItemChecked(selected,true);list?.setSelection(selected)
-            list?.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
+            val list=dialog.listView ?:return@setOnShowListener
+            list.choiceMode=android.widget.ListView.CHOICE_MODE_SINGLE
+            list.setItemChecked(selected,true);list.setSelection(selected)
+            list.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{
                 override fun onItemSelected(parent:android.widget.AdapterView<*>?,view:View?,position:Int,id:Long){
                     pending=position;list.setItemChecked(position,true)
                     previewQualityMode=if(key!=null && position==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[position]
