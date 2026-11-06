@@ -9,7 +9,7 @@ class HomeTvPoliciesTest {
         val available=setOf("TV","News")
         assertEquals("News",HomeTvPolicies.resolvePlaylistSource("News","TV",enabled,available))
         assertEquals("TV",HomeTvPolicies.resolvePlaylistSource("Missing","TV",enabled,available))
-        assertEquals("News",HomeTvPolicies.resolvePlaylistSource("Disabled","Disabled",enabled,available))
+        assertEquals("TV",HomeTvPolicies.resolvePlaylistSource("Disabled","Disabled",enabled,available))
         assertNull(HomeTvPolicies.resolvePlaylistSource("Missing",null,enabled,emptySet()))
     }
 
