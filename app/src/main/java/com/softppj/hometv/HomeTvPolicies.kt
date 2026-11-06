@@ -28,8 +28,9 @@ internal object HomeTvPolicies {
         val perPlaylist = LinkedHashMap<String, Int>(live.size)
         live.forEach { index ->
             val channel = channels[index]
-            val number = (counts[channel.source] ?: 0) + 1
-            counts[channel.source] = number
+            val playlistKey = channel.source.trim().lowercase(java.util.Locale.ROOT)
+            val number = (counts[playlistKey] ?: 0) + 1
+            counts[playlistKey] = number
             perPlaylist[channelKey(channel)] = number
         }
         val continuous = LinkedHashMap<String, Int>(live.size)
@@ -37,6 +38,18 @@ internal object HomeTvPolicies {
             continuous[channelKey(channels[index])] = position + 1
         }
         return ChannelIndexSnapshot(groups, representatives, live, perPlaylist, continuous)
+    }
+
+    fun resolvePlaylistSource(
+        selected:String?,
+        current:String?,
+        enabled:List<String>,
+        available:Set<String>
+    ):String?{
+        val enabledSet=enabled.toHashSet()
+        return selected?.takeIf{it in enabledSet && it in available}
+            ?: current?.takeIf{it in enabledSet && it in available}
+            ?: enabled.firstOrNull{it in available}
     }
 
     fun shouldAttemptNativeYoutube(
