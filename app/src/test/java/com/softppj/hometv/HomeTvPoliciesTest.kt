@@ -4,6 +4,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HomeTvPoliciesTest {
+    @Test fun playlistScopeUsesSelectedThenCurrentThenFirstAvailable(){
+        val enabled=listOf("HomeTV Live","TV","News")
+        val available=setOf("TV","News")
+        assertEquals("News",HomeTvPolicies.resolvePlaylistSource("News","TV",enabled,available))
+        assertEquals("TV",HomeTvPolicies.resolvePlaylistSource("Missing","TV",enabled,available))
+        assertEquals("News",HomeTvPolicies.resolvePlaylistSource("Disabled","Disabled",enabled,available))
+        assertNull(HomeTvPolicies.resolvePlaylistSource("Missing",null,enabled,emptySet()))
+    }
+
+    @Test fun playlistNumberingTreatsSourceNameCaseConsistently(){
+        val channels=listOf(
+            Channel("One","https://a/1","News",source="Playlist A"),
+            Channel("Two","https://a/2","News",source="playlist a")
+        )
+        val index=HomeTvPolicies.buildChannelIndex(channels)
+        assertEquals(1,index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels[0])])
+        assertEquals(2,index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels[1])])
+    }
+
     @Test fun reachabilityRejectsHtmlAndErrors() {
         assertTrue(HomeTvPolicies.isReachableHttpResponse(200, "application/vnd.apple.mpegurl"))
         assertFalse(HomeTvPolicies.isReachableHttpResponse(200, "text/html"))
