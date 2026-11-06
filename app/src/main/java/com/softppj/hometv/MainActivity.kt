@@ -2119,7 +2119,7 @@ class MainActivity: Activity() {
             "Playback engine",
             "Alternative stream",
             if(favoriteIds.contains(id(c)))"Remove favorite" else "Add favorite",
-            "Lock / Unlock",
+            "Parental lock",
             if(isManuallyHidden(c))"Unhide channel" else "Hide channel",
             "All channels",
             "Settings",
@@ -5536,7 +5536,7 @@ class MainActivity: Activity() {
         val returnToSettings=settingsScreenVisible
         if(index!=null && isYoutubeChannel(index)){
             AlertDialog.Builder(this).setTitle("YouTube picture quality")
-                .setItems(arrayOf("Best available (experimental)","Prefer 1080p","Prefer 720p","Auto (YouTube controls resolution)","Show actual resolution / quality")){
+                .setItems(arrayOf("Best available","Prefer 1080p","Prefer 720p","Auto (YouTube controls resolution)","Playback quality details")){
                     _,choice->
                     if(choice==4)showYoutubeQualityDiagnostics()
                     else{
@@ -5557,7 +5557,7 @@ class MainActivity: Activity() {
         previewQualityIndex=index ?: active
         previewQualityMode=if(key!=null && pending==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[pending]
         val dialog=AlertDialog.Builder(this)
-            .setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Universal picture quality")
+            .setTitle(if(index!=null)numberFor(index).toString()+". "+channels[index].name+" Settings — Picture Quality" else "Default stream quality")
             .setSingleChoiceItems(options,selected){_,choice->
                 pending=choice
                 previewQualityMode=if(key!=null && choice==0) prefs.getString("quality_global","Auto") ?: "Auto" else options[choice]
@@ -5573,7 +5573,7 @@ class MainActivity: Activity() {
                 }
                 editor.apply()
                 if(index==null || index==active)applyQuality()
-                showBanner("Picture quality saved")
+                showBanner("Stream quality saved")
             }
             .setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
@@ -5714,7 +5714,7 @@ class MainActivity: Activity() {
             editor.apply()
         }
         val dialog=AlertDialog.Builder(this)
-            .setTitle(if(target!=null)numberFor(target).toString()+". "+channels[target].name+" Settings — Aspect Ratio" else "Universal aspect ratio")
+            .setTitle(if(target!=null)numberFor(target).toString()+". "+channels[target].name+" Settings — Aspect Ratio" else "Default screen fit")
             .setSingleChoiceItems(labels,selected){_,position->
                 // Highlighting previews the aspect ratio; only OK saves it.
                 preview(position)
@@ -6631,15 +6631,15 @@ class MainActivity: Activity() {
         if(active<0){settings();return}
         val items=arrayOf(
             "Playback engine: "+(prefs.getString("engine","Media3")?:"Media3"),
-            "Buffering: "+bufferProfile(),
-            "Universal picture quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
-            "Universal screen size: "+(prefs.getString("screen_mode","16:9")?:"Fit"),
-            "Auto-reconnect: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
-            "Resume last channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
-            "Date & time overlay",
-            "Manage playlists (leave playback)",
-            "Home screen (stop playback)",
-            "Back to TV"
+            "Buffering profile: "+bufferProfile(),
+            "Default stream quality: "+(prefs.getString("quality_global","Auto")?:"Auto"),
+            "Default screen fit: "+(prefs.getString("screen_mode","Fit")?:"Fit"),
+            "Automatic reconnection: "+if(prefs.getBoolean("auto_reconnect",true))"ON" else "OFF",
+            "Resume previous channel: "+if(prefs.getBoolean("resume",true))"ON" else "OFF",
+            "Clock display",
+            "Playlist manager (stop playback)",
+            "Home (stop playback)",
+            "Return to TV"
         )
         val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
@@ -6919,7 +6919,7 @@ class MainActivity: Activity() {
         root.addView(tvText("Personalize your TV experience",14f,0xFFB0C6D9.toInt()))
         settingsScreenVisible=true
         root.addView(tvSection("ACCOUNT & PLAYLISTS"))
-        root.addView(button("Surrender License / Change TV"){surrenderLicense()})
+        root.addView(button("Manage device activation"){surrenderLicense()})
         root.addView(button("Playlist manager"){managePlaylists()})
         root.addView(settingsToggle("Automatic playlist refresh","auto_playlist_check",true))
         root.addView(label("Checks the selected active playlist in the background after startup. Cached channels open first; unchanged playlists are not reparsed."))
@@ -6936,9 +6936,9 @@ class MainActivity: Activity() {
         root.addView(button("Hidden channels"){hiddenChannels()})
         root.addView(settingsToggle("Check hidden channels automatically","auto_hidden_channel_check",true))
         root.addView(label("Checks hidden channels after startup without delaying playback."))
-        root.addView(settingsToggle("Check hidden channels when app is in background","background_hidden_channel_check",true))
+        root.addView(settingsToggle("Check hidden channels in background","background_hidden_channel_check",true))
         root.addView(label("When you leave HomeTV after playback, a low-priority check continues while the app process remains alive. Results are saved and shown when you return. Android may stop background work if it kills the app."))
-        root.addView(settingsToggle("Auto Unhide Working Channels","auto_unhide_working_channels",false))
+        root.addView(settingsToggle("Automatically restore working channels","auto_unhide_working_channels",false))
         root.addView(label("OFF by default. When ON, a channel is restored only after actual playback succeeds. URL checks alone never unhide channels."))
         root.addView(button("TV guide (EPG)"){configureEpg()})
         root.addView(button("TV guide time adjustment"){configureEpgOffset()})
@@ -6957,7 +6957,7 @@ class MainActivity: Activity() {
         root.addView(button("Buffering profile: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
         root.addView(settingsToggle("Check alternative stream links in background","background_url_checks",false){startBackgroundChannelChecks()})
-        root.addView(label("YouTube playback: WebView watch page (restored compatibility mode)"))
+        root.addView(label("YouTube player: Compatibility mode"))
         root.addView(settingsToggle("Skip unavailable channels automatically","auto_skip_nonworking",true))
         root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
         root.addView(settingsToggle("Reconnect interrupted streams","auto_reconnect",true))
