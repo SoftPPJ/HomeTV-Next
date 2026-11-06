@@ -5343,7 +5343,7 @@ class MainActivity: Activity() {
             "Default screen fit: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
             "Channel screen fit: "+screenMode(),
             "Stream quality","Buffering profile","Audio track","Preferred audio language","Subtitle settings","Sleep timer","Playback engine",
-            "Clock display","Alternative stream","Home","All settings","Channel volume",
+            "Clock display","Select stream source","Home","Live TV settings","Channel volume",
             "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")"
         )
         val drawer=LinearLayout(this).apply{
