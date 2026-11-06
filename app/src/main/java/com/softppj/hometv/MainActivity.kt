@@ -6703,7 +6703,11 @@ class MainActivity: Activity() {
             }
         }
         val payload=JSONObject().put("format","HomeTV-settings-v1").put("settings",data).toString(2)
-        launchTextExport("HomeTV-settings-backup.json","application/json",payload,exportBackupRequest)
+        AlertDialog.Builder(this).setTitle("Save settings backup")
+            .setMessage("The backup includes playlist URLs, which may contain provider credentials. Licence activation and the parental PIN are excluded. Save the file only to a location you trust.")
+            .setPositiveButton("Choose location"){_,_->
+                launchTextExport("HomeTV-settings-backup.json","application/json",payload,exportBackupRequest)
+            }.setNegativeButton("Cancel",null).show()
     }
     private fun mergePlaylistBackup(incoming:String):String{
         val merged=linkedMapOf<String,JSONObject>()
@@ -6816,8 +6820,11 @@ class MainActivity: Activity() {
     }
     private fun showDiagnosticLogs(){
         val report=HomeTvDiagnostics.readReport()
+        val preview=report.takeLast(30_000)
+        val message=if(report.isBlank())"No diagnostic logs have been recorded yet."
+            else preview+(if(report.length>preview.length)"\n\nShowing the latest entries. Use Save report to save the complete available report." else "")
         AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
-            .setMessage(if(report.isBlank())"No diagnostic logs have been recorded yet." else report)
+            .setMessage(message)
             .setPositiveButton("Save report"){_,_->exportDiagnosticReport()}
             .setNegativeButton("Close",null).show()
     }
@@ -6828,7 +6835,7 @@ class MainActivity: Activity() {
             return
         }
         val stamp=java.text.SimpleDateFormat("yyyyMMdd-HHmm",java.util.Locale.ROOT).format(java.util.Date())
-        launchTextExport("HomeTV-diagnostics-"+stamp+".txt","text/plain",report.takeLast(200_000),exportDiagnosticsRequest)
+        launchTextExport("HomeTV-diagnostics-"+stamp+".txt","text/plain",report,exportDiagnosticsRequest)
     }
     private fun showPlaybackDiagnostics(){
         val current=channels.getOrNull(active)
