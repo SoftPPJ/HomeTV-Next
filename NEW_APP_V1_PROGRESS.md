@@ -296,3 +296,24 @@ No final APK, prerelease, or release is approved or created by this audit.
 Do not mark these as passed from source inspection: 10k/20k+ real-TV stress; rapid Up/Down and channel switching; Surya Comedy; HLS/DASH/SmoothStreaming/MP4/WebTV playback quality; Media3/LibVLC recovery; remote focus; YouTube audio/controls; EPG timing; picture presets; channel gain; USB/local import; backup restore; offline licence grace; and side-by-side installation.
 
 A successful debug build and automated test run are necessary but not sufficient. The live licence gateway and Android TV acceptance checklist remain release gates. No prerelease or production release is authorised by this audit.
+
+
+## Latest audited debug build — 2026-11-06
+
+- Source snapshot: `58f981dd91733f772f6f2a2da21defcd4c1e2661` on `new-app-v1-development`.
+- Build workflow: `ppj1981/HomeTV-Build`, run [42267495099](https://github.com/ppj1981/HomeTV-Build/actions/runs/42267495099).
+- Passed: exact source revision verification, Node licence-expiry tests, Kotlin compilation, Android unit tests, debug APK assembly, APK package/label verification, and artifact upload.
+- APK package identity verified as `com.softppj.myhometv.next`; application label verified as `My Home TV Next`.
+- Artifact: `HomeTV-Next-V1-debug-test`, ID `13527463101`, SHA-256 `7ab127af0c77ea15618a648a527437fd28bbc4a2267861c60b8bcc4d56a0cb3a`. Available from the run's **Artifacts** section until 13 November 2026.
+- Added fixed left navigation rail, 20-second playback stall threshold, testable logical-channel index (including alternate URL grouping and playlist-local/combined numbering), guarded YouTube native/WebView fallback, and per-channel audio gain defaulting to 20% with 0–200% adjustment. Alternate URLs for the same logical channel now share the channel-volume preference.
+- The successful build is a **debug test APK only**. No release or prerelease was created.
+
+### Remaining release blockers (not passed)
+
+1. **Android TV acceptance:** no physical TV/device test was run. Remote focus/navigation, side-by-side installation with V6, 10k/20k+ real playlist stress, all stream protocols/quality, audio gain, YouTube, EPG, picture presets, local file import and backup/restore still require device validation.
+2. **Licence isolation:** the deployed `hometv-license-next` Worker has a separate signing key binding, but its `UPSTREAM_BASE` is confirmed as `hometv-license.prasanthpjoy.workers.dev`. Activation/device/admin operations therefore still use the V6 backend records. This does not change V6 Worker source, but it is not independent licence state. Do not run a real Next activation against it until the user chooses shared versus isolated licensing. A separate Next V1 database/backend is required for strict isolation.
+3. **Licence end-to-end:** the signing secret binding exists, but a real test activation, signature/public-key match, device release, expiry, offline grace and clock rollback have not been verified against the live Worker/APK. The source expiry helper is tested; no Worker deployment was made during this audit.
+4. **Third engine:** no separate IJKPlayer/FFmpeg player engine is integrated. The current FFmpeg component is a Media3 decoder extension and is GPL-3.0; distribution obligations need review before any release.
+5. **Known partials:** LibVLC subtitle selection is not exposed in the current UI; imported local-file playlist contents are not embedded in JSON backups; WebView channel gain cannot boost above 100%.
+
+No production APK, prerelease, or public release is approved by this audit. The user must approve any licensing-backend isolation/deployment or release action.
