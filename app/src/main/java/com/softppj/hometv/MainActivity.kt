@@ -3102,8 +3102,14 @@ class MainActivity: Activity() {
                     val currentSource=currentBeforeApply?.source
                     val relocated=channels.indexOfFirst{it.url==currentUrl &&
                         (currentSource==null || it.source==currentSource)}
-                    if(relocated>=0)active=relocated
-                    else{
+                    if(relocated>=0){
+                        val indexChanged=relocated!=active
+                        active=relocated
+                        // Player listeners and delayed recovery callbacks are bound
+                        // to the original channel index. Rebind playback if a refresh
+                        // moved the current channel so those callbacks remain valid.
+                        if(indexChanged && videoScreen!=null)playIndex(relocated)
+                    }else{
                         stopPlayback()
                         showHome()
                     }
