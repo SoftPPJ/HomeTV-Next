@@ -5371,7 +5371,7 @@ class MainActivity: Activity() {
             setPadding(30,20,30,20)
             addView(label)
             addView(level)
-            addView(TextView(this).apply{
+            addView(TextView(this@MainActivity).apply{
                 text="20% is the quiet default. 100% is the stream's original level; up to 200% can boost quiet channels. TV/soundbar master volume remains separate."
                 textSize=14f
             })
