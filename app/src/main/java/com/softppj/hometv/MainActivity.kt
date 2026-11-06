@@ -6664,7 +6664,7 @@ class MainActivity: Activity() {
         val excluded=setOf("license_key","license_device","license_expiry","pin","last_url")
         val data=JSONObject()
         prefs.all.forEach{(key,value)->
-            if(key in excluded || key.startsWith("license_") ||
+            if(key in excluded || key.startsWith("license_") || key.startsWith("signed_license_") ||
                 key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
                 key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))return@forEach
             when(value){
@@ -6725,7 +6725,7 @@ class MainActivity: Activity() {
             val iterator=values.keys()
             while(iterator.hasNext()){
                 val key=iterator.next()
-                if(key=="pin" || key=="last_url" || key.startsWith("license_") ||
+                if(key=="pin" || key=="last_url" || key.startsWith("license_") || key.startsWith("signed_license_") ||
                     key.contains("password",ignoreCase=true) || key.contains("secret",ignoreCase=true) ||
                     key.contains("token",ignoreCase=true) || key.contains("credential",ignoreCase=true))continue
                 val item=values.getJSONObject(key)
@@ -6751,7 +6751,7 @@ class MainActivity: Activity() {
                         if(mode==1){
                             prefs.all.keys.filter{key->
                                 key !in incomingKeys && key!="pin" && key!="last_url" &&
-                                    !key.startsWith("license_") &&
+                                    !key.startsWith("license_") && !key.startsWith("signed_license_") &&
                                     !key.contains("password",ignoreCase=true) &&
                                     !key.contains("secret",ignoreCase=true) &&
                                     !key.contains("token",ignoreCase=true) &&
