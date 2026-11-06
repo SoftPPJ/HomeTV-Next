@@ -6639,7 +6639,6 @@ class MainActivity: Activity() {
             "Clock display",
             "Playlist manager (stop playback)",
             "Home (stop playback)",
-            "Return to TV"
         )
         val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
