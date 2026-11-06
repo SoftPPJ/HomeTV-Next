@@ -768,7 +768,12 @@ class MainActivity: Activity() {
     }
     private fun hasNetworkConnection():Boolean{
         val manager=getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-        return try{manager?.activeNetworkInfo?.isConnected==true}catch(_:Exception){true}
+            ?:return false
+        return try{
+            val network=manager.activeNetwork ?:return false
+            val capabilities=manager.getNetworkCapabilities(network) ?:return false
+            capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }catch(_:Exception){true}
     }
     private var networkRecoveryTask:Runnable?=null
     private fun awaitNetworkRecovery(index:Int,screen:FrameLayout){
