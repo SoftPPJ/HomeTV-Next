@@ -366,6 +366,7 @@ class MainActivity: Activity() {
     private val playedThisSession=mutableSetOf<String>()
     private val failedUrlsThisSession=mutableSetOf<String>()
     private var fallbackEngineOverride:String?=null
+    private var pendingPlaybackDrawerChannelKey:String?=null
     private var engineChannelUrl:String?=null
     private var web:WebView?=null
     // A YouTube page can finish more than once during redirects/SPA navigation.
@@ -721,6 +722,7 @@ class MainActivity: Activity() {
         showBanner("Source "+((current+1)%options.size+1)+" of "+options.size)
     }
     private fun selectAlternative(index:Int){
+        val returnToPlaybackDrawer=videoScreen?.findViewWithTag<View>("settings_drawer")!=null
         val options=alternateIndices(index)
         if(options.size<=1){
             Toast.makeText(this,"No alternative stream for this channel",Toast.LENGTH_SHORT).show()
@@ -742,6 +744,7 @@ class MainActivity: Activity() {
                 if(prefs.getString("working_url_"+selectedKey,null)!=selected.url)
                     editor.remove("working_url_"+selectedKey).remove("confirmed_engine_"+selectedKey)
                 editor.apply()
+                if(returnToPlaybackDrawer)pendingPlaybackDrawerChannelKey=selectedKey
                 playIndex(target)
             }.setNegativeButton("Cancel",null).create()
         showSideDialog(dialog)
@@ -1999,14 +2002,16 @@ class MainActivity: Activity() {
         dialog.show()
     }
     private fun chooseBufferProfile(){
+        val returnToSettings=settingsScreenVisible
+        val returnToPlaybackDrawer=videoScreen?.findViewWithTag<View>("settings_drawer")!=null
         var pending=bufferProfiles.indexOf(prefs.getString("buffer_profile","Auto")).coerceAtLeast(0)
-        val dialog=AlertDialog.Builder(this).setTitle("Playback buffer")
+        val dialog=AlertDialog.Builder(this).setTitle("Buffering profile")
             .setSingleChoiceItems(bufferProfiles,pending){_,i->pending=i}
             .setPositiveButton("OK"){_,_->
                 prefs.edit().putString("buffer_profile",bufferProfiles[pending]).apply()
-                if(settingsScreenVisible)settings()
-                else if(active>=0)showPlaybackSettings()
-                else settings()
+                if(returnToSettings)settings()
+                else if(!returnToPlaybackDrawer && active>=0)showPlaybackSettings()
+                else if(!returnToPlaybackDrawer)settings()
             }.setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
@@ -2065,6 +2070,7 @@ class MainActivity: Activity() {
     }
     private fun chooseChannelEngine(i:Int){
         if(i !in channels.indices)return
+        val returnToPlaybackDrawer=videoScreen?.findViewWithTag<View>("settings_drawer")!=null
         val c=channels[i]
         val universal=(prefs.getString("engine","Media3") ?: "Media3")
             .takeIf{it=="Media3" || it=="LibVLC"} ?: "Auto"
@@ -2083,7 +2089,10 @@ class MainActivity: Activity() {
                     else putString("manual_engine_"+channelKey(c),choices[pending])
                 }.apply()
                 engineAttempts.clear();fallbackEngineOverride=null;unavailableChannels.remove(channelKey(c))
-                if(active==i)playIndex(i)
+                if(active==i){
+                    if(returnToPlaybackDrawer)pendingPlaybackDrawerChannelKey=channelKey(c)
+                    playIndex(i)
+                }
             }.setNegativeButton("Cancel",null).create()
         dialog.setOnShowListener{
             val list=dialog.listView ?:return@setOnShowListener
@@ -6062,6 +6071,8 @@ class MainActivity: Activity() {
         if(!licenseReady)return
         if(index !in channels.indices)return
         val c=channels[index]
+        if(pendingPlaybackDrawerChannelKey!=null && pendingPlaybackDrawerChannelKey!=channelKey(c))
+            pendingPlaybackDrawerChannelKey=null
         if(youtubeNativeAttemptedUrl!=null && youtubeNativeAttemptedUrl!=c.url){
             youtubeNativeGeneration++
             youtubeNativeAttemptedUrl=null
@@ -6409,6 +6420,10 @@ class MainActivity: Activity() {
         updateClock()
         screen.requestFocus()
         showChannelInfo(index)
+        if(pendingPlaybackDrawerChannelKey==channelKey(c)){
+            pendingPlaybackDrawerChannelKey=null
+            handler.post{if(active==index && videoScreen===screen)showPlaybackSettings()}
+        }
     }
     private fun fallbackYouTubeNativeToWeb(index:Int,screen:FrameLayout):Boolean{
         if(youtubeNativeStreamUrl==null || active!=index || videoScreen!==screen)return false
