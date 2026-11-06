@@ -2831,15 +2831,15 @@ class MainActivity: Activity() {
             }
             root.addView(row)
         }
-        root.addView(button("All Channels view: "+if(prefs.getBoolean("all_playlists_continuous_numbers",false))"All enabled playlists (continuous numbers)" else "Active playlist only"){
+        root.addView(button("Channel list scope: "+if(prefs.getBoolean("all_playlists_continuous_numbers",false))"All enabled playlists (continuous numbers)" else "Active playlist only"){
             val combined=!prefs.getBoolean("all_playlists_continuous_numbers",false)
             prefs.edit().putBoolean("all_playlists_continuous_numbers",combined).apply()
             managePlaylists()
         })
-        root.addView(button("↻ Refresh from original source URLs"){refresh({managePlaylists()},true)})
-        root.addView(button("Add M3U URL"){editPlaylist(null)})
-        root.addView(button("Import M3U file (TV / USB)"){showImportFallback()})
-        root.addView(button("Add Xtream Codes"){addXtream()})
+        root.addView(button("↻ Refresh playlists"){refresh({managePlaylists()},true)})
+        root.addView(button("Add playlist URL"){editPlaylist(null)})
+        root.addView(button("Import playlist file (USB / device)"){showImportFallback()})
+        root.addView(button("Add Xtream Codes account"){addXtream()})
         root.addView(button("Back"){showHome()})
     }
     private fun editPlaylist(index:Int?,fromPlaybackDrawer:Boolean=false){
@@ -3408,7 +3408,7 @@ class MainActivity: Activity() {
     private fun showChannels(){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset("Channels (${visibleIndices().size})")
-        root.addView(button("Rebuild playlists"){refresh({showChannels()},true)})
+        root.addView(button("Refresh channel groups"){refresh({showChannels()},true)})
         val groups=playlistIndicesIncludingLocked().map{channels[it].group}.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER)
         // Virtualize groups too: do not create a Button for every playlist group.
         val list=ListView(this).apply{
@@ -3447,7 +3447,7 @@ class MainActivity: Activity() {
     private fun showGroupContents(group:String){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         reset(group)
-        root.addView(button("Lock group"){toggleLock(group,true)})
+        root.addView(button("Protect group"){toggleLock(group,true)})
         // Virtualized rows: never create thousands of Buttons on the UI thread.
         val indices=visibleIndices().filter{channels[it].group==group}
         val list=ListView(this).apply{
@@ -3484,7 +3484,7 @@ class MainActivity: Activity() {
         }
         root.addView(label("Long press: Hide / Unhide · Favourite · Lock / Unlock"))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
-        root.addView(button("Groups"){showChannels()})
+        root.addView(button("All channel groups"){showChannels()})
     }
     private fun manageLockedChannels(){
         requirePin{
@@ -5290,10 +5290,10 @@ class MainActivity: Activity() {
         screen.findViewWithTag<View>("settings_drawer")?.let{screen.removeView(it);return}
         screen.findViewWithTag<View>("channel_drawer")?.let{screen.removeView(it)}
         val options=arrayOf(
-            "Universal aspect ratio: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
-            "This channel aspect ratio: "+screenMode(),
-            "Picture quality","Buffering","Audio tracks","Preferred audio language","Subtitles","Sleep timer","Playback engine",
-            "Date & time overlay","Alternative stream / URL","Home screen","Full settings","Channel volume",
+            "Default screen fit: "+(prefs.getString("screen_mode","Fit") ?: "Fit"),
+            "Channel screen fit: "+screenMode(),
+            "Stream quality","Buffering profile","Audio track","Preferred audio language","Subtitle settings","Sleep timer","Playback engine",
+            "Clock display","Alternative stream","Home","All settings","Channel volume",
             "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")"
         )
         val drawer=LinearLayout(this).apply{
@@ -5303,7 +5303,7 @@ class MainActivity: Activity() {
             isFocusableInTouchMode=true
         }
         drawer.addView(TextView(this).apply{
-            text="PLAYBACK SETTINGS"
+            text="PLAYBACK OPTIONS"
             textSize=20f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(20,18,12,16)
@@ -6855,19 +6855,19 @@ class MainActivity: Activity() {
         })
         root.addView(tvText("Personalize your TV experience",14f,0xFFB0C6D9.toInt()))
         settingsScreenVisible=true
-        root.addView(tvSection("ACCOUNT & LIBRARY"))
+        root.addView(tvSection("ACCOUNT & PLAYLISTS"))
         root.addView(button("Surrender License / Change TV"){surrenderLicense()})
-        root.addView(button("Manage playlists"){managePlaylists()})
-        root.addView(settingsToggle("Automatic Playlist Check & Update","auto_playlist_check",true))
+        root.addView(button("Playlist manager"){managePlaylists()})
+        root.addView(settingsToggle("Automatic playlist refresh","auto_playlist_check",true))
         root.addView(label("Checks the selected active playlist in the background after startup. Cached channels open first; unchanged playlists are not reparsed."))
-        root.addView(button("Clear cache (keep license active)"){confirmClearCache()})
-        root.addView(button("Export settings backup"){exportSettings()})
-        root.addView(button("Restore settings backup"){importSettings()})
-        root.addView(tvSection("DIAGNOSTICS"))
-        root.addView(button("Playback diagnostics"){showPlaybackDiagnostics()})
-        root.addView(button("View diagnostic logs (30 days)"){showDiagnosticLogs()})
+        root.addView(button("Clear app cache"){confirmClearCache()})
+        root.addView(button("Back up settings"){exportSettings()})
+        root.addView(button("Restore settings"){importSettings()})
+        root.addView(tvSection("SYSTEM & DIAGNOSTICS"))
+        root.addView(button("Playback status & diagnostics"){showPlaybackDiagnostics()})
+        root.addView(button("View diagnostic logs"){showDiagnosticLogs()})
         root.addView(button("Export diagnostic report"){exportDiagnosticReport()})
-        root.addView(button("Test network download speed"){runNetworkDiagnostics()})
+        root.addView(button("Test network speed"){runNetworkDiagnostics()})
         root.addView(button("Sleep timer"){sleepTimer()})
         root.addView(button("Favorites"){favorites()})
         root.addView(button("Hidden channels"){hiddenChannels()})
@@ -6877,12 +6877,12 @@ class MainActivity: Activity() {
         root.addView(label("When you leave HomeTV after playback, a low-priority check continues while the app process remains alive. Results are saved and shown when you return. Android may stop background work if it kills the app."))
         root.addView(settingsToggle("Auto Unhide Working Channels","auto_unhide_working_channels",false))
         root.addView(label("OFF by default. When ON, a channel is restored only after actual playback succeeds. URL checks alone never unhide channels."))
-        root.addView(button("EPG / XMLTV guide"){configureEpg()})
-        root.addView(button("EPG time correction"){configureEpgOffset()})
-        root.addView(button("Viewer profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
-        root.addView(tvSection("PLAYBACK & DISPLAY"))
-        root.addView(button("Information transparency: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
-        root.addView(settingsToggle("Show EPG in channel info","show_channel_epg",true))
+        root.addView(button("TV guide (EPG)"){configureEpg()})
+        root.addView(button("TV guide time adjustment"){configureEpgOffset()})
+        root.addView(button("User profile: "+(if(viewerId()=="default")"Default" else viewerId())){manageViewerProfiles()})
+        root.addView(tvSection("PLAYBACK & PICTURE"))
+        root.addView(button("Info panel opacity: "+prefs.getInt("information_opacity",65)+"%"){chooseInformationTransparency()})
+        root.addView(settingsToggle("Show programme information in channel details","show_channel_epg",true))
         root.addView(button("Playback engine: "+(prefs.getString("engine","Media3")?:"Media3")){
             val choices=arrayOf("Auto","Media3","LibVLC")
             AlertDialog.Builder(this).setTitle("Playback engine").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("engine","Media3"))){dialog,i->
@@ -6890,18 +6890,18 @@ class MainActivity: Activity() {
                 dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
-        root.addView(settingsToggle("Live video on Up / Down preview","live_channel_preview",false))
-        root.addView(button("Buffering: "+bufferProfile()){chooseBufferProfile()})
+        root.addView(settingsToggle("Live preview while browsing channels","live_channel_preview",false))
+        root.addView(button("Buffering profile: "+bufferProfile()){chooseBufferProfile()})
         root.addView(label("Ultra Fast = quickest switching; Balanced = recommended; Stable / Maximum Buffer = fewer pauses on uneven networks. Changes apply to the next channel."))
-        root.addView(settingsToggle("Background URL checking","background_url_checks",false){startBackgroundChannelChecks()})
+        root.addView(settingsToggle("Check alternative stream links in background","background_url_checks",false){startBackgroundChannelChecks()})
         root.addView(label("YouTube playback: WebView watch page (restored compatibility mode)"))
-        root.addView(settingsToggle("Auto-skip non-working channels","auto_skip_nonworking",true))
+        root.addView(settingsToggle("Skip unavailable channels automatically","auto_skip_nonworking",true))
         root.addView(label("ON: after all URLs and both players fail, automatically move to the next available channel. OFF: stay on the failed channel. Background URL checking stays separate."))
-        root.addView(settingsToggle("Auto-reconnect streams","auto_reconnect",true))
-        root.addView(tvSection("PARENTAL CONTROLS"))
-        root.addView(button("Manage locked channels / groups"){manageLockedChannels()})
-        root.addView(button("Channels skipped by Up/Down and CH+/−"){manageSkippedChannels()})
-        root.addView(button("Set / change lock password"){
+        root.addView(settingsToggle("Reconnect interrupted streams","auto_reconnect",true))
+        root.addView(tvSection("PARENTAL & ACCESS CONTROL"))
+        root.addView(button("Manage protected channels & groups"){manageLockedChannels()})
+        root.addView(button("Manage channel-surfing exclusions"){manageSkippedChannels()})
+        root.addView(button("Set / change parental PIN"){
             val field=EditText(this).apply{
                 hint="Any letters or digits (no minimum length)"
                 inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
@@ -6917,19 +6917,19 @@ class MainActivity: Activity() {
                 .setPositiveButton("Save"){_,_->save()}.setNegativeButton("Cancel",null).show()}
             if(prefs.contains("pin"))requirePin{prompt()} else prompt()
         })
-        root.addView(settingsToggle("Resume last channel","resume",true))
-        root.addView(button("Open on launch: "+(prefs.getString("launch_screen","Last channel")?:"Last channel")){
+        root.addView(settingsToggle("Resume previous channel","resume",true))
+        root.addView(button("Startup screen: "+(prefs.getString("launch_screen","Last channel")?:"Last channel")){
             val choices=arrayOf("Home","Last channel","Channels")
-            AlertDialog.Builder(this).setTitle("When HomeTV opens").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel"))){dialog,i->
+            AlertDialog.Builder(this).setTitle("Choose startup screen").setSingleChoiceItems(choices,choices.indexOf(prefs.getString("launch_screen","Last channel"))){dialog,i->
                 prefs.edit().putString("launch_screen",choices[i]).apply();dialog.dismiss();settings()
             }.setNegativeButton("Cancel",null).show()
         })
-        root.addView(settingsToggle("Try launch at device boot","boot",false))
+        root.addView(settingsToggle("Launch HomeTV at device startup","boot",false))
         root.addView(label("Auto-start at TV power-on is restricted on Android 10+ and depends on TV manufacturer settings. Enabling this does not guarantee launch."))
-        root.addView(button("Universal picture quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
+        root.addView(button("Default stream quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Auto uses the original quality offered by the active playback engine/stream. Manual resolution preferences apply only where the engine and stream support them."))
-        root.addView(button("Universal screen size: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
-        root.addView(button("Date & time overlay"){clockSettings()})
+        root.addView(button("Default screen fit: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
+        root.addView(button("Clock display"){clockSettings()})
         root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
         root.addView(button("Home"){showHome()})
         // Number actionable rows (including toggles) so TV-remote users can
