@@ -246,5 +246,53 @@ No final APK, prerelease, or release is approved or created by this audit.
 - Network capability lookup now fails closed if Android throws, rather than assuming the network is validated.
 - Per-playlist numbering now normalizes source names consistently, including case variants.
 - Corrected the Next V1 Worker mapping for an `unlimited` entitlement: it now expires at the exclusive UAE boundary after **31 December 2100**, matching the agreed policy. Updated Node and Android licence tests accordingly.
-- Added `NEXT_V1_AUDIT.md` with the source compliance matrix and remaining release/device gates.
+- Recorded the source compliance matrix and remaining release/device gates in this progress file.
 - Still pending: fresh compile/test/APK build against this updated source head; live Worker configuration and activation verification; actual Android TV acceptance tests. No release or prerelease is part of this work.
+
+
+## Next V1 source compliance matrix — 2026-11-06
+
+**Scope:** source implementation and automated tests only. No Android TV device acceptance tests were performed.
+
+### Source-confirmed
+
+| Area | Status / evidence |
+|---|---|
+| App isolation | Package ID `com.softppj.myhometv.next`; independent app-private storage/preferences. Side-by-side install still needs a TV test. |
+| Startup | Cached playlist and last channel open before background refresh; launch destination configurable. |
+| Playlist refresh | Background, active playlist by default; ETag, Last-Modified and content hash; unchanged body reuses cache. |
+| Large playlists | 32 MiB input bound, bounded worker pool, background parsing, cached channel index and virtualized ListView. Automated tests cover 10,000 parsed entries and 20,000 indexed rows. |
+| Playlist scope | Active playlist is default; optional all-enabled-playlists view uses continuous numbering; alternate URLs share a logical channel number. Source selection now uses a cached source set and fallback. |
+| Playlist manager | Add/import, enable/disable, long-press lock, immediate deletion and next enabled non-empty playlist's last-channel selection. |
+| Hidden channels | Bounded HTTP reachability scan; reports URL reachability only. Auto-unhide is OFF by default and only follows actual foreground playback start. |
+| Licensing | Device/token-bound signed lease, local expiry, clock rollback guard, seven-day offline grace, transient network handling, no-internet state, background revalidation, backup exclusion. |
+| EPG | XMLTV (including gzip), tvg-id/name matching, current/next, guide grid, reminders and scheduled switching. |
+| Clock overlay | Default ON; date/time/day rotation, transparent background, shadow, position and size controls. |
+| Home UI | Branded cinematic home with fixed navigation rail and Live TV, Favorites, Guide, Movies, Series, Music, Web TV, YouTube, History and tools rows. |
+| Playback | Media3 primary, LibVLC fallback; HLS, DASH, SmoothStreaming, RTSP and progressive paths; WebView for web-page sources. |
+| Recovery | After a working URL/engine is confirmed, retries that same URL/engine. Other URLs are probed separately and only offered for user confirmation. Network loss waits for validated connectivity; stall threshold is 20 seconds. |
+| Audio | Per-channel gain default 20%, independent of TV master volume; gain/boost control, preferred audio language and per-channel track memory. |
+| Diagnostics | Private bounded logs retained 30 days, view/export, crash counting and safe-start after repeated crashes. |
+| Backup/restore | JSON backup with Merge/Replace; playlists, preferences, favourites and watch-history preferences; licence and parental PIN excluded. |
+
+### Partial or not integrated
+
+1. **Third player:** no independent IJKPlayer/FFmpeg player engine. The Jellyfin FFmpeg dependency is a Media3 decoder extension, not a third player, and is GPL-3.0. Distribution requires a licence/source-notice review.
+2. **YouTube:** native Media3 attempt is limited to individual videos whose public response exposes an HLS livestream manifest. Ordinary VOD, playlists, unsupported streams, and failed/slow discovery use WebView. This is not universal native YouTube playback.
+3. **Licence end-to-end:** Next V1 gateway source delegates to the existing backend and signs leases with a separate key. Live Worker configuration (`UPSTREAM_BASE`, private-key secret), activation, release and real APK/device signature matching are not verified. Unlimited expiry is corrected in source to the agreed 31 December 2100 UAE boundary.
+4. **Subtitles:** Media3 subtitle selection is present; equivalent LibVLC subtitle selection is not implemented in the current UI.
+5. **Local playlist backup:** imported `file:` M3U contents are app-private and are not embedded in the JSON backup. Those files must be re-imported after app-data loss or on another device.
+
+### Automated test coverage
+
+- M3U parser: metadata/headers, alternate URLs, deleted groups, unsupported schemes and 10,000 entries.
+- Channel/policy helpers: 20,000 rows, alternate URL grouping, playlist numbering/scope, hidden-channel policy, EPG matching, clock rotation and YouTube fallback guards.
+- Signed licence cache: valid/tampered signature, device/token binding, expiry, unlimited lease, seven-day grace, clock rollback and cache clear.
+- YouTube resolver: URL validation, public HLS extraction and malformed/unplayable responses.
+- Worker expiry helper: unlimited, UAE day boundary and invalid dates.
+
+### Device and live-service tests still open
+
+Do not mark these as passed from source inspection: 10k/20k+ real-TV stress; rapid Up/Down and channel switching; Surya Comedy; HLS/DASH/SmoothStreaming/MP4/WebTV playback quality; Media3/LibVLC recovery; remote focus; YouTube audio/controls; EPG timing; picture presets; channel gain; USB/local import; backup restore; offline licence grace; and side-by-side installation.
+
+A successful debug build and automated test run are necessary but not sufficient. The live licence gateway and Android TV acceptance checklist remain release gates. No prerelease or production release is authorised by this audit.
