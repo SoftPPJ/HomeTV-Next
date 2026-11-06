@@ -6539,7 +6539,7 @@ class MainActivity: Activity() {
                                 }
                             }
                             bufferingRecoveryTask=recovery
-                            handler.postDelayed(recovery,30000L)
+                            handler.postDelayed(recovery,20000L)
                         }
                     }else{
                         bufferingRecoveryTask?.let{handler.removeCallbacks(it)}
@@ -6641,7 +6641,7 @@ class MainActivity: Activity() {
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
                     if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
-                        android.os.SystemClock.elapsedRealtime()-lastHealthy>30000L){
+                        android.os.SystemClock.elapsedRealtime()-lastHealthy>20000L){
                         failed=true
                         autoBufferStalled()
                         HomeTvDiagnostics.w("HomeTV","LibVLC stalled for "+c.name)
