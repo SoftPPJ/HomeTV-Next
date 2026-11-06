@@ -236,3 +236,15 @@ No final APK, prerelease, or release is approved or created by this audit.
 - The native discovery screen shows a short status banner during the bounded lookup.
 - Added a signed-cache unit test proving that a far-future non-expiring lease is accepted while the existing seven-day offline grace remains enforced.
 - Worker expiry parsing is split into a pure helper with Node unit tests for unlimited, date-based and invalid expiries.
+
+
+## Source compliance audit and performance corrections — 2026-11-06
+
+- Added an O(1) cached set of playlist source names so repeated channel surfing does not scan a 10k+ channel list just to validate the selected playlist.
+- Playlist scope now resolves in this order: selected enabled playlist with loaded channels, currently playing playlist, then the first enabled playlist with loaded channels. This prevents the default per-playlist view from silently becoming an all-playlists view when the saved selection is unavailable.
+- Hidden-channel result and review screens now use the cached channel-key index instead of repeatedly scanning the full playlist for every result. Wording now accurately reports **reachable URLs**, not confirmed working playback. URL reachability still never triggers automatic unhide; that remains tied to an actual foreground playback-start event.
+- Network capability lookup now fails closed if Android throws, rather than assuming the network is validated.
+- Per-playlist numbering now normalizes source names consistently, including case variants.
+- Corrected the Next V1 Worker mapping for an `unlimited` entitlement: it now expires at the exclusive UAE boundary after **31 December 2100**, matching the agreed policy. Updated Node and Android licence tests accordingly.
+- Added `NEXT_V1_AUDIT.md` with the source compliance matrix and remaining release/device gates.
+- Still pending: fresh compile/test/APK build against this updated source head; live Worker configuration and activation verification; actual Android TV acceptance tests. No release or prerelease is part of this work.
