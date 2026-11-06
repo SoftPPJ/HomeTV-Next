@@ -22,22 +22,32 @@ internal object HomeTvDiagnostics {
     @Synchronized fun initialize(context: Context): Boolean {
         appContext = context.applicationContext
         val prefs = appContext!!.getSharedPreferences("hometv", Context.MODE_PRIVATE)
-        val previousStartupWasUnclean = prefs.getBoolean("startup_in_progress", false)
-        val crashCount = if (previousStartupWasUnclean) {
-            prefs.getInt("startup_crash_count", 0) + 1
-        } else {
-            prefs.getInt("startup_crash_count", 0)
-        }
+        // Count actual uncaught application crashes, not ordinary background
+        // process eviction. Android may kill a paused app without an Activity
+        // callback; that must not trigger safe startup on the next launch.
+        val crashCount = prefs.getInt("startup_crash_count", 0)
         val safeMode = prefs.getBoolean("safe_startup_mode", false) || crashCount >= 2
         prefs.edit()
             .putBoolean("startup_in_progress", true)
-            .putInt("startup_crash_count", crashCount)
             .putBoolean("safe_startup_mode", safeMode)
             .apply()
         prune()
         if (!crashHandlerInstalled) {
             val previous = Thread.getDefaultUncaughtExceptionHandler()
             Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+                // Persist the crash before delegating to Android's process handler.
+                try {
+                    val context = appContext
+                    if (context != null) {
+                        val crashPrefs = context.getSharedPreferences("hometv", Context.MODE_PRIVATE)
+                        val crashes = crashPrefs.getInt("startup_crash_count", 0) + 1
+                        crashPrefs.edit()
+                            .putInt("startup_crash_count", crashes)
+                            .putBoolean("safe_startup_mode", crashes >= 2)
+                            .putBoolean("startup_in_progress", false)
+                            .commit()
+                    }
+                } catch (_: Exception) { }
                 e("HomeTV", "Uncaught crash on thread " + thread.name, error)
                 if (previous != null) previous.uncaughtException(thread, error)
                 else {
