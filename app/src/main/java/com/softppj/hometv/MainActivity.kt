@@ -3914,7 +3914,7 @@ class MainActivity: Activity() {
         var pending=selected
         val dialog=AlertDialog.Builder(this).setTitle("Preferred audio language")
             .setSingleChoiceItems(choices,selected){_,which->pending=which}
-            .setPositiveButton("OK"){_,_->
+            .setPositiveButton("OK"){dialog,_->
                 val which=pending
                 val code=codes[which]
                 if(code.isBlank()){
