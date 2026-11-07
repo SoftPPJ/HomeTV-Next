@@ -145,3 +145,23 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - Cloudflare account inspection confirmed `hometv-license-next` is deployed with 100% traffic, has a `LICENSE_SIGNING_PRIVATE_JWK` secret binding, and its `UPSTREAM_BASE` points to the existing V6 licence Worker. Secret contents were not accessed. A live validation still requires a valid test licence/device pair and remains unverified.
 - **Remaining:** Android TV playback and quality tests are user-owned; do not claim the freeze is definitively fixed until observed on the TV. No APK should be assembled until the user explicitly authorizes packaging.
 
+
+
+## HomeTV-Next cross-version audit — 7 November 2026
+
+Compared against the preserved `HomeTV-V6/my-home-tv-v6-development` snapshot and the original `HomeTV` V6 development, stability, feature-completion and stabilization-integration branches.
+
+- The Next branch is a separate implementation. It independently contains the major cumulative V6 areas: cache-first startup, active-playlist refresh, large-playlist indexing, per-playlist numbering, two-digit left navigation and playlist selector, playlist lock/deletion, backup/restore, EPG, diagnostics, safe startup, signed lease cache, YouTube native-HLS attempt/WebView fallback and the cinematic home.
+- Next intentionally has two players only: Media3 primary and LibVLC secondary (LibVLC first for RTMP/VLC-only protocols). NextLib FFmpeg is a Media3 decoder extension; IJKPlayer is not included.
+- Next upgrades the V6 snapshot's Media3 1.5.1 / LibVLC 3.5.1 / Jellyfin FFmpeg 1.5.0+1 to Media3 1.11.1 / LibVLC 3.7.7 / NextLib 1.11.1-0.17.0.
+- Default stream-quality and aspect-ratio dialogs return to Settings after selection. Per-channel picture presets and custom adjustments are present.
+- Final audit fixed LibVLC freeze monitoring when Auto-reconnect is OFF and prevented a Playing event from confirming a video before an actual presented frame. Added tests for the confirmation policy.
+
+### Outstanding release gates
+- Latest source-only CI must pass after the final LibVLC changes.
+- Signed licence end-to-end activation/validation remains unverified without a real test licence/device pair.
+- Android TV playback, frozen-picture recovery, actual resolution/quality, long-run stability, remote controls, EPG and YouTube remain user device tests.
+- 10k–20k+ playlist UI/memory stress testing remains outstanding; unit indexing coverage is not a substitute.
+- Confirm GPL-3.0 distribution notices/source obligations for LibVLC and NextLib FFmpeg before APK distribution.
+
+No APK has been assembled or published. Do not enable APK packaging until the user explicitly authorizes it.
