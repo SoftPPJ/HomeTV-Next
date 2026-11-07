@@ -5512,7 +5512,9 @@ class MainActivity: Activity() {
             "Channel screen fit: "+screenMode(),
             "Stream quality","Buffering profile","Audio track","Preferred audio language","Subtitle settings","Sleep timer","Playback engine",
             "Clock display","Select stream source","Home","Live TV settings","Channel volume",
-            "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")"
+            "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")",
+            "View diagnostic logs",
+            "Save diagnostic report"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -5553,6 +5555,8 @@ class MainActivity: Activity() {
                 12->liveSettings()
                 13->if(active>=0)configureChannelVolume(active)
                 14->if(active>=0)configureChannelPicture(active)
+                15->showDiagnosticLogs()
+                16->exportDiagnosticReport()
             }
         }
         list.setOnKeyListener{_,code,event->
@@ -6688,6 +6692,9 @@ class MainActivity: Activity() {
                     }
                 }
                 override fun onPlaybackStateChanged(state:Int){
+                    HomeTvDiagnostics.i("Media3","state="+state+" isPlaying="+exo.isPlaying+
+                        " channel="+c.name+" positionMs="+exo.currentPosition+
+                        " bufferedMs="+(exo.bufferedPosition-exo.currentPosition).coerceAtLeast(0L))
                     if(state==Player.STATE_BUFFERING){
                         autoBufferStableSince=0L
                         autoBufferStalled()
@@ -6862,6 +6869,8 @@ class MainActivity: Activity() {
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return@post
                     when(eventType){
                         VlcPlayer.Event.Playing->{
+                            HomeTvDiagnostics.i("LibVLC","Playing event channel="+c.name+
+                                " timeMs="+try{vlc.time}catch(_:Exception){-1L})
                             started=true
                             vlcStartedAt=android.os.SystemClock.elapsedRealtime()
                             lastHealthy=vlcStartedAt
@@ -6892,6 +6901,8 @@ class MainActivity: Activity() {
                                 " vout="+event.voutCount)
                         }
                         VlcPlayer.Event.Buffering->{
+                            HomeTvDiagnostics.w("LibVLC","Buffering channel="+c.name+
+                                " percent="+event.buffering)
                             // Buffering is not proof of forward progress.
                         }
                         VlcPlayer.Event.Stopped,VlcPlayer.Event.EndReached->{
@@ -6994,6 +7005,8 @@ class MainActivity: Activity() {
             "Clock display",
             "Playlist manager (stop playback)",
             "Home (stop playback)",
+            "View diagnostic logs",
+            "Save diagnostic report",
         )
         val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
@@ -7024,6 +7037,8 @@ class MainActivity: Activity() {
                         .setPositiveButton("Continue"){_,_->managePlaylists()}
                         .setNegativeButton("Stay on TV",null).show()
                     8->showHome()
+                    9->showDiagnosticLogs()
+                    10->exportDiagnosticReport()
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
@@ -7414,6 +7429,27 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0 &&
+            (HomeTvPolicies.isRemoteSelectKey(event.keyCode) ||
+             HomeTvPolicies.isRemoteLeftKey(event.keyCode) ||
+             HomeTvPolicies.isRemoteRightKey(event.keyCode) ||
+             event.keyCode==KeyEvent.KEYCODE_DPAD_UP ||
+             event.keyCode==KeyEvent.KEYCODE_DPAD_DOWN)){
+            val screen=videoScreen
+            val drawer=screen?.findViewWithTag<View>("channel_drawer")?.tag
+                ?:screen?.findViewWithTag<View>("settings_drawer")?.tag
+                ?:screen?.findViewWithTag<View>("left_navigation")?.tag
+                ?: "none"
+            val focused=window.decorView.findFocus()?.javaClass?.simpleName ?: "none"
+            val media=channels.getOrNull(active)?.mediaType ?: "none"
+            HomeTvDiagnostics.i("RemoteInput","key="+event.keyCode+
+                " action="+event.action+" media="+media+" drawer="+drawer+
+                " focus="+focused+" selected="+(screen?.let{drawerList(
+                    it.findViewWithTag<View>("channel_drawer")
+                        ?:it.findViewWithTag<View>("settings_drawer")
+                        ?:it.findViewWithTag<View>("left_navigation")
+                )?.selectedItemPosition} ?: -1))
+        }
         // Give a visible AlertDialog its own remote OK and directional navigation.
         // Avoid processing dialog keys as channel commands in the Activity.
         if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
