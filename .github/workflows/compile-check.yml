@@ -30,10 +30,16 @@ jobs:
         with:
           gradle-version: '8.13'
       - name: Verify playback engine dependency versions
+        shell: bash
         run: |
-          gradle :app:dependencyInsight --dependency media3-exoplayer --configuration debugRuntimeClasspath --no-daemon
-          gradle :app:dependencyInsight --dependency libvlc-all --configuration debugRuntimeClasspath --no-daemon
-          gradle :app:dependencyInsight --dependency nextlib-media3ext --configuration debugRuntimeClasspath --no-daemon
+          set -euo pipefail
+          media3="$(gradle :app:dependencyInsight --dependency media3-exoplayer --configuration debugRuntimeClasspath --no-daemon --console=plain)"
+          libvlc="$(gradle :app:dependencyInsight --dependency libvlc-all --configuration debugRuntimeClasspath --no-daemon --console=plain)"
+          nextlib="$(gradle :app:dependencyInsight --dependency nextlib-media3ext --configuration debugRuntimeClasspath --no-daemon --console=plain)"
+          printf '%s\n' "$media3" "$libvlc" "$nextlib"
+          grep -Fq 'androidx.media3:media3-exoplayer:1.11.1' <<< "$media3"
+          grep -Fq 'org.videolan.android:libvlc-all:3.7.7' <<< "$libvlc"
+          grep -Fq 'io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.16.0' <<< "$nextlib"
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
