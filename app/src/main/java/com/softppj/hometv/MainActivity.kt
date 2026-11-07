@@ -5085,6 +5085,13 @@ class MainActivity: Activity() {
         list.isFocusable=true
         list.isFocusableInTouchMode=true
         list.choiceMode=ListView.CHOICE_MODE_SINGLE
+        list.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
+            override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long){
+                HomeTvDiagnostics.i("RemoteInput","Drawer selection changed position="+position+
+                    " item="+(parent?.getItemAtPosition(position)?.toString() ?: "unknown"))
+            }
+            override fun onNothingSelected(parent:AdapterView<*>?){}
+        }
         list.post{
             if(list.count>0){
                 if(list.selectedItemPosition !in 0 until list.count)
@@ -5535,6 +5542,8 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.END))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,choice,_->
+            HomeTvDiagnostics.i("RemoteInput","Playback settings item activated index="+choice+
+                " label="+options.getOrNull(choice))
             // Keep the playback-settings drawer underneath option dialogs. This
             // lets users make several changes without reopening the drawer.
             // Only destinations that replace the playback screen close it first.
@@ -5560,7 +5569,8 @@ class MainActivity: Activity() {
             }
         }
         list.setOnKeyListener{_,code,event->
-            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_LEFT)){
+            if(event.action==KeyEvent.ACTION_DOWN &&
+                (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_LEFT || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
                 close();true
             }else false
         }
@@ -6819,11 +6829,17 @@ class MainActivity: Activity() {
                 }
             }
             var started=false
+            var confirmed=false
             var failed=false
             var hasVideoOutput=false
             var vlcStartedAt=0L
             var lastHealthy=android.os.SystemClock.elapsedRealtime()
             var lastMediaTime=-1L
+            var lastDisplayedPictures=-1
+            var lastDecodedVideo=-1
+            var lastPlayedAudioBuffers=-1
+            var lastVideoProgressAt=0L
+            var lastVideoStatsLoggedAt=0L
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
@@ -6835,16 +6851,85 @@ class MainActivity: Activity() {
                             lastHealthy=now
                         }
                         val videoTracks=try{vlc.videoTracks}catch(_:Exception){null}
+                        val audioTracks=try{vlc.audioTracks}catch(_:Exception){null}
                         val hasVideoTrack=videoTracks?.any{it.id>=0}==true
+                        val hasAudioTrack=audioTracks?.any{it.id>=0}==true
                         if(!hasVideoOutput && hasVideoTrack)hasVideoOutput=true
-                        // SurfaceView does not expose per-frame callbacks. Use VLC's
-                        // own timeline events and time position to detect a stalled
-                        // transport without treating a missing TextureView callback
-                        // as a decoder failure.
+                        // LibVLC 3.5.1 exposes decoded/displayed video and audio-buffer
+                        // counters through the active Media stats. This separates a
+                        // frozen picture from a clock that continues because audio plays.
+                        val activeMedia=try{vlc.media}catch(_:Exception){null}
+                        val stats=try{activeMedia?.stats}catch(e:Exception){
+                            HomeTvDiagnostics.w("LibVLC","Unable to read media statistics for "+c.name,e)
+                            null
+                        }finally{
+                            try{activeMedia?.release()}catch(_:Exception){}
+                        }
+                        if(stats!=null){
+                            val displayed=stats.displayedPictures
+                            val decoded=stats.decodedVideo
+                            val audioBuffers=stats.playedAbuffers
+                            if(displayed>lastDisplayedPictures){
+                                lastDisplayedPictures=displayed
+                                lastVideoProgressAt=now
+                                if(!confirmed && hasVideoTrack){
+                                    confirmed=true
+                                    rememberWorking(c)
+                                    handler.removeCallbacks(watchdog)
+                                    autoBufferHealthy()
+                                    HomeTvDiagnostics.i("LibVLC","First displayed video frame confirmed channel="+c.name+
+                                        " decodedVideo="+decoded+" displayedPictures="+displayed)
+                                }
+                            }else if(lastDisplayedPictures<0){
+                                lastDisplayedPictures=displayed
+                                lastVideoProgressAt=now
+                            }
+                            if(decoded!=lastDecodedVideo)lastDecodedVideo=decoded
+                            if(audioBuffers!=lastPlayedAudioBuffers)lastPlayedAudioBuffers=audioBuffers
+                            if(now-lastVideoStatsLoggedAt>=15000L){
+                                lastVideoStatsLoggedAt=now
+                                HomeTvDiagnostics.i("LibVLC","Video stats channel="+c.name+
+                                    " decodedVideo="+decoded+" displayedPictures="+displayed+
+                                    " playedAudioBuffers="+audioBuffers+" videoTrack="+hasVideoTrack+
+                                    " audioTrack="+hasAudioTrack+" vout="+hasVideoOutput)
+                            }
+                            if(!confirmed && !hasVideoTrack && hasAudioTrack &&
+                                now-vlcStartedAt>=1500L &&
+                                (audioBuffers>0 || mediaTime>0L)){
+                                confirmed=true
+                                rememberWorking(c)
+                                handler.removeCallbacks(watchdog)
+                                autoBufferHealthy()
+                                HomeTvDiagnostics.i("LibVLC","Audio-only playback confirmed channel="+c.name)
+                            }
+                            if(HomeTvPolicies.isVideoOutputStalled(
+                                    isPlaying=vlc.isPlaying,
+                                    videoExpected=hasVideoTrack,
+                                    videoFrameAgeMs=if(lastVideoProgressAt==0L)now-vlcStartedAt else now-lastVideoProgressAt,
+                                    mediaProgressAgeMs=now-lastHealthy
+                                )){
+                                failed=true
+                                autoBufferStalled()
+                                HomeTvDiagnostics.e("LibVLC","Video output stalled while playback continued channel="+c.name+
+                                    " mediaTimeMs="+mediaTime+" decodedVideo="+decoded+
+                                    " displayedPictures="+displayed+" playedAudioBuffers="+audioBuffers+
+                                    " lastFrameAgeMs="+(now-lastVideoProgressAt))
+                                handleEngineFailure(index,screen)
+                                return
+                            }
+                        }else if(now-lastHealthy>=30_000L){
+                            failed=true
+                            autoBufferStalled()
+                            HomeTvDiagnostics.w("LibVLC","No LibVLC media stats and no transport progress channel="+c.name+
+                                " vout="+hasVideoOutput+" videoTracks="+(videoTracks?.size ?: -1)+
+                                " mediaTimeMs="+mediaTime)
+                            handleEngineFailure(index,screen)
+                            return
+                        }
                         if(now-lastHealthy>=30_000L){
                             failed=true
                             autoBufferStalled()
-                            HomeTvDiagnostics.w("HomeTV","LibVLC playback made no timeline progress for "+c.name+
+                            HomeTvDiagnostics.w("LibVLC","LibVLC transport made no timeline progress channel="+c.name+
                                 " vout="+hasVideoOutput+" videoTracks="+(videoTracks?.size ?: -1)+
                                 " mediaTimeMs="+mediaTime)
                             handleEngineFailure(index,screen)
@@ -6856,10 +6941,13 @@ class MainActivity: Activity() {
             }
             handler.postDelayed(stallCheck,5000)
             val watchdog=Runnable{
-                if(!started && !failed && active==index && vlcPlayer===vlc){
+                if(!confirmed && !failed && active==index && vlcPlayer===vlc){
                     failed=true
-                    HomeTvDiagnostics.w("HomeTV","LibVLC startup timeout for "+c.name)
-                    showBanner(c.name+" did not start. Trying another stream.",true)
+                    val videoTracks=try{vlc.videoTracks?.size ?: -1}catch(_:Exception){-1}
+                    HomeTvDiagnostics.w("HomeTV","LibVLC output confirmation timeout channel="+c.name+
+                        " started="+started+" vout="+hasVideoOutput+" videoTracks="+videoTracks+
+                        " timeMs="+try{vlc.time}catch(_:Exception){-1L})
+                    showBanner(c.name+" video output was not confirmed. Trying another stream.",true)
                     handleEngineFailure(index,screen)
                 }
             }
@@ -6875,10 +6963,9 @@ class MainActivity: Activity() {
                             vlcStartedAt=android.os.SystemClock.elapsedRealtime()
                             lastHealthy=vlcStartedAt
                             lastMediaTime=try{vlc.time}catch(_:Exception){-1L}
-                            // Preserve the previously working confirmation point:
-                            // LibVLC's Playing event means its selected URL/engine
-                            // has actually started, unlike an HTTP reachability probe.
-                            rememberWorking(c)
+                            // Playing means the demuxer/player started, not that a
+                            // video frame reached the display. Confirmation is deferred
+                            // until Media.getStats() reports displayed pictures.
                             handler.postDelayed({
                                 if(vlcPlayer===vlc && active==index && !failed)
                                     applyVlcAudioTrackPreference(c,vlc)
@@ -6888,8 +6975,6 @@ class MainActivity: Activity() {
                                     android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
                                     recoveryAttempts.remove(c.url)
                             },60000L)
-                            autoBufferHealthy()
-                            handler.removeCallbacks(watchdog)
                         }
                         VlcPlayer.Event.TimeChanged,VlcPlayer.Event.PositionChanged->{
                             lastHealthy=android.os.SystemClock.elapsedRealtime()
@@ -7429,26 +7514,36 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
-        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0 &&
-            (HomeTvPolicies.isRemoteSelectKey(event.keyCode) ||
-             HomeTvPolicies.isRemoteLeftKey(event.keyCode) ||
-             HomeTvPolicies.isRemoteRightKey(event.keyCode) ||
-             event.keyCode==KeyEvent.KEYCODE_DPAD_UP ||
-             event.keyCode==KeyEvent.KEYCODE_DPAD_DOWN)){
+        // Capture every key event before any Activity-level early return. Android TV
+        // remotes frequently expose vendor-specific keycodes; logging only DPAD and
+        // media keys hid the actual input that the player was receiving.
+        run {
             val screen=videoScreen
-            val drawer=screen?.findViewWithTag<View>("channel_drawer")?.tag
-                ?:screen?.findViewWithTag<View>("settings_drawer")?.tag
-                ?:screen?.findViewWithTag<View>("left_navigation")?.tag
-                ?: "none"
-            val focused=window.decorView.findFocus()?.javaClass?.simpleName ?: "none"
-            val media=channels.getOrNull(active)?.mediaType ?: "none"
-            HomeTvDiagnostics.i("RemoteInput","key="+event.keyCode+
-                " action="+event.action+" media="+media+" drawer="+drawer+
-                " focus="+focused+" selected="+(screen?.let{drawerList(
-                    it.findViewWithTag<View>("channel_drawer")
-                        ?:it.findViewWithTag<View>("settings_drawer")
-                        ?:it.findViewWithTag<View>("left_navigation")
-                )?.selectedItemPosition} ?: -1))
+            val drawerView=screen?.findViewWithTag<View>("channel_drawer")
+                ?:screen?.findViewWithTag<View>("settings_drawer")
+                ?:screen?.findViewWithTag<View>("left_navigation")
+            val list=drawerList(drawerView)
+            val focused=window.decorView.findFocus()
+            val device=event.device
+            HomeTvDiagnostics.i("RemoteInput",
+                "action="+event.action+
+                " keyCode="+event.keyCode+
+                " keyName="+KeyEvent.keyCodeToString(event.keyCode)+
+                " scanCode="+event.scanCode+
+                " source="+event.source+
+                " deviceId="+event.deviceId+
+                " deviceName="+(device?.name ?: "unknown")+
+                " repeat="+event.repeatCount+
+                " meta="+event.metaState+
+                " flags="+event.flags+
+                " focus="+(focused?.javaClass?.simpleName ?: "none")+
+                " focusId="+(focused?.id ?: View.NO_ID)+
+                " drawer="+(drawerView?.tag ?: "none")+
+                " listSelected="+(list?.selectedItemPosition ?: -1)+
+                " listChecked="+(list?.checkedItemPosition ?: -1)+
+                " windowFocus="+window.decorView.hasWindowFocus()+
+                " active="+active+
+                " media="+(channels.getOrNull(active)?.mediaType ?: "none"))
         }
         // Give a visible AlertDialog its own remote OK and directional navigation.
         // Avoid processing dialog keys as channel commands in the Activity.
@@ -7499,26 +7594,15 @@ class MainActivity: Activity() {
                         }
                         return true
                     }
-                    HomeTvPolicies.isRemoteLeftKey(event.keyCode)->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);showLeftNavigation()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
-                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);currentScreen?.requestFocus()}
-                            }
-                        }
-                        return true
-                    }
-                    HomeTvPolicies.isRemoteRightKey(event.keyCode)->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);showOverlayList()}
-                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);currentScreen?.requestFocus()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
-                            }
-                        }
-                        return true
-                    }
+                    // Let Android's focused ListView handle DPAD navigation itself.
+                    // Intercepting DPAD_LEFT/RIGHT here prevented its own key listeners
+                    // from receiving the event and made selection appear unresponsive.
+                    event.keyCode in setOf(
+                        KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN,
+                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT
+                    )->return false
+                    HomeTvPolicies.isRemoteLeftKey(event.keyCode)->return true
+                    HomeTvPolicies.isRemoteRightKey(event.keyCode)->return true
                 }
             }
         }
