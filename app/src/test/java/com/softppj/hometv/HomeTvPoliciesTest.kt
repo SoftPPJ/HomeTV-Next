@@ -23,20 +23,30 @@ class HomeTvPoliciesTest {
         assertEquals(2,index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels[1])])
     }
 
-    @Test fun libVlcReceivesSupportedPlaylistHttpHeaders(){
+    @Test fun libVlcReceivesOnlyTheV6SupportedPlaylistHttpHeadersCaseInsensitively(){
         assertEquals(
             listOf(
                 ":http-user-agent=HomeTV-Test",
-                ":http-referrer=https://ref.example/",
-                ":http-origin=https://origin.example"
+                ":http-referrer=https://ref.example/"
             ),
             HomeTvPolicies.libVlcHttpHeaderOptions(mapOf(
-                "User-Agent" to "HomeTV-Test",
-                "Referer" to "https://ref.example/",
+                "user-agent" to "HomeTV-Test",
+                "referer" to "https://ref.example/",
                 "Origin" to "https://origin.example"
             ))
         )
-        assertTrue(HomeTvPolicies.libVlcHttpHeaderOptions(mapOf("Origin" to "bad\r\nheader")).isEmpty())
+        assertTrue(HomeTvPolicies.libVlcHttpHeaderOptions(mapOf("User-Agent" to "bad\r\nheader")).isEmpty())
+    }
+
+    @Test fun remoteSelectAndNavigationKeysCoverCommonAndroidTvMappings(){
+        assertTrue(HomeTvPolicies.isRemoteSelectKey(android.view.KeyEvent.KEYCODE_DPAD_CENTER))
+        assertTrue(HomeTvPolicies.isRemoteSelectKey(android.view.KeyEvent.KEYCODE_ENTER))
+        assertTrue(HomeTvPolicies.isRemoteSelectKey(android.view.KeyEvent.KEYCODE_BUTTON_A))
+        assertTrue(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+        assertTrue(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_MEDIA_REWIND))
+        assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT))
+        assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
+        assertFalse(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_DPAD_UP))
     }
 
     @Test fun reachabilityRejectsHtmlAndErrors() {
@@ -112,9 +122,9 @@ class HomeTvPoliciesTest {
         assertEquals(10_000, index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels.last())])
     }
 
-    @Test fun libVlcAutoAndBestAvailableKeepTheOriginalAdaptiveResolutionRange() {
-        assertEquals(listOf(":adaptive-logic=highest"), HomeTvPolicies.libVlcAdaptiveOptions("Auto"))
-        assertEquals(listOf(":adaptive-logic=highest"), HomeTvPolicies.libVlcAdaptiveOptions("Best Available"))
+    @Test fun libVlcAutoAndBestAvailableUseNativeAdaptiveBitrateSelection() {
+        assertTrue(HomeTvPolicies.libVlcAdaptiveOptions("Auto").isEmpty())
+        assertTrue(HomeTvPolicies.libVlcAdaptiveOptions("Best Available").isEmpty())
         assertFalse(HomeTvPolicies.libVlcAdaptiveOptions("Auto").any { it.startsWith(":adaptive-maxheight=") })
     }
 
