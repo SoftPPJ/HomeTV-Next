@@ -1,6 +1,9 @@
 name: MyTV V1 compile and test only
 
 on:
+  push:
+    branches:
+      - new-app-v1-development
   workflow_dispatch:
 
 permissions:
@@ -30,3 +33,12 @@ jobs:
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Upload debug APK for device testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-Next-V1-debug
+          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          if-no-files-found: error
+          retention-days: 14
