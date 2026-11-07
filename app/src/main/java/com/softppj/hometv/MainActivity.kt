@@ -4347,10 +4347,15 @@ class MainActivity: Activity() {
         }
     }
     @UnstableApi
-    private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
-        // Standard means native Media3 rendering. Do not install an empty
-        // video-effect chain: some TV decoders freeze when it is attached.
-        if(selectedPicturePreset(c)=="Standard")return
+    private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel,clearNative:Boolean=false){
+        // Standard at initial startup leaves Media3's untouched native surface.
+        // When returning from a non-standard preset, explicitly clear the old
+        // effect chain so it cannot remain active behind the Standard label.
+        if(selectedPicturePreset(c)=="Standard"){
+            if(clearNative)try{exo.setVideoEffects(emptyList())}
+            catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Could not clear Media3 picture effects",e)}
+            return
+        }
         try{
             exo.setVideoEffects(media3PictureEffects(c))
         }catch(e:Exception){
@@ -4402,7 +4407,7 @@ class MainActivity: Activity() {
         previewPictureMode=mode
         if(active==index){
             vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-            player?.let{applyMedia3PicturePreset(it,c)}
+            player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
         }
     }
     private fun clearPicturePreview(index:Int,c:Channel){
@@ -4411,7 +4416,7 @@ class MainActivity: Activity() {
             previewPictureMode=null
             if(active==index){
                 vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-                player?.let{applyMedia3PicturePreset(it,c)}
+                player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
             }
         }
     }
