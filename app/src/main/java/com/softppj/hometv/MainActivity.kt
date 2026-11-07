@@ -4371,10 +4371,31 @@ class MainActivity: Activity() {
         },250L)
     }
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
-        // LibVLC 3.x applies the adjust video filter at LibVLC-instance creation.
-        // A committed preset rebuilds only this channel's LibVLC session with
-        // --video-filter=adjust and its brightness/contrast/saturation options.
-        // Do not reflectively call methods absent from some Android LibVLC builds.
+        // Use runtime setters when a LibVLC Android build exposes them. The
+        // committed setting is also applied through the native adjust filter
+        // when the LibVLC instance is recreated, covering builds without setters.
+        val preset=selectedPictureValues(c)
+        try{
+            val methods=vlc.javaClass.methods
+            val enable=methods.firstOrNull{
+                it.name=="setVideoAdjustEnabled" &&
+                    it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType))
+            }
+            if(enable!=null){
+                enable.invoke(vlc,selectedPicturePreset(c)!="Standard")
+                listOf(
+                    "setVideoAdjustBrightness" to preset.brightness,
+                    "setVideoAdjustContrast" to preset.contrast,
+                    "setVideoAdjustSaturation" to preset.saturation
+                ).forEach{(name,value)->
+                    methods.firstOrNull{
+                        it.name==name && it.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
+                    }?.invoke(vlc,value)
+                }
+            }
+        }catch(e:Exception){
+            HomeTvDiagnostics.w("HomeTV","LibVLC live picture preview unavailable; committed preset will apply on restart",e)
+        }
     }
     private fun previewPictureChoice(index:Int,c:Channel,mode:String){
         previewPictureChannelKey=channelKey(c)
