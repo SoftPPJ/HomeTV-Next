@@ -5072,6 +5072,15 @@ class MainActivity: Activity() {
         (row.getChildAt(1) as TextView).text=title
         return row
     }
+    private fun drawerList(drawer:View?):ListView?{
+        if(drawer is ListView)return drawer
+        if(drawer is android.view.ViewGroup){
+            for(i in 0 until drawer.childCount){
+                drawerList(drawer.getChildAt(i))?.let{return it}
+            }
+        }
+        return null
+    }
     private fun focusRemoteList(list:ListView,preferredPosition:Int=0){
         list.isFocusable=true
         list.isFocusableInTouchMode=true
@@ -7417,6 +7426,66 @@ class MainActivity: Activity() {
             (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
              event.keyCode==KeyEvent.KEYCODE_ENTER ||
              event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER))return true
+        if(active>=0){
+            val currentScreen=videoScreen
+            val openChannelDrawer=currentScreen?.findViewWithTag<View>("channel_drawer")
+            val openSettingsDrawer=currentScreen?.findViewWithTag<View>("settings_drawer")
+            val openNavigationDrawer=currentScreen?.findViewWithTag<View>("left_navigation")
+            val openDrawer=openChannelDrawer ?: openSettingsDrawer ?: openNavigationDrawer
+            if(openDrawer!=null){
+                when{
+                    HomeTvPolicies.isRemoteSelectKey(event.keyCode)->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            val list=drawerList(openDrawer)
+                            if(list!=null && list.count>0){
+                                val selected=list.selectedItemPosition
+                                    .takeIf{it in 0 until list.count}
+                                    ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                                    ?:0
+                                list.setSelection(selected)
+                                val child=list.getChildAt(selected-list.firstVisiblePosition)
+                                list.performItemClick(child,selected,list.getItemIdAtPosition(selected))
+                            }
+                        }
+                        // Consume both halves so the player surface cannot interpret
+                        // the same remote press as a seek or playback command.
+                        return true
+                    }
+                    HomeTvPolicies.isRemoteLeftKey(event.keyCode)->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            when{
+                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);showLeftNavigation()}
+                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen.requestFocus()}
+                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);currentScreen.requestFocus()}
+                            }
+                        }
+                        return true
+                    }
+                    HomeTvPolicies.isRemoteRightKey(event.keyCode)->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            when{
+                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);showOverlayList()}
+                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);currentScreen.requestFocus()}
+                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen.requestFocus()}
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
+        }
+        // Some TV remotes report the left/right transport keys as MEDIA_REWIND
+        // and MEDIA_FAST_FORWARD instead of DPAD_LEFT/DPAD_RIGHT. Live TV must
+        // navigate drawers, never seek a live transport stream.
+        if(active>=0 && channels.getOrNull(active)?.mediaType=="live" &&
+            (HomeTvPolicies.isRemoteLeftKey(event.keyCode) ||
+             HomeTvPolicies.isRemoteRightKey(event.keyCode))){
+            if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                if(HomeTvPolicies.isRemoteLeftKey(event.keyCode))showOverlayList()
+                else showChannelOptions()
+            }
+            return true
+        }
         if(event.action==KeyEvent.ACTION_DOWN && active>=0 &&
             (event.keyCode==KeyEvent.KEYCODE_VOLUME_UP || event.keyCode==KeyEvent.KEYCODE_VOLUME_DOWN)){
             val audio=getSystemService(AUDIO_SERVICE) as android.media.AudioManager
@@ -7527,8 +7596,8 @@ class MainActivity: Activity() {
                 if(media in setOf("movie","series","music")){
                     if(isActiveYoutubeMedia()){
                         when(event.keyCode){
-                            KeyEvent.KEYCODE_DPAD_LEFT->{youtubeRemoteAction("back");return true}
-                            KeyEvent.KEYCODE_DPAD_RIGHT->{youtubeRemoteAction("forward");return true}
+                            KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_MEDIA_REWIND->{youtubeRemoteAction("back");return true}
+                            KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD->{youtubeRemoteAction("forward");return true}
                             KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,
                             KeyEvent.KEYCODE_NUMPAD_ENTER,KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                             KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE->{
@@ -7538,8 +7607,10 @@ class MainActivity: Activity() {
                         }
                     }
                     when(event.keyCode){
-                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT->{
-                            val delta=if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)10_000L else -10_000L
+                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_MEDIA_REWIND,KeyEvent.KEYCODE_MEDIA_FAST_FORWARD->{
+                            val delta=if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT ||
+                                event.keyCode==KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)10_000L else -10_000L
                             val exo=player
                             val vlc=vlcPlayer
                             if(exo!=null && exo.isCurrentMediaItemSeekable){
