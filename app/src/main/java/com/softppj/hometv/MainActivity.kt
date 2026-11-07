@@ -7313,10 +7313,11 @@ class MainActivity: Activity() {
         val preview=report.takeLast(30_000)
         val message=if(report.isBlank())"No diagnostic logs have been recorded yet."
             else preview+(if(report.length>preview.length)"\n\nShowing the latest entries. Use Save report to save the complete available report." else "")
-        AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
+        val dialog=AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
             .setMessage(message)
             .setPositiveButton("Save report"){_,_->exportDiagnosticReport()}
-            .setNegativeButton("Close",null).show()
+            .setNegativeButton("Close",null).create()
+        showSideDialog(dialog)
     }
     private fun exportDiagnosticReport(){
         val report=HomeTvDiagnostics.readReport()
