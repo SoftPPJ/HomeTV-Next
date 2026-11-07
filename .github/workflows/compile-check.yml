@@ -1,4 +1,4 @@
-name: MyTV V1 compile and test only
+name: HomeTV-Next source compile and unit tests
 
 on:
   push:
@@ -28,17 +28,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
-      - name: Upload debug APK for device testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: HomeTV-Next-V1-debug
-          path: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
-          if-no-files-found: error
-          retention-days: 14
