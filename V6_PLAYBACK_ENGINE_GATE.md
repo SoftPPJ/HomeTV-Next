@@ -54,4 +54,4 @@ The final source audit corrected two LibVLC confirmation/watchdog gaps:
 - The 20-second video-frame watchdog now runs even when the user's Auto-reconnect setting is OFF. Detection and diagnostics remain active; the established-channel recovery path still respects Auto-reconnect and does not silently change the selected URL or engine.
 - A LibVLC Playing event no longer confirms a video stream before a real TextureView frame is presented. Audio-only confirmation requires a known track list and startup progress.
 
-Unit tests now cover video-frame-required confirmation and audio-only confirmation timing. The new source-only CI run must pass before this gate is considered source-verified.
+Unit tests now cover video-frame-required confirmation and audio-only confirmation timing. GitHub Actions run [42343307469](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42343307469) passed on commit `42a1c4d893d78e697b365b50935dfc497db66eb6`: exact Media3/LibVLC/NextLib dependency checks, Kotlin compilation and all unit tests. This verifies source compilation and unit tests only, not Android TV runtime quality.
