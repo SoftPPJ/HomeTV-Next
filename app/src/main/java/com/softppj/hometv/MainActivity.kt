@@ -2041,7 +2041,7 @@ class MainActivity: Activity() {
     }
     private val bufferProfiles=arrayOf("Auto","Ultra Fast","Fast","Balanced","Stable","Maximum Buffer")
     private val autoBufferLevels=intArrayOf(0,1,2,3)
-    private var autoBufferLevel=0
+    private var autoBufferLevel=1
     private var autoBufferLastChange=0L
     private var autoBufferStableSince=0L
     private var autoBufferRecoveryCount=0
@@ -5217,7 +5217,7 @@ class MainActivity: Activity() {
             list.setSelection(selectedGroup+9)
             list.setItemChecked(selectedGroup+9,true)
         }
-        list.requestFocus()
+        list.post{list.requestFocus()}
     }
     private fun showPlaylistDrawer(){
         val screen=videoScreen ?:return
@@ -5538,7 +5538,7 @@ class MainActivity: Activity() {
                 close();true
             }else false
         }
-        list.requestFocus()
+        list.post{list.requestFocus()}
     }
     private val qualityModes=arrayOf("Auto","Data Saver (360p)","Standard (480p)","HD (720p)","Full HD (1080p)","Best Available")
     private fun qualityMode(index:Int?=active.takeIf{it>=0}):String{
@@ -6514,8 +6514,8 @@ class MainActivity: Activity() {
         }else{
             val factory=DefaultHttpDataSource.Factory()
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(6500)
-                .setReadTimeoutMs(8500)
+                .setConnectTimeoutMs(if(c.mediaType=="live")10000 else 6500)
+                .setReadTimeoutMs(if(c.mediaType=="live")20000 else 8500)
                 .setUserAgent(c.headers["User-Agent"] ?: "VLC/3.0.20 LibVLC/3.0.20")
                 .setDefaultRequestProperties(c.headers.filterKeys{!it.equals("User-Agent",true)})
             val buffer=bufferValues()
@@ -6557,8 +6557,10 @@ class MainActivity: Activity() {
                 }
             }
             startupWatchdog=startupTimeout
-            // HLS sources can take longer to open their first segment.
-            val startupLimit=if(streamKind(c.url)=="hls")12000L else 8000L
+            // Live IPTV sources can legitimately need more than eight seconds
+            // to negotiate a transport stream and deliver the first video frame.
+            // Do not abandon a viable engine during normal startup buffering.
+            val startupLimit=HomeTvPolicies.startupTimeoutMs(c.mediaType,streamKind(c.url))
             handler.postDelayed(startupTimeout,startupLimit)
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
@@ -6907,7 +6909,9 @@ class MainActivity: Activity() {
                     }
                 }
             }
-            val startupLimit=if(streamKind(c.url)=="hls")12000L else 8000L
+            // Match Media3's live startup grace; avoid switching away from a
+            // LibVLC stream before a slow IPTV transport has time to stabilise.
+            val startupLimit=HomeTvPolicies.startupTimeoutMs(c.mediaType,streamKind(c.url))
             handler.postDelayed(watchdog,startupLimit)
             val media=VlcMedia(core,Uri.parse(c.url))
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
@@ -7459,22 +7463,13 @@ class MainActivity: Activity() {
             val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
             if(!drawerOpen){
                 val media=channels.getOrNull(active)?.mediaType
-                // Live streams may expose a seekable DVR window. Only consume
-                // LEFT/RIGHT when the active stream actually supports seeking.
+                // Live-TV directional keys are navigation, even when a stream
+                // exposes a DVR seek window. Seeking live streams here hijacks
+                // the channel-list and channel-options controls.
                 if(media=="live" && (event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)){
-                    val exo=player
-                    val vlc=vlcPlayer
-                    if(exo?.isCurrentMediaItemSeekable==true || vlc?.isSeekable==true){
-                        val delta=if(event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)10_000L else -10_000L
-                        if(exo?.isCurrentMediaItemSeekable==true){
-                            val target=(exo.currentPosition+delta).coerceAtLeast(0L)
-                            exo.seekTo(if(exo.duration>0)target.coerceAtMost(exo.duration) else target)
-                        }else if(vlc?.isSeekable==true){
-                            val target=(vlc.time+delta).coerceAtLeast(0L)
-                            vlc.time=if(vlc.length>0)target.coerceAtMost(vlc.length) else target
-                        }
-                        return true
-                    }
+                    if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT)showOverlayList()
+                    else showChannelOptions()
+                    return true
                 }
                 if(media=="live" && event.keyCode in setOf(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE)){
                     when(event.keyCode){
