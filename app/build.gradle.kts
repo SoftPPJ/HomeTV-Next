@@ -55,9 +55,10 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.11.1")
     // OpenGL video effects used by the optional Media3 picture presets.
     implementation("androidx.media3:media3-effect:1.11.1")
+    // Keep the LibVLC version aligned with the V6 build that was previously confirmed on the target TV.
     // GPLv3 decoder; retain only with appropriate distribution/licensing compliance.
     implementation("io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.17.0")
-    implementation("org.videolan.android:libvlc-all:3.7.7")
+    implementation("org.videolan.android:libvlc-all:3.5.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
