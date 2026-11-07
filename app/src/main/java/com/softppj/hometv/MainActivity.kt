@@ -1050,12 +1050,19 @@ class MainActivity: Activity() {
         lateinit var launchNextVlc:()->Unit
 
         launchNextVlc={
-            if(resolved)return@launchNextVlc
-            if(!stillCurrent()){resolved=true;done();return@launchNextVlc}
-            if(vlcPosition>=candidates.size){resolved=true;done();return@launchNextVlc}
-            val candidate=candidates[vlcPosition++]
-            android.util.Log.i("HomeTV","Alternative probe: LibVLC "+(vlcPosition)+"/"+candidates.size+" for "+c.name)
-            probeAlternativeVlc(candidate,channels[candidate],::offer,launchNextVlc)
+            if(resolved){
+                Unit
+            }else if(!stillCurrent()){
+                resolved=true
+                done()
+            }else if(vlcPosition>=candidates.size){
+                resolved=true
+                done()
+            }else{
+                val candidate=candidates[vlcPosition++]
+                android.util.Log.i("HomeTV","Alternative probe: LibVLC "+(vlcPosition)+"/"+candidates.size+" for "+c.name)
+                probeAlternativeVlc(candidate,channels[candidate],::offer,launchNextVlc)
+            }
         }
 
         fun finishMedia3(candidate:Int,working:Boolean){
@@ -1088,7 +1095,7 @@ class MainActivity: Activity() {
         }
 
         launchMoreMedia3={
-            if(resolved || !stillCurrent())return@launchMoreMedia3
+            if(!resolved && stillCurrent()){
             while(activeProbes.size<3 && pending.isNotEmpty()){
                 val candidate=pending.removeFirst()
                 val target=channels[candidate]
@@ -1126,6 +1133,7 @@ class MainActivity: Activity() {
             }
             if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size && !resolved){
                 launchNextVlc()
+            }
             }
         }
         if(!stillCurrent()){done();return}
