@@ -47,7 +47,8 @@ android {
                 }
                 val expected = listOf(
                     "android-all-instrumented-9-robolectric-4913185-2-i7.jar",
-                    "android-all-instrumented-12.1-robolectric-8229987-i7.jar"
+                    "android-all-instrumented-12.1-robolectric-8229987-i7.jar",
+                    "android-all-instrumented-15-robolectric-12650502-i7.jar"
                 )
                 expected.forEach { filename ->
                     val sdkJar = File(robolectricSdkDir, filename)
