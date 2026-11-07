@@ -1,5 +1,7 @@
 package com.softppj.hometv
 
+import android.view.KeyEvent
+
 internal data class ChannelIndexSnapshot(
     val indicesByKey: Map<String, List<Int>>,
     val representatives: List<Int>,
@@ -9,6 +11,20 @@ internal data class ChannelIndexSnapshot(
 )
 
 internal object HomeTvPolicies {
+    fun isRemoteSelectKey(keyCode:Int):Boolean = keyCode in setOf(
+        KeyEvent.KEYCODE_DPAD_CENTER,
+        KeyEvent.KEYCODE_ENTER,
+        KeyEvent.KEYCODE_NUMPAD_ENTER,
+        KeyEvent.KEYCODE_BUTTON_A,
+        KeyEvent.KEYCODE_BUTTON_SELECT
+    )
+
+    fun isRemoteLeftKey(keyCode:Int):Boolean =
+        keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_MEDIA_REWIND
+
+    fun isRemoteRightKey(keyCode:Int):Boolean =
+        keyCode==KeyEvent.KEYCODE_DPAD_RIGHT || keyCode==KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
+
     fun channelKey(channel: Channel): String =
         channel.mediaType + "|" +
             channel.source.trim().lowercase(java.util.Locale.ROOT) + "|" +
@@ -96,18 +112,19 @@ internal object HomeTvPolicies {
         "Standard (480p)" -> listOf(":adaptive-maxheight=480", ":adaptive-logic=highest")
         "HD (720p)" -> listOf(":adaptive-maxheight=720", ":adaptive-logic=highest")
         "Full HD (1080p)" -> listOf(":adaptive-maxheight=1080", ":adaptive-logic=highest")
-        "Auto", "Best Available" -> listOf(":adaptive-logic=highest")
+        // Keep LibVLC's native adaptive selection for Auto. Forcing the highest
+        // bitrate at startup made marginal live streams repeatedly rebuffer.
+        "Auto", "Best Available" -> emptyList()
         else -> emptyList()
     }
 
-    /** Apply the HTTP headers supported by the bundled LibVLC 3.x HTTP access module. */
+    /** Preserve the V6-supported LibVLC HTTP headers; arbitrary Origin headers are not portable across VLC 3.x builds. */
     fun libVlcHttpHeaderOptions(headers:Map<String,String>):List<String> = buildList {
-        headers["User-Agent"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
-            ?.let{add(":http-user-agent="+it)}
-        headers["Referer"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
-            ?.let{add(":http-referrer="+it)}
-        headers["Origin"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
-            ?.let{add(":http-origin="+it)}
+        fun value(vararg names:String):String? = headers.entries.firstOrNull{entry->
+            names.any{entry.key.equals(it,true)}
+        }?.value?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
+        value("User-Agent","http-user-agent")?.let{add(":http-user-agent="+it)}
+        value("Referer","Referrer","http-referrer","http-referer")?.let{add(":http-referrer="+it)}
     }
 
     /** VLC's adjust filter is configured on the LibVLC instance, before the player opens a stream. */
