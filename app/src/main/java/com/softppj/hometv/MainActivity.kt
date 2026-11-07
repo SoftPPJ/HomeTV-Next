@@ -6840,6 +6840,7 @@ class MainActivity: Activity() {
             var lastPlayedAudioBuffers=-1
             var lastVideoProgressAt=0L
             var lastVideoStatsLoggedAt=0L
+            var startupConfirmationWatchdog:Runnable?=null
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
@@ -6875,7 +6876,7 @@ class MainActivity: Activity() {
                                 if(!confirmed && hasVideoTrack){
                                     confirmed=true
                                     rememberWorking(c)
-                                    handler.removeCallbacks(watchdog)
+                                    startupConfirmationWatchdog?.let{handler.removeCallbacks(it)}
                                     autoBufferHealthy()
                                     HomeTvDiagnostics.i("LibVLC","First displayed video frame confirmed channel="+c.name+
                                         " decodedVideo="+decoded+" displayedPictures="+displayed)
@@ -6900,7 +6901,7 @@ class MainActivity: Activity() {
                                 (audioBuffers>0 || mediaTime>0L)){
                                 confirmed=true
                                 rememberWorking(c)
-                                handler.removeCallbacks(watchdog)
+                                startupConfirmationWatchdog?.let{handler.removeCallbacks(it)}
                                 autoBufferHealthy()
                                 HomeTvDiagnostics.i("LibVLC","Audio-only playback confirmed channel="+c.name)
                             }
@@ -6953,6 +6954,7 @@ class MainActivity: Activity() {
                     handleEngineFailure(index,screen)
                 }
             }
+            startupConfirmationWatchdog=watchdog
             vlc.setEventListener{event->
                 val eventType=event.type
                 handler.post{
