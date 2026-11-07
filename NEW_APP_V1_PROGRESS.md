@@ -348,6 +348,7 @@ No production APK, prerelease, or public release is approved by this audit. The 
 
 Compared the current Next development source with the preserved V6 development snapshot and the original V6 stabilization / feature-completion / stabilization-integration branches (PRs #3–#6).
 
+- Per the user's 6 November instruction, Next deliberately loads `TV.m3u` directly; the V6-only `Master.m3u` integration is intentionally not copied into Next.
 - The Next branch is a separate implementation, not a wholesale merge of the V6 branches. It independently contains the key cumulative V6 areas: cache-first startup and active-playlist refresh, playlist indexing and per-playlist numbering, numbered left navigation and playlist selector, playlist locking/deletion, backup/restore, EPG, diagnostics, safe startup, signed offline licence cache, YouTube native-HLS attempt with WebView fallback, and the cinematic home UI.
 - Next intentionally uses two playback engines: Media3 first and LibVLC second (LibVLC first for RTMP/VLC-only protocols). NextLib FFmpeg is a Media3 decoder extension, not a third player. IJKPlayer is intentionally excluded from this new app.
 - The current Settings implementation returns to the Settings page after default quality and aspect-ratio selections. The channel picture presets and manual controls are also present.
