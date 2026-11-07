@@ -1,0 +1,62 @@
+name: HomeTV Next - build and publish prerelease APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_apk:
+        description: "Publish an APK only after explicit owner approval"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_apk == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v7
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.9'
+      - name: Compile Kotlin
+        run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK identity and file
+        run: |
+          APK=app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep -F "package: name='com.softppj.myhometv.next'"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging "$APK" | grep -F "application-label:'My Home TV Next'"
+      - name: Publish verified APK as prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: next-v1-test-${{ github.run_number }}
+          name: HomeTV Next V1 - Prerelease #${{ github.run_number }}
+          body: |
+            Automated test build for My Home TV Next.
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+
+            This is a prerelease for testing, not a stable production release.
+          prerelease: true
+          draft: false
+          files: app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
