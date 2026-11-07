@@ -137,6 +137,13 @@ class HomeTvPoliciesTest {
         assertFalse(HomeTvPolicies.isVideoOutputStalled(true,false,30_000L,5_000L))
     }
 
+    @Test fun liveStreamsReceiveEnoughTimeToStabiliseBeforeEngineFallback() {
+        assertEquals(30_000L, HomeTvPolicies.startupTimeoutMs("live", "file"))
+        assertEquals(30_000L, HomeTvPolicies.startupTimeoutMs("live", "hls"))
+        assertEquals(25_000L, HomeTvPolicies.startupTimeoutMs("movie", "hls"))
+        assertEquals(15_000L, HomeTvPolicies.startupTimeoutMs("movie", "file"))
+    }
+
     @Test fun youtubeNativeAttemptAndFallbackAreGuarded() {
         assertTrue(HomeTvPolicies.shouldAttemptNativeYoutube(true, false, false, false))
         assertFalse(HomeTvPolicies.shouldAttemptNativeYoutube(false, false, false, false))
