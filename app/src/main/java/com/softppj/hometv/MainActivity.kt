@@ -7455,8 +7455,8 @@ class MainActivity: Activity() {
                         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
                             when{
                                 openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);showLeftNavigation()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen.requestFocus()}
-                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);currentScreen.requestFocus()}
+                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
+                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);currentScreen?.requestFocus()}
                             }
                         }
                         return true
