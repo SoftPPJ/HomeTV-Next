@@ -4190,13 +4190,13 @@ class MainActivity: Activity() {
                 (if(group.isTrackSelected(index))" ✓" else "")
         }
         if(entries.isEmpty()){
-            AlertDialog.Builder(this).setTitle("Audio tracks")
+            showSideDialog(AlertDialog.Builder(this).setTitle("Audio tracks")
                 .setMessage(if(names.isEmpty())"No audio track was detected for this channel. Try another stream URL."
                     else "Audio tracks were detected, but this device cannot currently decode them.")
-                .setPositiveButton("OK",null).show()
+                .setPositiveButton("OK",null).create())
             return
         }
-        AlertDialog.Builder(this).setTitle("Select audio track").setItems(supportedNames.toTypedArray()){_,position->
+        val dialog=AlertDialog.Builder(this).setTitle("Select audio track").setItems(supportedNames.toTypedArray()){_,position->
             val (group,index,format)=entries[position]
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup,listOf(index)))
@@ -4216,7 +4216,8 @@ class MainActivity: Activity() {
                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                 .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
                 .build()
-        }.setNegativeButton("Cancel",null).show()
+        }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     // Media3 subtitle choices are saved per logical channel. This does not alter
@@ -4251,9 +4252,9 @@ class MainActivity: Activity() {
         }
         val exo=player
         if(exo==null){
-            AlertDialog.Builder(this).setTitle("Subtitles")
+            showSideDialog(AlertDialog.Builder(this).setTitle("Subtitles")
                 .setMessage("Subtitle selection is available for streams playing through Media3. This channel is using another playback engine.")
-                .setPositiveButton("OK",null).show()
+                .setPositiveButton("OK",null).create())
             return
         }
         val choices=mutableListOf("Off","Automatic")
@@ -4274,7 +4275,7 @@ class MainActivity: Activity() {
                 languages.add(language)
             }
         }
-        AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
             .setItems(choices.toTypedArray()){_,choice->
                 val editor=prefs.edit()
                 if(choice==0){
@@ -4297,7 +4298,8 @@ class MainActivity: Activity() {
                         .setOverrideForType(TrackSelectionOverride(group,listOf(track))).build()
                     showBanner("Subtitles: "+choices[choice])
                 }
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     private var sleepTimerTask:Runnable?=null
@@ -4312,7 +4314,7 @@ class MainActivity: Activity() {
             "15 minutes","30 minutes","45 minutes","60 minutes","90 minutes","120 minutes"
         )
         val minutes=intArrayOf(0,15,30,45,60,90,120)
-        AlertDialog.Builder(this).setTitle("Sleep timer — stop TV playback")
+        val dialog=AlertDialog.Builder(this).setTitle("Sleep timer — stop TV playback")
             .setItems(options){_,which->
                 sleepTimerTask?.let{handler.removeCallbacks(it)}
                 sleepTimerTask=null
@@ -4335,7 +4337,8 @@ class MainActivity: Activity() {
                     if(active>=0)showBanner("Sleep timer: "+delay+" minutes")
                     else Toast.makeText(this,"Sleep timer: "+delay+" minutes",Toast.LENGTH_SHORT).show()
                 }
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     private data class PicturePreset(val brightness:Float,val contrast:Float,val saturation:Float)
