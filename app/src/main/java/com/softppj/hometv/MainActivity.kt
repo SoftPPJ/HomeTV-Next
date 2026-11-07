@@ -3021,7 +3021,7 @@ class MainActivity: Activity() {
             val isLocked=p.name in locked
             val row=button((if(isLocked)"🔒 " else if(p.enabled)"✓ " else "○ ")+p.name+" — "+(if(p.url.contains("/get.php?"))"Xtream Codes" else if(p.url.startsWith("file:"))"Local M3U" else p.url.take(40))){
                 val openOptions={
-                    val opts=arrayOf("Enable / Disable","Edit","Delete")
+                    val opts=arrayOf("Enable / Disable","Edit","Delete",if(isLocked)"Unlock playlist" else "Lock playlist")
                     AlertDialog.Builder(this).setTitle(p.name).setItems(opts){_,which->
                         when(which){
                             0->{list[index]=p.copy(enabled=!p.enabled);savePlaylists(list);managePlaylists()}
@@ -3030,6 +3030,13 @@ class MainActivity: Activity() {
                                 val removed=list.removeAt(index)
                                 deletePlaylistSource(removed.name)
                             }.setNegativeButton("Cancel",null).show()
+                            3->{
+                                val current=prefs.getStringSet("locked_playlists",emptySet())?.toMutableSet() ?: mutableSetOf()
+                                if(p.name in current)current.remove(p.name) else current.add(p.name)
+                                prefs.edit().putStringSet("locked_playlists",current).apply()
+                                Toast.makeText(this,if(p.name in current)"Playlist locked" else "Playlist unlocked",Toast.LENGTH_SHORT).show()
+                                managePlaylists()
+                            }
                         }
                     }.show()
                 }
@@ -6773,7 +6780,10 @@ class MainActivity: Activity() {
             if(height>0){
                 media.addOption(":adaptive-maxheight="+height)
                 media.addOption(":adaptive-logic=highest")
-            }else if(quality=="Best Available"){
+            }else if(quality=="Auto" || quality=="Best Available"){
+                // Auto keeps the full source-resolution range and selects the
+                // highest available HLS/DASH variant instead of defaulting to
+                // a conservative low-resolution rendition in LibVLC.
                 media.addOption(":adaptive-logic=highest")
             }
             vlc.media=media
