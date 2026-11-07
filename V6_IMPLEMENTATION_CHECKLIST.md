@@ -125,7 +125,7 @@ Release rule: do not describe the app as fully implemented or production-ready u
 
 ## HomeTV-Next engine modernization — 7 November 2026
 
-- Updated AndroidX Media3 modules to 1.11.1, LibVLC to 3.7.7, the Media3 FFmpeg decoder extension to 1.9.0+1, Android Gradle Plugin to 8.13.2, Kotlin to 2.2.10, Gradle to 8.13 and compile SDK to 36.
+- Updated AndroidX Media3 modules to 1.11.1, LibVLC to 3.7.7, the Media3 FFmpeg decoder extension to NextLib 1.11.1-0.17.0 (aligned with Media3 1.11.1), Android Gradle Plugin to 8.13.2, Kotlin to 2.2.10, Gradle to 8.13 and compile SDK to 36.
 - Media3 remains primary. LibVLC remains the second engine and the first choice for RTMP/VLC-only protocols. FFmpeg is a Media3 decoder extension only; IJKPlayer is not included.
 - LibVLC Auto/Best Available now request the highest adaptive rendition without a resolution cap. Only explicit user quality presets impose a height ceiling. Automatic hardware decoding is enabled and no stream re-encoding is introduced.
 - LibVLC picture presets are installed through VLC's native adjust filter at LibVLC instance creation. Media3 presets are installed before prepare. Selecting/previewing a preset restarts only the current channel after a short debounce so the decoder is not reconfigured mid-stream.
