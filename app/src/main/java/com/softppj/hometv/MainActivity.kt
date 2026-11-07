@@ -1099,8 +1099,7 @@ class MainActivity: Activity() {
             val media=VlcMedia(vlc,Uri.parse(target.url))
             media.addOption(":no-audio")
             media.addOption(":no-video")
-            target.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
-            target.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+            HomeTvPolicies.libVlcHttpHeaderOptions(target.headers).forEach{media.addOption(it)}
             p.media=media
             media.release()
             watchdog=Runnable{finish(false)}
@@ -3388,8 +3387,7 @@ class MainActivity: Activity() {
                 val media=VlcMedia(core,Uri.parse(channel.url))
                 media.addOption(":no-audio")
                 media.addOption(":no-video")
-                channel.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
-                channel.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+                HomeTvPolicies.libVlcHttpHeaderOptions(channel.headers).forEach{media.addOption(it)}
                 probe.media=media
                 media.release()
                 vlcProbeWatchdog=Runnable{finish(false)}
@@ -6908,8 +6906,7 @@ class MainActivity: Activity() {
             val startupLimit=HomeTvPolicies.startupTimeoutMs(c.mediaType,streamKind(c.url))
             handler.postDelayed(watchdog,startupLimit)
             val media=VlcMedia(core,Uri.parse(c.url))
-            c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
-            c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
+            HomeTvPolicies.libVlcHttpHeaderOptions(c.headers).forEach{media.addOption(it)}
             media.addOption(":network-caching="+cache)
             media.addOption(":live-caching="+cache)
             val quality=qualityMode(index)
