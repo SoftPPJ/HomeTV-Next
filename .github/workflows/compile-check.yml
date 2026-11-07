@@ -5,6 +5,7 @@ on:
     branches:
       - new-app-v1-development
       - fix/remote-vlc-regression-2026-11-07
+      - fix/remote-playback-diagnostics-2026-11-07
   workflow_dispatch:
 
 permissions:
