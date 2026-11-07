@@ -31,15 +31,16 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        // Robolectric's documented local dependency directory resolver looks
-        // up android-all-instrumented-<version>.jar in this verified folder.
+        // Keep Robolectric's diagnostic output visible in CI so a failed local
+        // SDK lookup reports the exact path it attempted to open.
         unitTests.all {
             val robolectricSdkDir =
                 layout.buildDirectory.dir("robolectric-deps").get().asFile.absoluteFile
             it.systemProperty("robolectric.dependency.dir", robolectricSdkDir.absolutePath)
-            // Pass the property explicitly to the forked test JVM as well. This avoids
-            // relying on Gradle's test-system-property forwarding with AGP-managed tests.
             it.jvmArgs("-Drobolectric.dependency.dir=${robolectricSdkDir.absolutePath}")
+            it.systemProperty("robolectric.logging.enabled", "true")
+            it.jvmArgs("-Drobolectric.logging.enabled=true")
+            it.testLogging.showStandardStreams = true
             it.doFirst {
                 check(robolectricSdkDir.isDirectory) {
                     "Robolectric SDK directory does not exist: $robolectricSdkDir"
