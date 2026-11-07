@@ -3945,6 +3945,9 @@ class MainActivity: Activity() {
                 }
                 isFocusable=true
                 isFocusableInTouchMode=true
+                // AlertDialog list rows must own DPAD focus so OK activates the
+                // highlighted setting instead of falling through to playback.
+                post{requestFocus()}
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
