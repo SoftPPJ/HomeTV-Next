@@ -6880,8 +6880,10 @@ class MainActivity: Activity() {
                         if(!hasVideoOutput)lastHealthy=android.os.SystemClock.elapsedRealtime()
                     }
                     VlcPlayer.Event.Vout->{
+                        // Vout means a video output was created, not that a frame
+                        // reached the TextureView. Only onSurfaceTextureUpdated
+                        // is allowed to confirm a real presented frame.
                         hasVideoOutput=event.voutCount>0
-                        if(hasVideoOutput)lastVlcVideoFrameAt=android.os.SystemClock.elapsedRealtime()
                     }
                     VlcPlayer.Event.Buffering->{
                         // A buffering callback is not proof of progress.
