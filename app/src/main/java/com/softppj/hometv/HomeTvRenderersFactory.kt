@@ -1,12 +1,10 @@
 package com.softppj.hometv
 
 import android.content.Context
-import androidx.media3.common.util.UnstableApi
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 
-@OptIn(UnstableApi::class)
 internal class HomeTvRenderersFactory(
     context:Context,
     private val channelGainProcessor:ChannelGainAudioProcessor
