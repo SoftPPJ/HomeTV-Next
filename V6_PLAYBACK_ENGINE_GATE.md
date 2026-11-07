@@ -1,47 +1,36 @@
-# V6 playback-engine implementation gate
+# HomeTV-Next playback-engine implementation and verification gate
 
-Current inspected source: MainActivity.kt uses Media3 1.5.1 and LibVLC 3.5.1. handleEngineFailure() iterates alternate URLs with these two engines for unconfirmed channels. Confirmed channels retry their saved engine. YouTube is routed to WebView. No IJKPlayer dependency is present.
+**Target:** `SoftPPJ/HomeTV-Next` / `new-app-v1-development`
 
-## Next engineering changes (not yet implemented)
-- Extract playback session/engine state from MainActivity.kt behind a cancellable, generation-checked controller.
-- Keep per-channel confirmed engine + URL and user manual override, and preserve these across refreshes.
-- Track attempted (URL, engine) pairs per discovery session; never retry a failed pair until a new explicit retry or a new session.
-- Bound start time and release player/surface resources before switching.
-- Preserve WebView YouTube routing, with no IJK probing of YouTube watch pages.
-- Evaluate a maintained IJK fork for licensing, Android ABI, dependency conflicts, memory and actual additional successful streams. Do not add it to production Gradle before passing these gates.
-- Only when approved, add IJK as an opt-in third fallback after Media3 and LibVLC, and persist success per channel.
+This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player. IJKPlayer is not included. FFmpeg is retained only as a Media3 decoder extension, not as a third playback engine.
 
-## Required tests
-- Media3 succeeds: LibVLC and IJK never initialize.
-- Media3 fails, LibVLC succeeds: remember LibVLC; do not re-probe Media3 on subsequent opens.
-- Both fail: try IJK only if enabled and validated; otherwise honor auto-skip and manual override.
-- Multiple URLs: do not count URLs as separate logical channels.
-- Rapid switching and HOME/BACK: stale callbacks cannot restart an old channel.
-- YouTube and normal IPTV regression, 1k/5k/10k playlist memory, long playback.
-- Compare same stream URL for player success, startup latency, resolution, dropped frames, audio sync, memory and crash rate.
+## Current engine stack
 
-This document is an implementation plan, not evidence that the third engine is integrated or tested.
+- **AndroidX Media3:** 1.11.1 across ExoPlayer, HLS, DASH, RTSP, SmoothStreaming, UI and video effects.
+- **Media3 FFmpeg decoder extension:** 1.9.0+1. It is loaded after Android's native renderers, with decoder fallback enabled; it is not a separate player engine.
+- **LibVLC Android:** 3.7.7.
+- **Build toolchain:** Android Gradle Plugin 8.13.2, Kotlin 2.2.10, Gradle 8.13, compile SDK 36, Java 17.
 
-## Implementation update — stale delayed fallback
-- Commit 58c697a: the delayed initial-discovery fallback Runnable now captures playbackGeneration and checks it before calling playIndex. This blocks that particular delayed callback from restarting a replaced session.
-- Other delayed recovery callbacks still require review. Compilation and Android TV regression tests have not been run for this commit.
+## Quality policy
 
-## Implementation update — reconnect generation guards
-- Commit 0ce0a7c: added playbackGeneration checks to delayed confirmed-stream reconnect and stream-stopped retry tasks, preventing these particular tasks from restarting a replaced playback session.
-- Network-recovery polling, player event listeners, engine selection, compilation and device tests remain to be reviewed/verified.
+- Media3 Auto leaves adaptive track selection uncapped; Best Available requests the highest supported bitrate. Explicit user quality presets may set a resolution ceiling.
+- LibVLC Auto and Best Available use `:adaptive-logic=highest` without an `:adaptive-maxheight` cap. Only explicit Data Saver / Standard / HD / Full HD choices add a maximum height.
+- LibVLC enables automatic hardware decoding with `--avcodec-hw=any`, retains network/live caching, and does not re-encode the source.
+- LibVLC picture presets use VLC's native `adjust` video filter configured on the LibVLC instance. Standard/Engine Native leaves that filter disabled.
+- Picture preview/commit recreates the current channel session after a short debounce so picture effects are installed before decoder preparation rather than changing a live TV decoder pipeline.
 
-## Implementation update — network recovery ownership
-- Commit 029bdd3: network recovery polling now captures playbackGeneration and checks both generation and task identity before retrying playback or rescheduling. This prevents an outdated polling task from reviving a replaced session.
-- Source change only; Kotlin compilation and real device tests are still pending. Other asynchronous callbacks and third-engine evaluation remain open.
+## Frozen-picture protection
 
-## Implementation update — confirmed URL scoping
-- Commit 65c67a3: handleEngineFailure treats a saved engine as confirmed only when the current channel URL equals the persisted working URL. This avoids applying the proven-source reconnect policy to an unproven alternative URL.
-- Follow-up needed: inspect engineFor and rememberWorking consistency when automatic fallback succeeds on a different URL, and verify manual override behavior. Not compiled or device-tested.
+- Media3 tracks rendered decoder-frame progress and the first rendered video frame. If audio/playback continues but video output stops for 20 seconds, it first tries one native-rendering recovery when a non-standard picture effect is active; if that does not recover, it enters the existing confirmed-engine recovery path.
+- LibVLC uses a TextureView frame-update callback, together with video-output/track state, to detect actual presented-frame stalls rather than trusting the audio/media clock. A 20-second video-frame stall enters recovery. Intentionally paused playback is excluded; audio-only streams use media-time progress.
+- A video source is not marked as a confirmed working LibVLC source until a real video frame has been presented. Audio-only playback can be confirmed after playback settles.
+- The established-channel policy remains: retry the saved URL on its confirmed engine; probe alternatives in the background; do not silently replace the saved URL or engine.
 
-## Implementation update — confirmed engine/URL pairing
-- Commit d3fbeb6: rememberWorking now persists the confirmed engine and URL together after actual playback, except when testing an alternative or preserving a different manually pinned URL. engineFor only uses channel-level confirmed engine when current URL matches working URL.
-- Remaining: confirm manual engine overrides and alternative test promotion behavior, run Kotlin compile and APK build, and test on Android TV. This is source-only, unverified.
+## Verification status
 
-## Implementation update — manual alternative stream selection
-- Commit f700e19: switchAlternative and selectAlternative persist manual_url but clear previous working_url and confirmed_engine; a new stream must actually play before being marked confirmed. Existing manual engine preferences are retained.
-- Caveat: clearing the previous confirmed pair on manual selection is intentional for discovery but needs regression testing, including returning to a previous source and honoring pinned engine behavior. Not compiled or device-tested.
+- Source-only CI now checks resolved playback dependencies, compiles Kotlin, and runs unit tests.
+- Unit tests cover uncapped LibVLC Auto/Best Available, explicit quality ceilings, native versus adjusted picture options, paused playback and video-frame stall decisions.
+- CI intentionally does **not** assemble or upload an APK while the remaining source updates are being completed.
+- Android TV playback, decoder compatibility, original-resolution output, long-run stability and remote-control acceptance remain device tests for the user. Do not mark them passed without user confirmation.
+
+**Release gate:** no APK, prerelease or release until all remaining source work is complete, source-only checks pass, and the user explicitly authorizes packaging.
