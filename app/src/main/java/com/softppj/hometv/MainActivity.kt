@@ -7592,6 +7592,8 @@ class MainActivity: Activity() {
         networkRecoveryTask=null
         closeVideoPreview()
         playbackGeneration++
+        picturePreviewRestartTask?.let{handler.removeCallbacks(it)}
+        picturePreviewRestartTask=null
         startupWatchdog?.let{handler.removeCallbacks(it)}
         startupWatchdog=null
         previewIndex=-1
