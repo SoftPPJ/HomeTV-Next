@@ -7465,8 +7465,8 @@ class MainActivity: Activity() {
                         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
                             when{
                                 openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);showOverlayList()}
-                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);currentScreen.requestFocus()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen.requestFocus()}
+                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);currentScreen?.requestFocus()}
+                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
                             }
                         }
                         return true
@@ -7520,51 +7520,7 @@ class MainActivity: Activity() {
             val navigationDrawer=videoScreen?.findViewWithTag<View>("left_navigation")
             val drawer=channelDrawer ?: settingsDrawer ?: navigationDrawer
             val drawerOpen=drawer!=null
-            if(drawerOpen){
-                if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0 &&
-                    (event.keyCode==KeyEvent.KEYCODE_BUTTON_A || event.keyCode==KeyEvent.KEYCODE_BUTTON_SELECT)){
-                    fun findList(view:View):ListView?{
-                        if(view is ListView)return view
-                        if(view is android.view.ViewGroup){
-                            for(i in 0 until view.childCount){
-                                findList(view.getChildAt(i))?.let{return it}
-                            }
-                        }
-                        return null
-                    }
-                    val list=drawer?.let{findList(it)}
-                    if(list!=null && list.count>0){
-                        val selected=list.selectedItemPosition
-                            .takeIf{it in 0 until list.count}
-                            ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
-                            ?:0
-                        list.performItemClick(null,selected,list.getItemIdAtPosition(selected))
-                    }
-                    return true
-                }
-                when(event.keyCode){
-                    KeyEvent.KEYCODE_DPAD_LEFT->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                channelDrawer!=null->{videoScreen?.removeView(channelDrawer);showLeftNavigation()}
-                                settingsDrawer!=null->videoScreen?.removeView(settingsDrawer)
-                                navigationDrawer!=null->videoScreen?.removeView(navigationDrawer)
-                            }
-                        }
-                        return true
-                    }
-                    KeyEvent.KEYCODE_DPAD_RIGHT->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                navigationDrawer!=null->{videoScreen?.removeView(navigationDrawer);showOverlayList()}
-                                channelDrawer!=null->videoScreen?.removeView(channelDrawer)
-                                settingsDrawer!=null->videoScreen?.removeView(settingsDrawer)
-                            }
-                        }
-                        return true
-                    }
-                }
-            }
+            // Drawer OK and directional keys are handled before player dispatch above.
             // A typed channel number must not steal OK from an open menu.
             if(!drawerOpen && channelDigits.isNotEmpty() &&
                 (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
