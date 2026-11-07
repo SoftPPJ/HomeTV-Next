@@ -155,6 +155,13 @@ class HomeTvPoliciesTest {
         assertTrue(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,true,1_500L))
     }
 
+    @Test fun audioOnlyConfirmationRequiresKnownEmptyVideoTracksAndAnAudioTrack(){
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(null,1))
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(1,1))
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(0,0))
+        assertTrue(HomeTvPolicies.isKnownAudioOnly(0,1))
+    }
+
     @Test fun videoFreezePolicyUsesPresentedFramesAndIgnoresPausedPlayback() {
         assertFalse(HomeTvPolicies.isVideoOutputStalled(false,true,30_000L,30_000L))
         assertFalse(HomeTvPolicies.isVideoOutputStalled(true,true,5_000L,30_000L))
