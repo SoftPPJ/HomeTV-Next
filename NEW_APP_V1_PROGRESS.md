@@ -334,3 +334,11 @@ No production APK, prerelease, or public release is approved by this audit. The 
 - This matches the approved shared-backend design. The Next V1 app still keeps its own package, app data, cached signed lease, and pinned public key. No V6 Worker source, V6 app, or licence records were changed by this verification.
 - Still outstanding: use a designated test activation to verify that the live Next V1 Worker produces a signature accepted by the APK's pinned public key, then test activation, surrender, expiry, seven-day offline grace, clock rollback, and cache-clear behaviour. Do not use a production licence for a test activation.
 - The current debug APK build was independently rechecked: Build run [42267495099](https://github.com/ppj1981/HomeTV-Build/actions/runs/42267495099) checked out source `58f981dd91733f772f6f2a2da21defcd4c1e2661`, passed Node licence-expiry tests, Kotlin compilation, Kotlin unit tests, debug APK assembly, package/label checks, and artifact upload. The APK SHA-256 is `ef03ea3ee1ef816fce5715b42dc80e97f35563903cbd1740f653a9494358cc14`; artifact ZIP SHA-256 is `7ab127af0c77ea15618a648a527437fd28bbc4a2267861c60b8bcc4d56a0cb3a`.
+
+
+## Playback and playlist corrections — 2026-11-07
+
+- Commit `f11750a1e496a918f3aa21a717dd382fcca0ade1` exposes **Lock playlist / Unlock playlist** in the normal playlist context menu. The existing long-press lock shortcut remains available, and locked playlist access continues to require the configured PIN.
+- LibVLC's default **Auto** quality mode now explicitly requests the highest available adaptive HLS/DASH rendition without imposing a resolution cap. Explicit 360p/480p/720p/1080p choices remain capped as selected; **Best Available** remains unchanged.
+- Source review confirms Media3 is the first engine for HLS, DASH, SmoothStreaming, progressive HTTP(S) media (including MP4/TS), and RTSP. LibVLC is intentionally first for RTMP and UDP/RTP/MMS protocols that Media3 does not natively support. A previously confirmed working engine/URL remains remembered rather than being silently replaced.
+- Verification still required: compile-only workflow on this exact branch/commit, unit tests, then Android TV testing of playlist lock/unlock/PIN protection, LibVLC picture quality on the same streams used for comparison, and Media3-first playback/fallback. No APK, prerelease, or release was created.
