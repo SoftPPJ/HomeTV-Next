@@ -4358,6 +4358,18 @@ class MainActivity: Activity() {
             HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)
         }
     }
+    private fun restartLibVlcForPicturePreset(index:Int,c:Channel){
+        if(index !in channels.indices || active!=index || vlcPlayer==null ||
+            channelKey(channels[index])!=channelKey(c))return
+        val generation=playbackGeneration
+        // VLC's Android MediaPlayer API does not expose the desktop adjust-filter
+        // setters consistently. The filter is configured on the LibVLC instance,
+        // so rebuild only this channel's VLC session after the user commits a preset.
+        handler.postDelayed({
+            if(active==index && playbackGeneration==generation && vlcPlayer!=null)
+                playIndex(index)
+        },250L)
+    }
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
         val mode=selectedPicturePreset(c)
         val preset=selectedPictureValues(c)
@@ -4394,8 +4406,8 @@ class MainActivity: Activity() {
             .remove(pictureCustomKey(c,"brightness")).remove(pictureCustomKey(c,"contrast"))
             .remove(pictureCustomKey(c,"saturation")).apply()
         if(active==index){
-            vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-            player?.let{applyMedia3PicturePreset(it,c)}
+            if(vlcPlayer!=null)restartLibVlcForPicturePreset(index,c)
+            else player?.let{applyMedia3PicturePreset(it,c)}
         }
         showBanner(c.name+" picture mode: "+mode)
     }
@@ -4423,8 +4435,8 @@ class MainActivity: Activity() {
                     .putInt(pictureCustomKey(c,"contrast"),contrast.progress)
                     .putInt(pictureCustomKey(c,"saturation"),saturation.progress).apply()
                 if(active==activeIndex){
-                    vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-                    player?.let{applyMedia3PicturePreset(it,c)}
+                    if(vlcPlayer!=null)restartLibVlcForPicturePreset(activeIndex,c)
+                    else player?.let{applyMedia3PicturePreset(it,c)}
                 }
                 showBanner(c.name+" custom picture settings saved")
             }.setNeutralButton("Reset"){_,_->applyPictureChoice(activeIndex,c,"Standard")}
@@ -6769,6 +6781,14 @@ class MainActivity: Activity() {
                 "--avcodec-hw=any",
                 "--no-video-title-show"
             )
+            val pictureMode=selectedPicturePreset(c)
+            if(pictureMode!="Standard"){
+                val picture=selectedPictureValues(c)
+                options.add("--video-filter=adjust")
+                options.add("--brightness="+picture.brightness)
+                options.add("--contrast="+picture.contrast)
+                options.add("--saturation="+picture.saturation)
+            }
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
