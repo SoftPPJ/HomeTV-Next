@@ -3407,6 +3407,7 @@ class MainActivity: Activity() {
     private var backgroundProbeOffset=0
     private var probePositionByUrl:Map<String,Int> = emptyMap()
     private val probePlayers=mutableSetOf<ExoPlayer>()
+    private val probeWatchdogs=mutableMapOf<ExoPlayer,Runnable>()
     private var probeInFlight=0
     private val vlcProbeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
     private val vlcProbeQueue=java.util.ArrayDeque<Channel>()
@@ -3424,51 +3425,59 @@ class MainActivity: Activity() {
     private fun launchNextVlcProbe(generation:Int){
         if(generation!=backgroundProbeGeneration || !licenseReady ||
             !prefs.getBoolean("background_url_checks",false) || vlcProbePlayer!=null)return
-        while(vlcProbeQueue.isNotEmpty()){
-            val channel=vlcProbeQueue.removeFirst()
-            val url=channel.url.lowercase(java.util.Locale.ROOT)
-            if(!(url.startsWith("http://") || url.startsWith("https://")) ||
-                "youtube.com" in url || "youtu.be" in url ||
-                channel.url==channels.getOrNull(active)?.url)continue
-            try{
-                val core=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200","--http-reconnect"))
-                val probe=VlcPlayer(core)
-                vlcProbeCore=core
-                vlcProbePlayer=probe
-                var completed=false
-                fun finish(working:Boolean){
-                    if(completed)return
-                    completed=true
-                    if(working && generation==backgroundProbeGeneration &&
-                        prefs.getBoolean("background_url_checks",false)){
-                        vlcProbeReachable[channel.url]=true
-                        // This is a compatibility hint, not a proven LibVLC-only
-                        // stream: only actual playback may persist that preference.
-                    }
-                    handler.post{
-                        if(vlcProbePlayer===probe){
-                            stopVlcProbe()
-                            handler.post{launchNextVlcProbe(generation)}
-                        }
+        // Never start LibVLC until every queued Media3 probe has completed.
+        if(probeInFlight>0 || probeQueue.isNotEmpty())return
+        val channel=if(vlcProbeQueue.isNotEmpty())vlcProbeQueue.removeFirst() else null
+        if(channel==null){
+            if(generation==backgroundProbeGeneration){
+                periodicProbeTask?.let{handler.removeCallbacks(it)}
+                periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+                handler.postDelayed(periodicProbeTask!!,15*60*1000L)
+            }
+            return
+        }
+        try{
+            val core=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200","--http-reconnect"))
+            val probe=VlcPlayer(core)
+            vlcProbeCore=core
+            vlcProbePlayer=probe
+            var completed=false
+            fun finish(working:Boolean){
+                if(completed)return
+                completed=true
+                if(generation==backgroundProbeGeneration &&
+                    prefs.getBoolean("background_url_checks",false)){
+                    vlcProbeReachable[channel.url]=working
+                    if(working)unavailableChannels.remove(channelKey(channel))
+                }
+                handler.post{
+                    if(vlcProbePlayer===probe){
+                        stopVlcProbe()
+                        launchNextVlcProbe(generation)
                     }
                 }
-                probe.setEventListener{event->
-                    when(event.type){
-                        VlcPlayer.Event.Playing->finish(true)
-                        VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->finish(false)
-                    }
+            }
+            probe.setEventListener{event->
+                when(event.type){
+                    VlcPlayer.Event.Playing->handler.post{finish(true)}
+                    VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->
+                        handler.post{finish(false)}
                 }
-                val media=VlcMedia(core,Uri.parse(channel.url))
-                media.addOption(":no-audio")
-                media.addOption(":no-video")
-                HomeTvPolicies.libVlcHttpHeaderOptions(channel.headers).forEach{media.addOption(it)}
-                probe.media=media
-                media.release()
-                vlcProbeWatchdog=Runnable{finish(false)}
-                handler.postDelayed(vlcProbeWatchdog!!,6500L)
-                probe.play()
-                return
-            }catch(_:Exception){stopVlcProbe()}
+            }
+            val media=VlcMedia(core,Uri.parse(channel.url))
+            media.addOption(":no-audio")
+            media.addOption(":no-video")
+            HomeTvPolicies.libVlcHttpHeaderOptions(channel.headers).forEach{media.addOption(it)}
+            probe.media=media
+            media.release()
+            vlcProbeWatchdog=Runnable{finish(false)}
+            handler.postDelayed(vlcProbeWatchdog!!,6500L)
+            probe.play()
+        }catch(e:Exception){
+            HomeTvDiagnostics.w("HomeTV","Background LibVLC probe failed for "+channel.name,e)
+            vlcProbeReachable[channel.url]=false
+            stopVlcProbe()
+            handler.post{launchNextVlcProbe(generation)}
         }
     }
 
@@ -3525,7 +3534,8 @@ class MainActivity: Activity() {
     }
     // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
-        if(generation!=backgroundProbeGeneration || !licenseReady || !prefs.getBoolean("background_url_checks",false))return
+        if(generation!=backgroundProbeGeneration || !licenseReady ||
+            !prefs.getBoolean("background_url_checks",false))return
         if(!hasNetworkConnection()){
             periodicProbeTask?.let{handler.removeCallbacks(it)}
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
@@ -3535,8 +3545,6 @@ class MainActivity: Activity() {
         val busy=active>=0 && (player?.playbackState==Player.STATE_BUFFERING ||
             player?.playbackState==Player.STATE_IDLE)
         val limit=if(busy)1 else 2
-        // Rank at most once per dispatch, not once for every URL. The
-        // playback direction is sampled on each dispatch for responsive CH+/CH-.
         if(probeInFlight<limit && probeQueue.size>1){
             val anchor=active.coerceAtLeast(0)
             val count=channels.size.coerceAtLeast(1)
@@ -3555,43 +3563,64 @@ class MainActivity: Activity() {
             if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
                 "youtube.com" in uri || "youtu.be" in uri)continue
             probeInFlight++
-            thread(name="HomeTV-stream-check"){
-                val reachable:Boolean?=try{
-                    val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
-                    try{
-                        connection.connectTimeout=3500
-                        connection.readTimeout=3500
-                        connection.instanceFollowRedirects=true
-                        connection.setRequestProperty("Range","bytes=0-1023")
-                        connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                        channel.headers.forEach{(key,value)->
-                            if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
-                        }
-                        val code=connection.responseCode
-                        val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
-                        when{
-                            code in 200..299 && !contentType.contains("text/html")->true
-                            code==404 || code==410->false
-                            else->null
-                        }
-                    }finally{connection.disconnect()}
-                }catch(_:Exception){null}
-                handler.post{
-                    if(generation!=backgroundProbeGeneration ||
-                        !prefs.getBoolean("background_url_checks",false))return@post
+            try{
+                val factory=DefaultHttpDataSource.Factory()
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
+                    .setDefaultRequestProperties(channel.headers)
+                val probe=ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+                probePlayers.add(probe)
+                probe.volume=0f
+                var completed=false
+                var watchdog:Runnable?=null
+                fun finish(media3Works:Boolean){
+                    if(completed)return
+                    completed=true
+                    watchdog?.let{handler.removeCallbacks(it)}
+                    probeWatchdogs.remove(probe)
+                    probePlayers.remove(probe)
+                    try{probe.stop()}catch(_:Exception){}
+                    try{probe.release()}catch(_:Exception){}
+                    if(generation!=backgroundProbeGeneration)return
                     probeInFlight=(probeInFlight-1).coerceAtLeast(0)
-                    if(reachable!=null)probeReachable[channel.url]=reachable
-                    // A successful HTTP check can restore surfing eligibility,
-                    // but only actual playback can establish engine compatibility.
-                    if(reachable==true)unavailableChannels.remove(channelKey(channel))
+                    probeReachable[channel.url]=media3Works
+                    if(media3Works){
+                        vlcProbeReachable.remove(channel.url)
+                        unavailableChannels.remove(channelKey(channel))
+                    }else{
+                        // Keep LibVLC as a second-stage decoder test, not an HTTP-only guess.
+                        vlcProbeQueue.addLast(channel)
+                    }
                     launchNextProbe(generation)
+                    if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
                 }
+                probe.addListener(object:Player.Listener{
+                    override fun onIsPlayingChanged(isPlaying:Boolean){
+                        if(isPlaying)handler.post{finish(true)}
+                    }
+                    override fun onPlaybackStateChanged(state:Int){
+                        if(state==Player.STATE_ENDED)handler.post{finish(false)}
+                    }
+                    override fun onPlayerError(error:PlaybackException){
+                        handler.post{finish(false)}
+                    }
+                })
+                watchdog=Runnable{finish(false)}
+                probeWatchdogs[probe]=watchdog!!
+                handler.postDelayed(watchdog!!,7000L)
+                probe.setMediaItem(mediaItemForStream(channel.url))
+                probe.prepare()
+                probe.play()
+            }catch(e:Exception){
+                HomeTvDiagnostics.w("HomeTV","Background Media3 probe failed for "+channel.name,e)
+                probeInFlight=(probeInFlight-1).coerceAtLeast(0)
+                probeReachable[channel.url]=false
+                vlcProbeQueue.addLast(channel)
+                if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
             }
         }
-        if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
-            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
-            handler.postDelayed(periodicProbeTask!!,15*60*1000L)
-        }
+        if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
     }
     // Discover links from a bounded Web TV directory, without touching normal IPTV entries.
     // This extracts navigable channel pages; playable streams are resolved by the WebView.
