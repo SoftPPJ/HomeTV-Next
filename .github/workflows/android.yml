@@ -1,6 +1,9 @@
 name: HomeTV Next - build APK and optionally publish prerelease
 
 on:
+  push:
+    branches:
+      - fix/remote-playback-diagnostics-2026-11-07
   workflow_dispatch:
     inputs:
       publish_apk:
