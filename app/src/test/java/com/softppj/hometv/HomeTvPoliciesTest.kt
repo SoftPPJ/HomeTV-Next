@@ -46,6 +46,13 @@ class HomeTvPoliciesTest {
         assertTrue(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_MEDIA_REWIND))
         assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT))
         assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_MEDIA_REWIND))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_UP,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_DPAD_UP))
+        assertNull(HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_BUTTON_A))
         assertFalse(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_DPAD_UP))
     }
 
@@ -153,6 +160,13 @@ class HomeTvPoliciesTest {
         assertFalse(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,false,5_000L))
         assertFalse(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,true,1_000L))
         assertTrue(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,true,1_500L))
+    }
+
+    @Test fun audioOnlyConfirmationRequiresKnownEmptyVideoTracksAndAnAudioTrack(){
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(null,1))
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(1,1))
+        assertFalse(HomeTvPolicies.isKnownAudioOnly(0,0))
+        assertTrue(HomeTvPolicies.isKnownAudioOnly(0,1))
     }
 
     @Test fun videoFreezePolicyUsesPresentedFramesAndIgnoresPausedPlayback() {

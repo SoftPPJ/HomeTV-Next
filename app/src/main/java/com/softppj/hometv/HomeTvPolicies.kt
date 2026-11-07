@@ -25,6 +25,25 @@ internal object HomeTvPolicies {
     fun isRemoteRightKey(keyCode:Int):Boolean =
         keyCode==KeyEvent.KEYCODE_DPAD_RIGHT || keyCode==KeyEvent.KEYCODE_MEDIA_FAST_FORWARD
 
+    /** Map remote LEFT/RIGHT variants to DPAD events while a drawer owns navigation. */
+    fun drawerNavigationKey(keyCode:Int):Int? = when(keyCode){
+        KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT -> keyCode
+        KeyEvent.KEYCODE_MEDIA_REWIND -> KeyEvent.KEYCODE_DPAD_LEFT
+        KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> KeyEvent.KEYCODE_DPAD_RIGHT
+        else -> null
+    }
+
+    /** DPAD events must reach the focused ListView so its selection and click state stay in sync. */
+    fun shouldDeferDrawerNavigation(keyCode:Int):Boolean = keyCode in setOf(
+        KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT
+    )
+
+    /** Audio-only confirmation is safe only after VLC has positively enumerated no video tracks. */
+    fun isKnownAudioOnly(videoTrackCount:Int?,audioTrackCount:Int?):Boolean =
+        videoTrackCount==0 && (audioTrackCount ?: 0)>0
+
     fun channelKey(channel: Channel): String =
         channel.mediaType + "|" +
             channel.source.trim().lowercase(java.util.Locale.ROOT) + "|" +

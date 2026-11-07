@@ -5,6 +5,7 @@ on:
     branches:
       - new-app-v1-development
       - fix/remote-vlc-regression-2026-11-07
+      - fix/remote-playback-diagnostics-2026-11-07
   workflow_dispatch:
 
 permissions:
@@ -41,7 +42,7 @@ jobs:
           gradle :app:dependencies --configuration debugRuntimeClasspath --no-daemon --console=plain > playback-dependencies.txt
           cat playback-dependencies.txt
           grep -Fq 'androidx.media3:media3-exoplayer:1.11.1' playback-dependencies.txt
-          grep -Fq 'org.videolan.android:libvlc-all:3.5.1' playback-dependencies.txt
+          grep -Fq 'org.videolan.android:libvlc-all:3.7.7' playback-dependencies.txt
           grep -Fq 'io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.17.0' playback-dependencies.txt
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
@@ -82,3 +83,26 @@ jobs:
           echo "All pinned Robolectric SDK artifacts are downloaded and verified."
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK identity and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | grep -F "package: name='com.softppj.myhometv.next'"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | grep -F "application-label:'My Home TV Next'"
+          sha256sum "$APK" | tee "$APK.sha256"
+      - name: Upload verified APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-Next-V1-debug-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+            app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14

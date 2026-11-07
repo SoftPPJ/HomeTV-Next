@@ -971,15 +971,21 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         if(!failureSearches.add(key))return
-        val candidates=alternateIndices(index).filter{
-            it!=index && channels[it].url!=c.url
-        }.take(12)
+        // Probe every distinct alternate URL with Media3 first. A small bounded
+        // pool avoids serial delays without creating an unbounded number of decoders.
+        val candidates=alternateIndices(index).asSequence()
+            .filter{it!=index && channels[it].url!=c.url}
+            .distinctBy{channels[it].url}
+            .filter{candidate->
+                val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
+                (url.startsWith("http://") || url.startsWith("https://")) &&
+                    !url.contains("youtube.com") && !url.contains("youtu.be")
+            }.take(12).toList()
         if(candidates.isEmpty()){failureSearches.remove(key);return}
         val sourceUrl=c.url
-        var position=0
         fun stillCurrent():Boolean=
             active in channels.indices && channelKey(channels[active])==key &&
-            channels[active].url==sourceUrl && licenseReady && !isFinishing
+                channels[active].url==sourceUrl && licenseReady && !isFinishing
         fun done(){failureSearches.remove(key)}
         fun offer(candidate:Int,engine:String){
             done()
@@ -992,6 +998,7 @@ class MainActivity: Activity() {
                     if(!stillCurrent() || key !in recoveryPending)return@setPositiveButton
                     val target=channels[candidate]
                     recoveryPending.remove(key)
+                    // Persist the new URL + engine only after explicit confirmation.
                     prefs.edit().putString("manual_url_"+key,target.url)
                         .putString("manual_engine_"+key,engine)
                         .remove("working_url_"+key).remove("confirmed_engine_"+key).apply()
@@ -1016,55 +1023,122 @@ class MainActivity: Activity() {
                 addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
             }
             handler.postDelayed({
-                if(alternativePrompt===dialog) dismissAlternativePrompt(key)
+                if(alternativePrompt===dialog)dismissAlternativePrompt(key)
             },8000L)
         }
-        fun next(){
-            if(!stillCurrent()){done();return}
-            if(position>=candidates.size){done();return}
-            val candidate=candidates[position++]
-            val target=channels[candidate]
-            // Use a separate, muted Media3 instance: do not touch the live player.
-            var probe:ExoPlayer?=null
-            var finished=false
-            var watchdog:Runnable?=null
-            fun finish(working:Boolean){
-                if(finished)return
-                finished=true
-                watchdog?.let{handler.removeCallbacks(it)}
-                try{probe?.release()}catch(_:Exception){}
-                probe=null
-                if(working)offer(candidate,"Media3")
-                else handler.post{probeAlternativeVlc(candidate, target, ::offer, ::next)}
+
+        val pending=java.util.ArrayDeque<Int>()
+        candidates.forEach{pending.addLast(it)}
+        val activeProbes=mutableMapOf<Int,ExoPlayer>()
+        val watchdogs=mutableMapOf<Int,Runnable>()
+        val completed=mutableSetOf<Int>()
+        var media3Finished=0
+        var resolved=false
+        var vlcPosition=0
+
+        fun stopMedia3Probes(){
+            watchdogs.values.forEach{handler.removeCallbacks(it)}
+            watchdogs.clear()
+            activeProbes.values.toList().forEach{probe->
+                try{probe.stop()}catch(_:Exception){}
+                try{probe.release()}catch(_:Exception){}
             }
-            try{
-                val factory=DefaultHttpDataSource.Factory()
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
-                    .setDefaultRequestProperties(target.headers)
-                val exo=ExoPlayer.Builder(this)
-                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
-                probe=exo
-                exo.volume=0f
-                exo.addListener(object:Player.Listener{
-                    override fun onIsPlayingChanged(isPlaying:Boolean){
-                        if(isPlaying)finish(true)
-                    }
-                    override fun onPlaybackStateChanged(state:Int){
-                        if(state==Player.STATE_ENDED)finish(false)
-                    }
-                    override fun onPlayerError(error:PlaybackException){finish(false)}
-                })
-                watchdog=Runnable{finish(false)}
-                handler.postDelayed(watchdog!!,7000L)
-                exo.setMediaItem(mediaItemForStream(target.url))
-                exo.prepare()
-                exo.play()
-            }catch(_:Exception){finish(false)}
+            activeProbes.clear()
         }
-        handler.post{next()}
+
+        var launchMoreMedia3:(()->Unit)?=null
+        var launchNextVlc:(()->Unit)?=null
+
+        launchNextVlc={
+            if(resolved){
+                Unit
+            }else if(!stillCurrent()){
+                resolved=true
+                done()
+            }else if(vlcPosition>=candidates.size){
+                resolved=true
+                done()
+            }else{
+                val candidate=candidates[vlcPosition++]
+                android.util.Log.i("HomeTV","Alternative probe: LibVLC "+(vlcPosition)+"/"+candidates.size+" for "+c.name)
+                probeAlternativeVlc(candidate,channels[candidate],::offer){launchNextVlc?.invoke()}
+            }
+        }
+
+        fun finishMedia3(candidate:Int,working:Boolean){
+            if(resolved || !completed.add(candidate))return
+            watchdogs.remove(candidate)?.let{handler.removeCallbacks(it)}
+            activeProbes.remove(candidate)?.let{probe->
+                try{probe.stop()}catch(_:Exception){}
+                try{probe.release()}catch(_:Exception){}
+            }
+            media3Finished++
+            if(working && stillCurrent()){
+                resolved=true
+                android.util.Log.i("HomeTV","Alternative probe found Media3 playback for "+channels[candidate].name)
+                stopMedia3Probes()
+                offer(candidate,"Media3")
+                return
+            }
+            if(!stillCurrent()){
+                resolved=true
+                stopMedia3Probes()
+                done()
+                return
+            }
+            launchMoreMedia3?.invoke()
+            if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size){
+                // Only after every candidate has failed Media3 do we try LibVLC.
+                android.util.Log.i("HomeTV","All alternate Media3 probes failed; starting LibVLC checks for "+c.name)
+                launchNextVlc?.invoke()
+            }
+        }
+
+        launchMoreMedia3={
+            if(!resolved && stillCurrent()){
+            while(activeProbes.size<3 && pending.isNotEmpty()){
+                val candidate=pending.removeFirst()
+                val target=channels[candidate]
+                try{
+                    val factory=DefaultHttpDataSource.Factory()
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
+                        .setDefaultRequestProperties(target.headers)
+                    val exo=ExoPlayer.Builder(this)
+                        .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+                    activeProbes[candidate]=exo
+                    exo.volume=0f
+                    exo.addListener(object:Player.Listener{
+                        override fun onIsPlayingChanged(isPlaying:Boolean){
+                            if(isPlaying)handler.post{finishMedia3(candidate,true)}
+                        }
+                        override fun onPlaybackStateChanged(state:Int){
+                            if(state==Player.STATE_ENDED)handler.post{finishMedia3(candidate,false)}
+                        }
+                        override fun onPlayerError(error:PlaybackException){
+                            handler.post{finishMedia3(candidate,false)}
+                        }
+                    })
+                    val watchdog=Runnable{finishMedia3(candidate,false)}
+                    watchdogs[candidate]=watchdog
+                    handler.postDelayed(watchdog,7000L)
+                    exo.setMediaItem(mediaItemForStream(target.url))
+                    exo.prepare()
+                    exo.play()
+                    android.util.Log.i("HomeTV","Alternative probe: Media3 "+(media3Finished+activeProbes.size)+"/"+candidates.size+" for "+c.name)
+                }catch(e:Exception){
+                    HomeTvDiagnostics.w("HomeTV","Alternative Media3 probe failed for "+target.name,e)
+                    handler.post{finishMedia3(candidate,false)}
+                }
+            }
+            if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size && !resolved){
+                launchNextVlc?.invoke()
+            }
+            }
+        }
+        if(!stillCurrent()){done();return}
+        launchMoreMedia3?.invoke()
     }
-    // Isolated LibVLC compatibility probe; never borrows the foreground player.
     private fun probeAlternativeVlc(
         candidate:Int,target:Channel,
         offer:(Int,String)->Unit,next:()->Unit
@@ -2112,7 +2186,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private fun chooseBufferProfile(){
         val returnToSettings=settingsScreenVisible
@@ -2135,7 +2209,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     // Stream routing is independent of the user-selected engine and never
     // overrides a confirmed working URL/engine or a manual engine selection.
@@ -2216,7 +2290,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
@@ -3333,6 +3407,7 @@ class MainActivity: Activity() {
     private var backgroundProbeOffset=0
     private var probePositionByUrl:Map<String,Int> = emptyMap()
     private val probePlayers=mutableSetOf<ExoPlayer>()
+    private val probeWatchdogs=mutableMapOf<ExoPlayer,Runnable>()
     private var probeInFlight=0
     private val vlcProbeReachable=java.util.concurrent.ConcurrentHashMap<String,Boolean>()
     private val vlcProbeQueue=java.util.ArrayDeque<Channel>()
@@ -3350,51 +3425,59 @@ class MainActivity: Activity() {
     private fun launchNextVlcProbe(generation:Int){
         if(generation!=backgroundProbeGeneration || !licenseReady ||
             !prefs.getBoolean("background_url_checks",false) || vlcProbePlayer!=null)return
-        while(vlcProbeQueue.isNotEmpty()){
-            val channel=vlcProbeQueue.removeFirst()
-            val url=channel.url.lowercase(java.util.Locale.ROOT)
-            if(!(url.startsWith("http://") || url.startsWith("https://")) ||
-                "youtube.com" in url || "youtu.be" in url ||
-                channel.url==channels.getOrNull(active)?.url)continue
-            try{
-                val core=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200","--http-reconnect"))
-                val probe=VlcPlayer(core)
-                vlcProbeCore=core
-                vlcProbePlayer=probe
-                var completed=false
-                fun finish(working:Boolean){
-                    if(completed)return
-                    completed=true
-                    if(working && generation==backgroundProbeGeneration &&
-                        prefs.getBoolean("background_url_checks",false)){
-                        vlcProbeReachable[channel.url]=true
-                        // This is a compatibility hint, not a proven LibVLC-only
-                        // stream: only actual playback may persist that preference.
-                    }
-                    handler.post{
-                        if(vlcProbePlayer===probe){
-                            stopVlcProbe()
-                            handler.post{launchNextVlcProbe(generation)}
-                        }
+        // Never start LibVLC until every queued Media3 probe has completed.
+        if(probeInFlight>0 || probeQueue.isNotEmpty())return
+        val channel=if(vlcProbeQueue.isNotEmpty())vlcProbeQueue.removeFirst() else null
+        if(channel==null){
+            if(generation==backgroundProbeGeneration){
+                periodicProbeTask?.let{handler.removeCallbacks(it)}
+                periodicProbeTask=Runnable{startBackgroundChannelChecks()}
+                handler.postDelayed(periodicProbeTask!!,15*60*1000L)
+            }
+            return
+        }
+        try{
+            val core=LibVLC(this,arrayListOf("--no-audio","--no-video","--network-caching=1200","--http-reconnect"))
+            val probe=VlcPlayer(core)
+            vlcProbeCore=core
+            vlcProbePlayer=probe
+            var completed=false
+            fun finish(working:Boolean){
+                if(completed)return
+                completed=true
+                if(generation==backgroundProbeGeneration &&
+                    prefs.getBoolean("background_url_checks",false)){
+                    vlcProbeReachable[channel.url]=working
+                    if(working)unavailableChannels.remove(channelKey(channel))
+                }
+                handler.post{
+                    if(vlcProbePlayer===probe){
+                        stopVlcProbe()
+                        launchNextVlcProbe(generation)
                     }
                 }
-                probe.setEventListener{event->
-                    when(event.type){
-                        VlcPlayer.Event.Playing->finish(true)
-                        VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->finish(false)
-                    }
+            }
+            probe.setEventListener{event->
+                when(event.type){
+                    VlcPlayer.Event.Playing->handler.post{finish(true)}
+                    VlcPlayer.Event.EncounteredError,VlcPlayer.Event.EndReached->
+                        handler.post{finish(false)}
                 }
-                val media=VlcMedia(core,Uri.parse(channel.url))
-                media.addOption(":no-audio")
-                media.addOption(":no-video")
-                HomeTvPolicies.libVlcHttpHeaderOptions(channel.headers).forEach{media.addOption(it)}
-                probe.media=media
-                media.release()
-                vlcProbeWatchdog=Runnable{finish(false)}
-                handler.postDelayed(vlcProbeWatchdog!!,6500L)
-                probe.play()
-                return
-            }catch(_:Exception){stopVlcProbe()}
+            }
+            val media=VlcMedia(core,Uri.parse(channel.url))
+            media.addOption(":no-audio")
+            media.addOption(":no-video")
+            HomeTvPolicies.libVlcHttpHeaderOptions(channel.headers).forEach{media.addOption(it)}
+            probe.media=media
+            media.release()
+            vlcProbeWatchdog=Runnable{finish(false)}
+            handler.postDelayed(vlcProbeWatchdog!!,6500L)
+            probe.play()
+        }catch(e:Exception){
+            HomeTvDiagnostics.w("HomeTV","Background LibVLC probe failed for "+channel.name,e)
+            vlcProbeReachable[channel.url]=false
+            stopVlcProbe()
+            handler.post{launchNextVlcProbe(generation)}
         }
     }
 
@@ -3407,7 +3490,16 @@ class MainActivity: Activity() {
         // while a foreground channel is playing; old HTTP checks are ignored
         // by the generation guard.
         probeQueue.clear()
+        // Cancel probes from the previous generation before resetting counters.
+        probeWatchdogs.values.forEach{handler.removeCallbacks(it)}
+        probeWatchdogs.clear()
+        probePlayers.toList().forEach{probe->
+            try{probe.stop()}catch(_:Exception){}
+            try{probe.release()}catch(_:Exception){}
+        }
+        probePlayers.clear()
         probeInFlight=0
+        stopVlcProbe()
         vlcProbeQueue.clear()
         // An OFF toggle must not build and sort a huge probe queue.
         if(!prefs.getBoolean("background_url_checks",false))return
@@ -3451,7 +3543,8 @@ class MainActivity: Activity() {
     }
     // Lightweight network-only probes. Never instantiate decoders or record player compatibility.
     private fun launchNextProbe(generation:Int){
-        if(generation!=backgroundProbeGeneration || !licenseReady || !prefs.getBoolean("background_url_checks",false))return
+        if(generation!=backgroundProbeGeneration || !licenseReady ||
+            !prefs.getBoolean("background_url_checks",false))return
         if(!hasNetworkConnection()){
             periodicProbeTask?.let{handler.removeCallbacks(it)}
             periodicProbeTask=Runnable{startBackgroundChannelChecks()}
@@ -3461,8 +3554,6 @@ class MainActivity: Activity() {
         val busy=active>=0 && (player?.playbackState==Player.STATE_BUFFERING ||
             player?.playbackState==Player.STATE_IDLE)
         val limit=if(busy)1 else 2
-        // Rank at most once per dispatch, not once for every URL. The
-        // playback direction is sampled on each dispatch for responsive CH+/CH-.
         if(probeInFlight<limit && probeQueue.size>1){
             val anchor=active.coerceAtLeast(0)
             val count=channels.size.coerceAtLeast(1)
@@ -3481,43 +3572,64 @@ class MainActivity: Activity() {
             if(!(uri.startsWith("http://") || uri.startsWith("https://")) ||
                 "youtube.com" in uri || "youtu.be" in uri)continue
             probeInFlight++
-            thread(name="HomeTV-stream-check"){
-                val reachable:Boolean?=try{
-                    val connection=URL(channel.url).openConnection() as java.net.HttpURLConnection
-                    try{
-                        connection.connectTimeout=3500
-                        connection.readTimeout=3500
-                        connection.instanceFollowRedirects=true
-                        connection.setRequestProperty("Range","bytes=0-1023")
-                        connection.setRequestProperty("User-Agent",channel.headers["User-Agent"] ?: "HomeTV/1.0 AndroidTV")
-                        channel.headers.forEach{(key,value)->
-                            if(!key.equals("User-Agent",true))connection.setRequestProperty(key,value)
-                        }
-                        val code=connection.responseCode
-                        val contentType=connection.contentType?.lowercase(java.util.Locale.ROOT) ?: ""
-                        when{
-                            code in 200..299 && !contentType.contains("text/html")->true
-                            code==404 || code==410->false
-                            else->null
-                        }
-                    }finally{connection.disconnect()}
-                }catch(_:Exception){null}
-                handler.post{
-                    if(generation!=backgroundProbeGeneration ||
-                        !prefs.getBoolean("background_url_checks",false))return@post
+            try{
+                val factory=DefaultHttpDataSource.Factory()
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
+                    .setDefaultRequestProperties(channel.headers)
+                val probe=ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+                probePlayers.add(probe)
+                probe.volume=0f
+                var completed=false
+                var watchdog:Runnable?=null
+                fun finish(media3Works:Boolean){
+                    if(completed)return
+                    completed=true
+                    watchdog?.let{handler.removeCallbacks(it)}
+                    probeWatchdogs.remove(probe)
+                    probePlayers.remove(probe)
+                    try{probe.stop()}catch(_:Exception){}
+                    try{probe.release()}catch(_:Exception){}
+                    if(generation!=backgroundProbeGeneration)return
                     probeInFlight=(probeInFlight-1).coerceAtLeast(0)
-                    if(reachable!=null)probeReachable[channel.url]=reachable
-                    // A successful HTTP check can restore surfing eligibility,
-                    // but only actual playback can establish engine compatibility.
-                    if(reachable==true)unavailableChannels.remove(channelKey(channel))
+                    probeReachable[channel.url]=media3Works
+                    if(media3Works){
+                        vlcProbeReachable.remove(channel.url)
+                        unavailableChannels.remove(channelKey(channel))
+                    }else{
+                        // Keep LibVLC as a second-stage decoder test, not an HTTP-only guess.
+                        vlcProbeQueue.addLast(channel)
+                    }
                     launchNextProbe(generation)
+                    if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
                 }
+                probe.addListener(object:Player.Listener{
+                    override fun onIsPlayingChanged(isPlaying:Boolean){
+                        if(isPlaying)handler.post{finish(true)}
+                    }
+                    override fun onPlaybackStateChanged(state:Int){
+                        if(state==Player.STATE_ENDED)handler.post{finish(false)}
+                    }
+                    override fun onPlayerError(error:PlaybackException){
+                        handler.post{finish(false)}
+                    }
+                })
+                watchdog=Runnable{finish(false)}
+                probeWatchdogs[probe]=watchdog!!
+                handler.postDelayed(watchdog!!,7000L)
+                probe.setMediaItem(mediaItemForStream(channel.url))
+                probe.prepare()
+                probe.play()
+            }catch(e:Exception){
+                HomeTvDiagnostics.w("HomeTV","Background Media3 probe failed for "+channel.name,e)
+                probeInFlight=(probeInFlight-1).coerceAtLeast(0)
+                probeReachable[channel.url]=false
+                vlcProbeQueue.addLast(channel)
+                if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
             }
         }
-        if(probeInFlight==0 && probeQueue.isEmpty() && generation==backgroundProbeGeneration){
-            periodicProbeTask=Runnable{startBackgroundChannelChecks()}
-            handler.postDelayed(periodicProbeTask!!,15*60*1000L)
-        }
+        if(probeInFlight==0 && probeQueue.isEmpty())launchNextVlcProbe(generation)
     }
     // Discover links from a bounded Web TV directory, without touching normal IPTV entries.
     // This extracts navigable channel pages; playable streams are resolved by the WebView.
@@ -3921,6 +4033,39 @@ class MainActivity: Activity() {
         }
     }
     private fun showSideDialog(dialog:AlertDialog,side:Int=Gravity.RIGHT){
+        // Some TV remotes report OK as BUTTON_A/BUTTON_SELECT rather than DPAD_CENTER.
+        // Also commit single-choice settings on the first OK press instead of merely
+        // previewing the highlighted row and leaving the user on an unfocused OK button.
+        dialog.setOnKeyListener{_,keyCode,event->
+            if(event.action!=KeyEvent.ACTION_DOWN || event.repeatCount!=0 ||
+                !HomeTvPolicies.isRemoteSelectKey(keyCode))return@setOnKeyListener false
+            val list=dialog.listView
+            val focused=dialog.window?.currentFocus
+            if(focused is Button){
+                HomeTvDiagnostics.i("RemoteInput","Dialog button activated key="+keyCode+
+                    " text="+focused.text)
+                focused.performClick()
+                return@setOnKeyListener true
+            }
+            if(list==null || !list.hasFocus())return@setOnKeyListener false
+            val selected=list.selectedItemPosition
+                .takeIf{it in 0 until list.count}
+                ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                ?:0
+            if(selected !in 0 until list.count)return@setOnKeyListener false
+            HomeTvDiagnostics.i("RemoteInput","Dialog list activated key="+keyCode+
+                " selected="+selected+" choiceMode="+list.choiceMode)
+            list.performItemClick(
+                list.getChildAt(selected-list.firstVisiblePosition),
+                selected,list.getItemIdAtPosition(selected)
+            )
+            val positive=dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            if(list.choiceMode==ListView.CHOICE_MODE_SINGLE &&
+                positive!=null && positive.visibility==View.VISIBLE && positive.isEnabled){
+                positive.performClick()
+            }
+            true
+        }
         dialog.show()
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
@@ -3928,9 +4073,6 @@ class MainActivity: Activity() {
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
-                // Preserve the dialog's native choice mode. Single-choice setting
-                // dialogs need CHOICE_MODE_SINGLE for DPAD focus to track previews;
-                // ordinary action lists remain in their default non-choice mode.
                 selector=android.graphics.drawable.StateListDrawable().apply{
                     addState(intArrayOf(android.R.attr.state_pressed),
                         android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
@@ -3943,8 +4085,6 @@ class MainActivity: Activity() {
                 }
                 isFocusable=true
                 isFocusableInTouchMode=true
-                // AlertDialog list rows must own DPAD focus so OK activates the
-                // highlighted setting instead of falling through to playback.
                 post{requestFocus()}
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -4133,7 +4273,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
 
     private fun audioTracks(){
@@ -4162,13 +4302,13 @@ class MainActivity: Activity() {
                 (if(group.isTrackSelected(index))" ✓" else "")
         }
         if(entries.isEmpty()){
-            AlertDialog.Builder(this).setTitle("Audio tracks")
+            showSideDialog(AlertDialog.Builder(this).setTitle("Audio tracks")
                 .setMessage(if(names.isEmpty())"No audio track was detected for this channel. Try another stream URL."
                     else "Audio tracks were detected, but this device cannot currently decode them.")
-                .setPositiveButton("OK",null).show()
+                .setPositiveButton("OK",null).create())
             return
         }
-        AlertDialog.Builder(this).setTitle("Select audio track").setItems(supportedNames.toTypedArray()){_,position->
+        val dialog=AlertDialog.Builder(this).setTitle("Select audio track").setItems(supportedNames.toTypedArray()){_,position->
             val (group,index,format)=entries[position]
             exo.trackSelectionParameters=exo.trackSelectionParameters.buildUpon()
                 .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup,listOf(index)))
@@ -4188,7 +4328,8 @@ class MainActivity: Activity() {
                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                 .setPreferredAudioLanguage(if(prefs.getBoolean("audio_use_stream_default",false)) null else preferredAudioLanguage())
                 .build()
-        }.setNegativeButton("Cancel",null).show()
+        }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     // Media3 subtitle choices are saved per logical channel. This does not alter
@@ -4223,9 +4364,9 @@ class MainActivity: Activity() {
         }
         val exo=player
         if(exo==null){
-            AlertDialog.Builder(this).setTitle("Subtitles")
+            showSideDialog(AlertDialog.Builder(this).setTitle("Subtitles")
                 .setMessage("Subtitle selection is available for streams playing through Media3. This channel is using another playback engine.")
-                .setPositiveButton("OK",null).show()
+                .setPositiveButton("OK",null).create())
             return
         }
         val choices=mutableListOf("Off","Automatic")
@@ -4246,7 +4387,7 @@ class MainActivity: Activity() {
                 languages.add(language)
             }
         }
-        AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
+        val dialog=AlertDialog.Builder(this).setTitle(c.name+" — Subtitles")
             .setItems(choices.toTypedArray()){_,choice->
                 val editor=prefs.edit()
                 if(choice==0){
@@ -4269,7 +4410,8 @@ class MainActivity: Activity() {
                         .setOverrideForType(TrackSelectionOverride(group,listOf(track))).build()
                     showBanner("Subtitles: "+choices[choice])
                 }
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     private var sleepTimerTask:Runnable?=null
@@ -4284,7 +4426,7 @@ class MainActivity: Activity() {
             "15 minutes","30 minutes","45 minutes","60 minutes","90 minutes","120 minutes"
         )
         val minutes=intArrayOf(0,15,30,45,60,90,120)
-        AlertDialog.Builder(this).setTitle("Sleep timer — stop TV playback")
+        val dialog=AlertDialog.Builder(this).setTitle("Sleep timer — stop TV playback")
             .setItems(options){_,which->
                 sleepTimerTask?.let{handler.removeCallbacks(it)}
                 sleepTimerTask=null
@@ -4307,7 +4449,8 @@ class MainActivity: Activity() {
                     if(active>=0)showBanner("Sleep timer: "+delay+" minutes")
                     else Toast.makeText(this,"Sleep timer: "+delay+" minutes",Toast.LENGTH_SHORT).show()
                 }
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
 
     private data class PicturePreset(val brightness:Float,val contrast:Float,val saturation:Float)
@@ -4515,11 +4658,12 @@ class MainActivity: Activity() {
     private fun chooseSideAction(side:String){
         val actions=arrayOf("Channel list","Channel settings","Previous channel","Next channel","Fit / Fill","Do nothing")
         val current=prefs.getString("side_"+side,if(side=="left")"Channel list" else "Channel settings")
-        AlertDialog.Builder(this).setTitle("Remote "+side+" button")
+        val dialog=AlertDialog.Builder(this).setTitle("Remote "+side+" button")
             .setSingleChoiceItems(actions,actions.indexOf(current)){dialog,index->
                 prefs.edit().putString("side_"+side,actions[index]).apply()
                 dialog.dismiss();settings()
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
     private fun updateClock(){
         clockTask?.let{handler.removeCallbacks(it)}
@@ -5085,6 +5229,13 @@ class MainActivity: Activity() {
         list.isFocusable=true
         list.isFocusableInTouchMode=true
         list.choiceMode=ListView.CHOICE_MODE_SINGLE
+        list.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
+            override fun onItemSelected(parent:AdapterView<*>?,view:View?,position:Int,id:Long){
+                HomeTvDiagnostics.i("RemoteInput","Drawer selection changed position="+position+
+                    " item="+(parent?.getItemAtPosition(position)?.toString() ?: "unknown"))
+            }
+            override fun onNothingSelected(parent:AdapterView<*>?){}
+        }
         list.post{
             if(list.count>0){
                 if(list.selectedItemPosition !in 0 until list.count)
@@ -5512,7 +5663,9 @@ class MainActivity: Activity() {
             "Channel screen fit: "+screenMode(),
             "Stream quality","Buffering profile","Audio track","Preferred audio language","Subtitle settings","Sleep timer","Playback engine",
             "Clock display","Select stream source","Home","Live TV settings","Channel volume",
-            "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")"
+            "Picture adjustments ("+(channels.getOrNull(active)?.let{selectedPicturePreset(it)} ?: "Standard")+")",
+            "View diagnostic logs",
+            "Save diagnostic report"
         )
         val drawer=LinearLayout(this).apply{
             tag="settings_drawer"
@@ -5533,6 +5686,8 @@ class MainActivity: Activity() {
         screen.addView(drawer,FrameLayout.LayoutParams(width,-1,Gravity.END))
         fun close(){if(drawer.parent===screen)screen.removeView(drawer);screen.requestFocus()}
         list.setOnItemClickListener{_,_,choice,_->
+            HomeTvDiagnostics.i("RemoteInput","Playback settings item activated index="+choice+
+                " label="+options.getOrNull(choice))
             // Keep the playback-settings drawer underneath option dialogs. This
             // lets users make several changes without reopening the drawer.
             // Only destinations that replace the playback screen close it first.
@@ -5553,10 +5708,13 @@ class MainActivity: Activity() {
                 12->liveSettings()
                 13->if(active>=0)configureChannelVolume(active)
                 14->if(active>=0)configureChannelPicture(active)
+                15->showDiagnosticLogs()
+                16->exportDiagnosticReport()
             }
         }
         list.setOnKeyListener{_,code,event->
-            if(event.action==KeyEvent.ACTION_DOWN && (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_LEFT)){
+            if(event.action==KeyEvent.ACTION_DOWN &&
+                (code==KeyEvent.KEYCODE_BACK || code==KeyEvent.KEYCODE_DPAD_LEFT || code==KeyEvent.KEYCODE_DPAD_RIGHT)){
                 close();true
             }else false
         }
@@ -5775,7 +5933,7 @@ class MainActivity: Activity() {
             if(index==null || index==active)applyQuality()
             if(returnToSettings)settings()
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","21:9","1:1","Original","Zoom 110%","Zoom 125%","Zoom 150%")
     private var previewScreenMode:String?=null
@@ -6688,6 +6846,9 @@ class MainActivity: Activity() {
                     }
                 }
                 override fun onPlaybackStateChanged(state:Int){
+                    HomeTvDiagnostics.i("Media3","state="+state+" isPlaying="+exo.isPlaying+
+                        " channel="+c.name+" positionMs="+exo.currentPosition+
+                        " bufferedMs="+(exo.bufferedPosition-exo.currentPosition).coerceAtLeast(0L))
                     if(state==Player.STATE_BUFFERING){
                         autoBufferStableSince=0L
                         autoBufferStalled()
@@ -6812,11 +6973,18 @@ class MainActivity: Activity() {
                 }
             }
             var started=false
+            var confirmed=false
             var failed=false
             var hasVideoOutput=false
             var vlcStartedAt=0L
             var lastHealthy=android.os.SystemClock.elapsedRealtime()
             var lastMediaTime=-1L
+            var lastDisplayedPictures=-1
+            var lastDecodedVideo=-1
+            var lastPlayedAudioBuffers=-1
+            var lastVideoProgressAt=0L
+            var lastVideoStatsLoggedAt=0L
+            var startupConfirmationWatchdog:Runnable?=null
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
@@ -6828,16 +6996,87 @@ class MainActivity: Activity() {
                             lastHealthy=now
                         }
                         val videoTracks=try{vlc.videoTracks}catch(_:Exception){null}
+                        val audioTracks=try{vlc.audioTracks}catch(_:Exception){null}
                         val hasVideoTrack=videoTracks?.any{it.id>=0}==true
+                        val hasAudioTrack=audioTracks?.any{it.id>=0}==true
                         if(!hasVideoOutput && hasVideoTrack)hasVideoOutput=true
-                        // SurfaceView does not expose per-frame callbacks. Use VLC's
-                        // own timeline events and time position to detect a stalled
-                        // transport without treating a missing TextureView callback
-                        // as a decoder failure.
+                        // LibVLC 3.5.1 exposes decoded/displayed video and audio-buffer
+                        // counters through the active Media stats. This separates a
+                        // frozen picture from a clock that continues because audio plays.
+                        val activeMedia=try{vlc.media}catch(_:Exception){null}
+                        val stats=try{activeMedia?.stats}catch(e:Exception){
+                            HomeTvDiagnostics.w("LibVLC","Unable to read media statistics for "+c.name,e)
+                            null
+                        }finally{
+                            try{activeMedia?.release()}catch(_:Exception){}
+                        }
+                        if(stats!=null){
+                            val displayed=stats.displayedPictures
+                            val decoded=stats.decodedVideo
+                            val audioBuffers=stats.playedAbuffers
+                            if(displayed>lastDisplayedPictures){
+                                lastDisplayedPictures=displayed
+                                lastVideoProgressAt=now
+                                if(!confirmed && hasVideoTrack){
+                                    confirmed=true
+                                    rememberWorking(c)
+                                    startupConfirmationWatchdog?.let{handler.removeCallbacks(it)}
+                                    autoBufferHealthy()
+                                    HomeTvDiagnostics.i("LibVLC","First displayed video frame confirmed channel="+c.name+
+                                        " decodedVideo="+decoded+" displayedPictures="+displayed)
+                                }
+                            }else if(lastDisplayedPictures<0){
+                                lastDisplayedPictures=displayed
+                                lastVideoProgressAt=now
+                            }
+                            if(decoded!=lastDecodedVideo)lastDecodedVideo=decoded
+                            if(audioBuffers!=lastPlayedAudioBuffers)lastPlayedAudioBuffers=audioBuffers
+                            if(now-lastVideoStatsLoggedAt>=15000L){
+                                lastVideoStatsLoggedAt=now
+                                HomeTvDiagnostics.i("LibVLC","Video stats channel="+c.name+
+                                    " decodedVideo="+decoded+" displayedPictures="+displayed+
+                                    " playedAudioBuffers="+audioBuffers+" videoTrack="+hasVideoTrack+
+                                    " audioTrack="+hasAudioTrack+" vout="+hasVideoOutput)
+                            }
+                            if(!confirmed && HomeTvPolicies.isKnownAudioOnly(
+                                    videoTracks?.count{it.id>=0},
+                                    audioTracks?.count{it.id>=0}
+                                ) && now-vlcStartedAt>=1500L &&
+                                (audioBuffers>0 || mediaTime>0L)){
+                                confirmed=true
+                                rememberWorking(c)
+                                startupConfirmationWatchdog?.let{handler.removeCallbacks(it)}
+                                autoBufferHealthy()
+                                HomeTvDiagnostics.i("LibVLC","Audio-only playback confirmed channel="+c.name)
+                            }
+                            if(HomeTvPolicies.isVideoOutputStalled(
+                                    isPlaying=vlc.isPlaying,
+                                    videoExpected=hasVideoTrack,
+                                    videoFrameAgeMs=if(lastVideoProgressAt==0L)now-vlcStartedAt else now-lastVideoProgressAt,
+                                    mediaProgressAgeMs=now-lastHealthy
+                                )){
+                                failed=true
+                                autoBufferStalled()
+                                HomeTvDiagnostics.e("LibVLC","Video output stalled while playback continued channel="+c.name+
+                                    " mediaTimeMs="+mediaTime+" decodedVideo="+decoded+
+                                    " displayedPictures="+displayed+" playedAudioBuffers="+audioBuffers+
+                                    " lastFrameAgeMs="+(now-lastVideoProgressAt))
+                                handleEngineFailure(index,screen)
+                                return
+                            }
+                        }else if(now-lastHealthy>=30_000L){
+                            failed=true
+                            autoBufferStalled()
+                            HomeTvDiagnostics.w("LibVLC","No LibVLC media stats and no transport progress channel="+c.name+
+                                " vout="+hasVideoOutput+" videoTracks="+(videoTracks?.size ?: -1)+
+                                " mediaTimeMs="+mediaTime)
+                            handleEngineFailure(index,screen)
+                            return
+                        }
                         if(now-lastHealthy>=30_000L){
                             failed=true
                             autoBufferStalled()
-                            HomeTvDiagnostics.w("HomeTV","LibVLC playback made no timeline progress for "+c.name+
+                            HomeTvDiagnostics.w("LibVLC","LibVLC transport made no timeline progress channel="+c.name+
                                 " vout="+hasVideoOutput+" videoTracks="+(videoTracks?.size ?: -1)+
                                 " mediaTimeMs="+mediaTime)
                             handleEngineFailure(index,screen)
@@ -6849,27 +7088,32 @@ class MainActivity: Activity() {
             }
             handler.postDelayed(stallCheck,5000)
             val watchdog=Runnable{
-                if(!started && !failed && active==index && vlcPlayer===vlc){
+                if(!confirmed && !failed && active==index && vlcPlayer===vlc){
                     failed=true
-                    HomeTvDiagnostics.w("HomeTV","LibVLC startup timeout for "+c.name)
-                    showBanner(c.name+" did not start. Trying another stream.",true)
+                    val videoTracks=try{vlc.videoTracks?.size ?: -1}catch(_:Exception){-1}
+                    HomeTvDiagnostics.w("HomeTV","LibVLC output confirmation timeout channel="+c.name+
+                        " started="+started+" vout="+hasVideoOutput+" videoTracks="+videoTracks+
+                        " timeMs="+try{vlc.time}catch(_:Exception){-1L})
+                    showBanner(c.name+" video output was not confirmed. Trying another stream.",true)
                     handleEngineFailure(index,screen)
                 }
             }
+            startupConfirmationWatchdog=watchdog
             vlc.setEventListener{event->
                 val eventType=event.type
                 handler.post{
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return@post
                     when(eventType){
                         VlcPlayer.Event.Playing->{
+                            HomeTvDiagnostics.i("LibVLC","Playing event channel="+c.name+
+                                " timeMs="+try{vlc.time}catch(_:Exception){-1L})
                             started=true
                             vlcStartedAt=android.os.SystemClock.elapsedRealtime()
                             lastHealthy=vlcStartedAt
                             lastMediaTime=try{vlc.time}catch(_:Exception){-1L}
-                            // Preserve the previously working confirmation point:
-                            // LibVLC's Playing event means its selected URL/engine
-                            // has actually started, unlike an HTTP reachability probe.
-                            rememberWorking(c)
+                            // Playing means the demuxer/player started, not that a
+                            // video frame reached the display. Confirmation is deferred
+                            // until Media.getStats() reports displayed pictures.
                             handler.postDelayed({
                                 if(vlcPlayer===vlc && active==index && !failed)
                                     applyVlcAudioTrackPreference(c,vlc)
@@ -6879,8 +7123,6 @@ class MainActivity: Activity() {
                                     android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
                                     recoveryAttempts.remove(c.url)
                             },60000L)
-                            autoBufferHealthy()
-                            handler.removeCallbacks(watchdog)
                         }
                         VlcPlayer.Event.TimeChanged,VlcPlayer.Event.PositionChanged->{
                             lastHealthy=android.os.SystemClock.elapsedRealtime()
@@ -6892,6 +7134,8 @@ class MainActivity: Activity() {
                                 " vout="+event.voutCount)
                         }
                         VlcPlayer.Event.Buffering->{
+                            HomeTvDiagnostics.w("LibVLC","Buffering channel="+c.name+
+                                " percent="+event.buffering)
                             // Buffering is not proof of forward progress.
                         }
                         VlcPlayer.Event.Stopped,VlcPlayer.Event.EndReached->{
@@ -6994,6 +7238,8 @@ class MainActivity: Activity() {
             "Clock display",
             "Playlist manager (stop playback)",
             "Home (stop playback)",
+            "View diagnostic logs",
+            "Save diagnostic report",
         )
         val liveDialog=AlertDialog.Builder(this).setTitle("HomeTV Settings — Live TV")
             .setItems(items){_,choice->
@@ -7024,6 +7270,8 @@ class MainActivity: Activity() {
                         .setPositiveButton("Continue"){_,_->managePlaylists()}
                         .setNegativeButton("Stay on TV",null).show()
                     8->showHome()
+                    9->showDiagnosticLogs()
+                    10->exportDiagnosticReport()
                 }
             }.setNegativeButton("Close",null).create()
         showSideDialog(liveDialog)
@@ -7177,10 +7425,11 @@ class MainActivity: Activity() {
         val preview=report.takeLast(30_000)
         val message=if(report.isBlank())"No diagnostic logs have been recorded yet."
             else preview+(if(report.length>preview.length)"\n\nShowing the latest entries. Use Save report to save the complete available report." else "")
-        AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
+        val dialog=AlertDialog.Builder(this).setTitle("Diagnostic logs — last 30 days")
             .setMessage(message)
             .setPositiveButton("Save report"){_,_->exportDiagnosticReport()}
-            .setNegativeButton("Close",null).show()
+            .setNegativeButton("Close",null).create()
+        showSideDialog(dialog)
     }
     private fun exportDiagnosticReport(){
         val report=HomeTvDiagnostics.readReport()
@@ -7347,8 +7596,10 @@ class MainActivity: Activity() {
         root.addView(button("Default stream quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Auto uses the original quality offered by the active playback engine/stream. Manual resolution preferences apply only where the engine and stream support them."))
         root.addView(button("Default screen fit: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
+        root.addView(button("Remote LEFT action: "+(prefs.getString("side_left","Channel list") ?: "Channel list")){chooseSideAction("left")})
+        root.addView(button("Remote RIGHT action: "+(prefs.getString("side_right","Channel settings") ?: "Channel settings")){chooseSideAction("right")})
         root.addView(button("Clock display"){clockSettings()})
-        root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
+        root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel. LEFT and RIGHT actions can be configured above; MENU opens playback settings."))
         root.addView(button("Home"){showHome()})
         // Number actionable rows (including toggles) so TV-remote users can
         // identify menu entries consistently while scrolling the settings page.
@@ -7414,6 +7665,37 @@ class MainActivity: Activity() {
         handler.postDelayed(task,2500L)
     }
     override fun dispatchKeyEvent(event:KeyEvent):Boolean{
+        // Capture every key event before any Activity-level early return. Android TV
+        // remotes frequently expose vendor-specific keycodes; logging only DPAD and
+        // media keys hid the actual input that the player was receiving.
+        run {
+            val screen=videoScreen
+            val drawerView=screen?.findViewWithTag<View>("channel_drawer")
+                ?:screen?.findViewWithTag<View>("settings_drawer")
+                ?:screen?.findViewWithTag<View>("left_navigation")
+            val list=drawerList(drawerView)
+            val focused=window.decorView.findFocus()
+            val device=event.device
+            HomeTvDiagnostics.i("RemoteInput",
+                "action="+event.action+
+                " keyCode="+event.keyCode+
+                " keyName="+KeyEvent.keyCodeToString(event.keyCode)+
+                " scanCode="+event.scanCode+
+                " source="+event.source+
+                " deviceId="+event.deviceId+
+                " deviceName="+(device?.name ?: "unknown")+
+                " repeat="+event.repeatCount+
+                " meta="+event.metaState+
+                " flags="+event.flags+
+                " focus="+(focused?.javaClass?.simpleName ?: "none")+
+                " focusId="+(focused?.id ?: View.NO_ID)+
+                " drawer="+(drawerView?.tag ?: "none")+
+                " listSelected="+(list?.selectedItemPosition ?: -1)+
+                " listChecked="+(list?.checkedItemPosition ?: -1)+
+                " windowFocus="+window.decorView.hasWindowFocus()+
+                " active="+active+
+                " media="+(channels.getOrNull(active)?.mediaType ?: "none"))
+        }
         // Give a visible AlertDialog its own remote OK and directional navigation.
         // Avoid processing dialog keys as channel commands in the Activity.
         if(!window.decorView.hasWindowFocus())return super.dispatchKeyEvent(event)
@@ -7435,42 +7717,34 @@ class MainActivity: Activity() {
             if(openDrawer!=null){
                 when{
                     HomeTvPolicies.isRemoteSelectKey(event.keyCode)->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            val list=drawerList(openDrawer)
-                            if(list!=null && list.count>0){
-                                val selected=list.selectedItemPosition
-                                    .takeIf{it in 0 until list.count}
-                                    ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
-                                    ?:0
-                                list.setSelection(selected)
-                                val child=list.getChildAt(selected-list.firstVisiblePosition)
-                                list.performItemClick(child,selected,list.getItemIdAtPosition(selected))
-                            }
-                        }
-                        // Consume both halves so the player surface cannot interpret
-                        // the same remote press as a seek or playback command.
+                        // Route every supported OK mapping through the focused ListView.
+                        // Some TV remotes send BUTTON_A / BUTTON_SELECT, which Android's
+                        // ListView does not interpret as an activation key by itself.
+                        val list=drawerList(openDrawer) ?: return false
+                        if(list.count<=0)return true
+                        val selected=list.selectedItemPosition
+                            .takeIf{it in 0 until list.count}
+                            ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                            ?:0
+                        list.requestFocus()
+                        if(list.selectedItemPosition !in 0 until list.count)
+                            list.setSelection(selected)
+                        list.dispatchKeyEvent(KeyEvent(event.action,KeyEvent.KEYCODE_DPAD_CENTER))
                         return true
                     }
-                    HomeTvPolicies.isRemoteLeftKey(event.keyCode)->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);showLeftNavigation()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
-                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);currentScreen?.requestFocus()}
-                            }
-                        }
+                    // DPAD navigation must reach the ListView. Some remotes expose
+                    // LEFT/RIGHT as media transport keys; translate those while a
+                    // drawer is open so they never seek or get swallowed.
+                    HomeTvPolicies.drawerNavigationKey(event.keyCode)!=null->{
+                        val list=drawerList(openDrawer) ?: return true
+                        list.requestFocus()
+                        val translated=HomeTvPolicies.drawerNavigationKey(event.keyCode)!!
+                        list.dispatchKeyEvent(KeyEvent(event.action,translated))
                         return true
                     }
-                    HomeTvPolicies.isRemoteRightKey(event.keyCode)->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            when{
-                                openNavigationDrawer!=null->{currentScreen?.removeView(openNavigationDrawer);showOverlayList()}
-                                openChannelDrawer!=null->{currentScreen?.removeView(openChannelDrawer);currentScreen?.requestFocus()}
-                                openSettingsDrawer!=null->{currentScreen?.removeView(openSettingsDrawer);currentScreen?.requestFocus()}
-                            }
-                        }
-                        return true
-                    }
+                    HomeTvPolicies.shouldDeferDrawerNavigation(event.keyCode)->return false
+                    HomeTvPolicies.isRemoteLeftKey(event.keyCode)->return true
+                    HomeTvPolicies.isRemoteRightKey(event.keyCode)->return true
                 }
             }
         }
@@ -7481,8 +7755,8 @@ class MainActivity: Activity() {
             (HomeTvPolicies.isRemoteLeftKey(event.keyCode) ||
              HomeTvPolicies.isRemoteRightKey(event.keyCode))){
             if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                if(HomeTvPolicies.isRemoteLeftKey(event.keyCode))showOverlayList()
-                else showChannelOptions()
+                if(HomeTvPolicies.isRemoteLeftKey(event.keyCode))sideAction("left")
+                else sideAction("right")
             }
             return true
         }
@@ -7534,8 +7808,8 @@ class MainActivity: Activity() {
                 // exposes a DVR seek window. Seeking live streams here hijacks
                 // the channel-list and channel-options controls.
                 if(media=="live" && (event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)){
-                    if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT)showOverlayList()
-                    else showChannelOptions()
+                    if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT)sideAction("left")
+                    else sideAction("right")
                     return true
                 }
                 if(media=="live" && event.keyCode in setOf(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE)){
