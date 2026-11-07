@@ -6811,13 +6811,19 @@ class MainActivity: Activity() {
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
-                    if(started && vlc.isPlaying && !failed && prefs.getBoolean("auto_reconnect",true)){
+                    if(started && vlc.isPlaying && !failed){
                         val now=android.os.SystemClock.elapsedRealtime()
-                        val hasVideoTrack=try{vlc.videoTracks?.any{it.id>=0}==true}catch(_:Exception){false}
+                        val videoTracks=try{vlc.videoTracks}catch(_:Exception){null}
+                        val hasVideoTrack=videoTracks?.any{it.id>=0}==true
                         val videoExpected=hasVideoOutput || hasVideoTrack
                         val videoFrameAge=if(lastVlcVideoFrameAt>0L)now-lastVlcVideoFrameAt
                             else now-vlcStartedAt
-                        if(videoExpected && lastVlcVideoFrameAt>0L && !vlcFrameConfirmed){
+                        // Confirm video only after a frame reaches the TextureView.
+                        // Audio-only streams may be confirmed once VLC exposes its
+                        // track list and playback has progressed for the startup grace.
+                        if(!vlcFrameConfirmed && HomeTvPolicies.shouldConfirmVlcPlayback(
+                                videoExpected,lastVlcVideoFrameAt>0L,videoTracks!=null,now-vlcStartedAt
+                            )){
                             vlcFrameConfirmed=true
                             rememberWorking(c)
                         }
@@ -6866,11 +6872,6 @@ class MainActivity: Activity() {
                         },60000L)
                         vlcStartedAt=android.os.SystemClock.elapsedRealtime()
                         lastHealthy=vlcStartedAt
-                        handler.postDelayed({
-                            if(vlcPlayer===vlc && active==index && !failed &&
-                                (lastVlcVideoFrameAt>0L || !hasVideoOutput))
-                                rememberWorking(c)
-                        },1500L)
                         autoBufferHealthy()
                         handler.removeCallbacks(watchdog)
                     }
