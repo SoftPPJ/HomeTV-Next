@@ -34,3 +34,13 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 - Android TV playback, decoder compatibility, original-resolution output, long-run stability and remote-control acceptance remain device tests for the user. Do not mark them passed without user confirmation.
 
 **Release gate:** no APK, prerelease or release until all remaining source work is complete, source-only checks pass, and the user explicitly authorizes packaging.
+
+
+## Latest source-only verification — 7 November 2026
+
+- Commit `031e78c2af0beb90f65875b346a20944f142c557` passed GitHub Actions run [42341597071](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42341597071): resolved dependency checks, Kotlin compilation and all unit tests.
+- Resolved runtime dependencies were confirmed as Media3 1.11.1, NextLib Media3 extension 1.11.1-0.17.0 and LibVLC 3.7.7.
+- No APK assembly, APK upload, release or prerelease occurred in this run. The run has no uploaded artifacts.
+- Cloudflare configuration inspection found the `hometv-license-next` Worker deployed at 100% traffic, with `LICENSE_SIGNING_PRIVATE_JWK` present as a secret binding and `UPSTREAM_BASE` configured to the existing V6 licensing Worker. No secret value was read. A live signed validation was not attempted because no test licence/device credentials were supplied.
+- Android TV behavior is still unverified and remains the user's test. Do not infer freeze-free playback or original stream quality from source checks.
+
