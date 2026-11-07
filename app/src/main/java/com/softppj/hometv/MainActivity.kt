@@ -7451,8 +7451,10 @@ class MainActivity: Activity() {
         root.addView(button("Default stream quality: "+(prefs.getString("quality_global","Auto") ?: "Auto")){selectQuality()})
         root.addView(label("Auto uses the original quality offered by the active playback engine/stream. Manual resolution preferences apply only where the engine and stream support them."))
         root.addView(button("Default screen fit: "+(prefs.getString("screen_mode","16:9") ?: "Fit")){selectScreenMode()})
+        root.addView(button("Remote LEFT action: "+(prefs.getString("side_left","Channel list") ?: "Channel list")){chooseSideAction("left")})
+        root.addView(button("Remote RIGHT action: "+(prefs.getString("side_right","Channel settings") ?: "Channel settings")){chooseSideAction("right")})
         root.addView(button("Clock display"){clockSettings()})
-        root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel; Left opens channels; Right/Menu opens playback settings."))
+        root.addView(label("Remote: Up previews next channel; Down previews previous channel; OK plays selected channel. LEFT and RIGHT actions can be configured above; MENU opens playback settings."))
         root.addView(button("Home"){showHome()})
         // Number actionable rows (including toggles) so TV-remote users can
         // identify menu entries consistently while scrolling the settings page.
@@ -7614,8 +7616,8 @@ class MainActivity: Activity() {
             (HomeTvPolicies.isRemoteLeftKey(event.keyCode) ||
              HomeTvPolicies.isRemoteRightKey(event.keyCode))){
             if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                if(HomeTvPolicies.isRemoteLeftKey(event.keyCode))showOverlayList()
-                else showChannelOptions()
+                if(HomeTvPolicies.isRemoteLeftKey(event.keyCode))sideAction("left")
+                else sideAction("right")
             }
             return true
         }
@@ -7667,8 +7669,8 @@ class MainActivity: Activity() {
                 // exposes a DVR seek window. Seeking live streams here hijacks
                 // the channel-list and channel-options controls.
                 if(media=="live" && (event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT || event.keyCode==KeyEvent.KEYCODE_DPAD_RIGHT)){
-                    if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT)showOverlayList()
-                    else showChannelOptions()
+                    if(event.keyCode==KeyEvent.KEYCODE_DPAD_LEFT)sideAction("left")
+                    else sideAction("right")
                     return true
                 }
                 if(media=="live" && event.keyCode in setOf(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,KeyEvent.KEYCODE_MEDIA_PLAY,KeyEvent.KEYCODE_MEDIA_PAUSE)){
