@@ -96,6 +96,39 @@ class HomeTvPoliciesTest {
         assertEquals(10_000, index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels.last())])
     }
 
+    @Test fun libVlcAutoAndBestAvailableKeepTheOriginalAdaptiveResolutionRange() {
+        assertEquals(listOf(":adaptive-logic=highest"), HomeTvPolicies.libVlcAdaptiveOptions("Auto"))
+        assertEquals(listOf(":adaptive-logic=highest"), HomeTvPolicies.libVlcAdaptiveOptions("Best Available"))
+        assertFalse(HomeTvPolicies.libVlcAdaptiveOptions("Auto").any { it.startsWith(":adaptive-maxheight=") })
+    }
+
+    @Test fun libVlcOnlyCapsResolutionWhenTheUserSelectsAnExplicitPreset() {
+        assertEquals(
+            listOf(":adaptive-maxheight=720", ":adaptive-logic=highest"),
+            HomeTvPolicies.libVlcAdaptiveOptions("HD (720p)")
+        )
+        assertEquals(
+            listOf(":adaptive-maxheight=1080", ":adaptive-logic=highest"),
+            HomeTvPolicies.libVlcAdaptiveOptions("Full HD (1080p)")
+        )
+    }
+
+    @Test fun libVlcNativePictureModeDoesNotInstallAnAdjustmentFilter() {
+        assertTrue(HomeTvPolicies.libVlcPictureOptions("Standard",1f,1f,1f).isEmpty())
+        assertEquals(
+            listOf("--video-filter=adjust","--brightness=1.1","--contrast=1.2","--saturation=0.9"),
+            HomeTvPolicies.libVlcPictureOptions("Cinema",1.1f,1.2f,0.9f)
+        )
+    }
+
+    @Test fun videoFreezePolicyUsesPresentedFramesAndIgnoresPausedPlayback() {
+        assertFalse(HomeTvPolicies.isVideoOutputStalled(false,true,30_000L,30_000L))
+        assertFalse(HomeTvPolicies.isVideoOutputStalled(true,true,5_000L,30_000L))
+        assertTrue(HomeTvPolicies.isVideoOutputStalled(true,true,20_000L,0L))
+        assertTrue(HomeTvPolicies.isVideoOutputStalled(true,false,0L,20_000L))
+        assertFalse(HomeTvPolicies.isVideoOutputStalled(true,false,30_000L,5_000L))
+    }
+
     @Test fun youtubeNativeAttemptAndFallbackAreGuarded() {
         assertTrue(HomeTvPolicies.shouldAttemptNativeYoutube(true, false, false, false))
         assertFalse(HomeTvPolicies.shouldAttemptNativeYoutube(false, false, false, false))
