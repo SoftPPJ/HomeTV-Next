@@ -45,25 +45,35 @@ jobs:
           grep -Fq 'io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.17.0' playback-dependencies.txt
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
-      - name: Prefetch Robolectric Android 9 framework
+      - name: Prefetch every Robolectric SDK used by tests
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="9-robolectric-4913185-2-i7"
-          ARTIFACT="android-all-instrumented-$VERSION.jar"
-          BASE_URL="https://repo.maven.apache.org/maven2/org/robolectric/android-all-instrumented/$VERSION"
           DEST="app/build/robolectric-deps"
           mkdir -p "$DEST"
-          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 600 \
-            "$BASE_URL/$ARTIFACT" --output "$DEST/$ARTIFACT"
-          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 \
-            "$BASE_URL/$ARTIFACT.sha256" --output "$RUNNER_TEMP/robolectric.sha256"
-          EXPECTED="$(tr -d '[:space:]' < "$RUNNER_TEMP/robolectric.sha256")"
-          if [[ ! "$EXPECTED" =~ ^[0-9a-fA-F]{64}$ ]]; then
-            echo "::error::Maven Central returned an invalid SHA-256 checksum."
-            exit 1
-          fi
-          echo "$EXPECTED  $DEST/$ARTIFACT" | sha256sum --check
-          echo "Robolectric SDK artifact verified and ready for offline local resolution."
+          # API 28 is pinned by M3uParserTest, SignedLicenseCacheTest and
+          # YouTubeStreamResolverTest. API 32 is the app target SDK and is
+          # used by Robolectric tests without an explicit @Config SDK.
+          VERSIONS=(
+            "9-robolectric-4913185-2-i7"
+            "12.1-robolectric-8229987-i7"
+          )
+          for VERSION in "${VERSIONS[@]}"; do
+            ARTIFACT="android-all-instrumented-$VERSION.jar"
+            BASE_URL="https://repo.maven.apache.org/maven2/org/robolectric/android-all-instrumented/$VERSION"
+            curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 600 \
+              "$BASE_URL/$ARTIFACT" --output "$DEST/$ARTIFACT"
+            curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 \
+              "$BASE_URL/$ARTIFACT.sha256" --output "$RUNNER_TEMP/$VERSION.sha256"
+            EXPECTED="$(tr -d '[:space:]' < "$RUNNER_TEMP/$VERSION.sha256")"
+            if [[ ! "$EXPECTED" =~ ^[0-9a-fA-F]{64}$ ]]; then
+              echo "::error::Maven Central returned an invalid SHA-256 checksum for $ARTIFACT."
+              exit 1
+            fi
+            echo "$EXPECTED  $DEST/$ARTIFACT" | sha256sum --check
+            test -s "$DEST/$ARTIFACT"
+          done
+          ls -lh "$DEST"
+          echo "All pinned Robolectric SDK artifacts are verified."
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
