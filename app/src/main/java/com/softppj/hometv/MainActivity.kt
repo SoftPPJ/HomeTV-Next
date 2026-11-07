@@ -1046,8 +1046,8 @@ class MainActivity: Activity() {
             activeProbes.clear()
         }
 
-        lateinit var launchMoreMedia3:()->Unit
-        lateinit var launchNextVlc:()->Unit
+        var launchMoreMedia3:(()->Unit)?=null
+        var launchNextVlc:(()->Unit)?=null
 
         launchNextVlc={
             if(resolved){
@@ -1061,7 +1061,7 @@ class MainActivity: Activity() {
             }else{
                 val candidate=candidates[vlcPosition++]
                 android.util.Log.i("HomeTV","Alternative probe: LibVLC "+(vlcPosition)+"/"+candidates.size+" for "+c.name)
-                probeAlternativeVlc(candidate,channels[candidate],::offer,launchNextVlc)
+                probeAlternativeVlc(candidate,channels[candidate],::offer){launchNextVlc?.invoke()}
             }
         }
 
@@ -1086,11 +1086,11 @@ class MainActivity: Activity() {
                 done()
                 return
             }
-            launchMoreMedia3()
+            launchMoreMedia3?.invoke()
             if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size){
                 // Only after every candidate has failed Media3 do we try LibVLC.
                 android.util.Log.i("HomeTV","All alternate Media3 probes failed; starting LibVLC checks for "+c.name)
-                launchNextVlc()
+                launchNextVlc?.invoke()
             }
         }
 
@@ -1132,12 +1132,12 @@ class MainActivity: Activity() {
                 }
             }
             if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size && !resolved){
-                launchNextVlc()
+                launchNextVlc?.invoke()
             }
             }
         }
         if(!stillCurrent()){done();return}
-        launchMoreMedia3()
+        launchMoreMedia3?.invoke()
     }
     private fun probeAlternativeVlc(
         candidate:Int,target:Channel,
