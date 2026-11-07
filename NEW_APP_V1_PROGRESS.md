@@ -1,6 +1,6 @@
 # Home TV Next — Development Progress
 
-Updated: 2026-11-04
+Updated: 2026-11-07
 
 ## Completed
 - Created isolated development branch: `new-app-v1-development`.
@@ -342,3 +342,24 @@ No production APK, prerelease, or public release is approved by this audit. The 
 - LibVLC's default **Auto** quality mode now explicitly requests the highest available adaptive HLS/DASH rendition without imposing a resolution cap. Explicit 360p/480p/720p/1080p choices remain capped as selected; **Best Available** remains unchanged.
 - Source review confirms Media3 is the first engine for HLS, DASH, SmoothStreaming, progressive HTTP(S) media (including MP4/TS), and RTSP. LibVLC is intentionally first for RTMP and UDP/RTP/MMS protocols that Media3 does not natively support. A previously confirmed working engine/URL remains remembered rather than being silently replaced.
 - Verification still required: compile-only workflow on this exact branch/commit, unit tests, then Android TV testing of playlist lock/unlock/PIN protection, LibVLC picture quality on the same streams used for comparison, and Media3-first playback/fallback. No APK, prerelease, or release was created.
+
+
+## Cross-version audit and final source corrections — 7 November 2026
+
+Compared the current Next development source with the preserved V6 development snapshot and the original V6 stabilization / feature-completion / stabilization-integration branches (PRs #3–#6).
+
+- The Next branch is a separate implementation, not a wholesale merge of the V6 branches. It independently contains the key cumulative V6 areas: cache-first startup and active-playlist refresh, playlist indexing and per-playlist numbering, numbered left navigation and playlist selector, playlist locking/deletion, backup/restore, EPG, diagnostics, safe startup, signed offline licence cache, YouTube native-HLS attempt with WebView fallback, and the cinematic home UI.
+- Next intentionally uses two playback engines: Media3 first and LibVLC second (LibVLC first for RTMP/VLC-only protocols). NextLib FFmpeg is a Media3 decoder extension, not a third player. IJKPlayer is intentionally excluded from this new app.
+- The current Settings implementation returns to the Settings page after default quality and aspect-ratio selections. The channel picture presets and manual controls are also present.
+- The previous V6 snapshot uses Media3 1.5.1 / LibVLC 3.5.1 / Jellyfin FFmpeg decoder 1.5.0+1. Next uses Media3 1.11.1 / LibVLC 3.7.7 / NextLib 1.11.1-0.17.0, Kotlin 2.4.21, AGP 8.13.2 and Gradle 8.13.
+- Audit found two LibVLC watchdog weaknesses: freeze detection was skipped when Auto-reconnect was OFF, and a delayed Playing callback could mark a video source working before a frame was actually presented. Both were corrected. The LibVLC watchdog now observes video-frame progress regardless of the auto-reconnect preference; recovery policy still respects that preference. Video sources are confirmed only after a TextureView frame; audio-only confirmation requires a known track list and startup progress.
+- Added unit coverage for the LibVLC first-frame confirmation rules. A fresh source-only CI run is required after these final corrections.
+
+### Still pending
+1. Fresh CI compile and unit-test pass for the latest audit fixes.
+2. Live signed-licence activation/validation using a real test licence and device. Worker configuration is present, but an end-to-end signed lease has not been exercised.
+3. Android TV testing by the user: frozen-picture recovery, actual stream resolution/quality, Media3 and LibVLC compatibility, audio sync, remote controls, startup, YouTube, EPG and side-by-side installation.
+4. Large-playlist stress testing on a real TV/device with 10k–20k+ entries. The 20k-row indexing unit test is not a memory or UI stress test.
+5. Review GPL-3.0 distribution obligations and include the required notices/source offer for LibVLC and the FFmpeg decoder extension before distributing an APK.
+
+No APK assembly, upload, prerelease or release has been performed. APK packaging remains disabled until the user explicitly authorizes it after source work is complete.
