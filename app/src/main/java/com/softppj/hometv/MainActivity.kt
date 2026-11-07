@@ -5074,6 +5074,18 @@ class MainActivity: Activity() {
         (row.getChildAt(1) as TextView).text=title
         return row
     }
+    private fun focusRemoteList(list:ListView,preferredPosition:Int=0){
+        list.isFocusable=true
+        list.isFocusableInTouchMode=true
+        list.choiceMode=ListView.CHOICE_MODE_SINGLE
+        list.post{
+            if(list.count>0){
+                if(list.selectedItemPosition !in 0 until list.count)
+                    list.setSelection(preferredPosition.coerceIn(0,list.count-1))
+                list.requestFocus()
+            }
+        }
+    }
     private fun showOverlayList(searchQuery:String?=null){
         prefs.edit().putBoolean("favorites_surfing",false).apply()
         val screen=videoScreen ?:return
@@ -5156,7 +5168,7 @@ class MainActivity: Activity() {
             list.setItemChecked(playingPosition,true)
             list.setSelection(playingPosition)
         }
-        list.requestFocus()
+        focusRemoteList(list,if(playingPosition>=0)playingPosition else 0)
     }
     private fun showLeftNavigation(){
         val screen=videoScreen ?:return
@@ -5220,7 +5232,7 @@ class MainActivity: Activity() {
             list.setSelection(selectedGroup+9)
             list.setItemChecked(selectedGroup+9,true)
         }
-        list.post{list.requestFocus()}
+        focusRemoteList(list,if(selectedGroup>=0)selectedGroup+9 else 0)
     }
     private fun showPlaylistDrawer(){
         val screen=videoScreen ?:return
@@ -5285,7 +5297,7 @@ class MainActivity: Activity() {
         }
         val selected=selectedPlaylistSource()
         list.setSelection(if(selected==null)2 else (sources.indexOf(selected)+3).coerceAtLeast(2))
-        list.requestFocus()
+        focusRemoteList(list,if(selected==null)2 else (sources.indexOf(selected)+3).coerceAtLeast(2))
     }
     private fun showGroupDrawer(group:String){
         val source=selectedPlaylistSource() ?: channels.firstOrNull{it.group==group}?.source
@@ -5349,7 +5361,7 @@ class MainActivity: Activity() {
             list.setItemChecked(playingPosition,true)
             list.setSelection(playingPosition)
         }
-        list.requestFocus()
+        focusRemoteList(list,if(playingPosition>=0)playingPosition else 0)
     }
     // Per-channel gain is separate from Android/TV master volume. 100% is
     // the original stream level; 200% can boost quiet PCM streams.
@@ -5541,7 +5553,7 @@ class MainActivity: Activity() {
                 close();true
             }else false
         }
-        list.post{list.requestFocus()}
+        focusRemoteList(list,0)
     }
     private val qualityModes=arrayOf("Auto","Data Saver (360p)","Standard (480p)","HD (720p)","Full HD (1080p)","Best Available")
     private fun qualityMode(index:Int?=active.takeIf{it>=0}):String{
@@ -6759,13 +6771,13 @@ class MainActivity: Activity() {
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
             val cache=bufferValues()[0].coerceAtLeast(300)
-            // Keep hardware decoding automatic and full-resolution output enabled.
-            // The adaptive stream selector below is capped only by an explicit user preset.
+            // Keep LibVLC on its Android defaults for hardware-decoder selection.
+            // Forcing "--avcodec-hw=any" caused device-specific decoder failures;
+            // the previous working V6 path let LibVLC choose the decoder itself.
             val options=arrayListOf(
                 "--network-caching="+cache,
                 "--live-caching="+cache,
                 "--http-reconnect",
-                "--avcodec-hw=any",
                 "--no-video-title-show"
             )
             val picture=selectedPictureValues(c)
@@ -6777,30 +6789,15 @@ class MainActivity: Activity() {
             vlcCore=core
             vlcPlayer=vlc
             try{vlc.volume=(channelVolumeGain(c)*100).toInt().coerceIn(0,200)}catch(_:Exception){}
-            // TextureView frame callbacks let HomeTV detect the real video output,
-            // not just an advancing audio/media clock.
-            val surface=TextureView(this)
+            // Use SurfaceView, matching the known-working V6 LibVLC output path.
+            // TextureView listener replacement after attachViews could leave VLC
+            // without a reliable surface lifecycle on some Android TV devices.
+            val surface=SurfaceView(this)
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             vlc.vlcVout.setVideoView(surface)
             vlc.vlcVout.attachViews()
-            val vlcSurfaceListener=surface.surfaceTextureListener
-            var lastVlcVideoFrameAt=0L
-            surface.surfaceTextureListener=object:TextureView.SurfaceTextureListener{
-                override fun onSurfaceTextureAvailable(texture:android.graphics.SurfaceTexture,width:Int,height:Int){
-                    vlcSurfaceListener?.onSurfaceTextureAvailable(texture,width,height)
-                }
-                override fun onSurfaceTextureSizeChanged(texture:android.graphics.SurfaceTexture,width:Int,height:Int){
-                    vlcSurfaceListener?.onSurfaceTextureSizeChanged(texture,width,height)
-                }
-                override fun onSurfaceTextureDestroyed(texture:android.graphics.SurfaceTexture):Boolean=
-                    vlcSurfaceListener?.onSurfaceTextureDestroyed(texture) ?: true
-                override fun onSurfaceTextureUpdated(texture:android.graphics.SurfaceTexture){
-                    vlcSurfaceListener?.onSurfaceTextureUpdated(texture)
-                    lastVlcVideoFrameAt=android.os.SystemClock.elapsedRealtime()
-                }
-            }
             surface.post{
-                if(vlcPlayer===vlc){
+                if(vlcPlayer===vlc && active==index && videoScreen===screen){
                     val w=screen.width.takeIf{it>0} ?: resources.displayMetrics.widthPixels
                     val h=screen.height.takeIf{it>0} ?: resources.displayMetrics.heightPixels
                     vlc.vlcVout.setWindowSize(w,h)
@@ -6811,41 +6808,36 @@ class MainActivity: Activity() {
             var failed=false
             var hasVideoOutput=false
             var vlcStartedAt=0L
-            var vlcFrameConfirmed=false
             var lastHealthy=android.os.SystemClock.elapsedRealtime()
+            var lastMediaTime=-1L
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
                     if(started && vlc.isPlaying && !failed){
                         val now=android.os.SystemClock.elapsedRealtime()
+                        val mediaTime=try{vlc.time}catch(_:Exception){-1L}
+                        if(mediaTime>=0L && mediaTime!=lastMediaTime){
+                            lastMediaTime=mediaTime
+                            lastHealthy=now
+                        }
                         val videoTracks=try{vlc.videoTracks}catch(_:Exception){null}
                         val hasVideoTrack=videoTracks?.any{it.id>=0}==true
-                        val videoExpected=hasVideoOutput || hasVideoTrack
-                        val videoFrameAge=if(lastVlcVideoFrameAt>0L)now-lastVlcVideoFrameAt
-                            else now-vlcStartedAt
-                        // Confirm video only after a frame reaches the TextureView.
-                        // Audio-only streams may be confirmed once VLC exposes its
-                        // track list and playback has progressed for the startup grace.
-                        if(!vlcFrameConfirmed && HomeTvPolicies.shouldConfirmVlcPlayback(
-                                videoExpected,lastVlcVideoFrameAt>0L,videoTracks!=null,now-vlcStartedAt
-                            )){
-                            vlcFrameConfirmed=true
-                            rememberWorking(c)
-                        }
-                        val stalled=HomeTvPolicies.isVideoOutputStalled(
-                            vlc.isPlaying,videoExpected,videoFrameAge,now-lastHealthy
-                        )
-                        if(stalled){
+                        if(!hasVideoOutput && hasVideoTrack)hasVideoOutput=true
+                        // SurfaceView does not expose per-frame callbacks. Use VLC's
+                        // own timeline events and time position to detect a stalled
+                        // transport without treating a missing TextureView callback
+                        // as a decoder failure.
+                        if(now-lastHealthy>=30_000L){
                             failed=true
                             autoBufferStalled()
-                            HomeTvDiagnostics.w("HomeTV","LibVLC "+(if(videoExpected)"video frames" else "media clock")+
-                                " stalled for "+c.name+" vout="+hasVideoOutput+
-                                " frameAgeMs="+videoFrameAge+" mediaTimeMs="+vlc.time)
+                            HomeTvDiagnostics.w("HomeTV","LibVLC playback made no timeline progress for "+c.name+
+                                " vout="+hasVideoOutput+" videoTracks="+(videoTracks?.size ?: -1)+
+                                " mediaTimeMs="+mediaTime)
                             handleEngineFailure(index,screen)
                             return
                         }
                     }
-                    handler.postDelayed(this,5000)
+                    handler.postDelayed(this,5000L)
                 }
             }
             handler.postDelayed(stallCheck,5000)
@@ -6858,62 +6850,61 @@ class MainActivity: Activity() {
                 }
             }
             vlc.setEventListener{event->
-                // LibVLC callbacks may arrive on native threads; process them
-                // on the Activity main handler and ignore obsolete players.
                 val eventType=event.type
                 handler.post{
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return@post
                     when(eventType){
-                    VlcPlayer.Event.Playing->{
-                        started=true
-                        handler.postDelayed({
-                            if(vlcPlayer===vlc && active==index && !failed)
-                                applyVlcAudioTrackPreference(c,vlc)
-                        },700L)
-                        handler.postDelayed({
-                            if(vlcPlayer===vlc && active==index && !failed &&
-                                android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
-                                recoveryAttempts.remove(c.url)
-                        },60000L)
-                        vlcStartedAt=android.os.SystemClock.elapsedRealtime()
-                        lastHealthy=vlcStartedAt
-                        autoBufferHealthy()
-                        handler.removeCallbacks(watchdog)
-                    }
-                    VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged->{
-                        // This is used only for audio-only streams. Video health is
-                        // determined from TextureView's actual frame-update callbacks.
-                        if(!hasVideoOutput)lastHealthy=android.os.SystemClock.elapsedRealtime()
-                    }
-                    VlcPlayer.Event.Vout->{
-                        // Vout means a video output was created, not that a frame
-                        // reached the TextureView. Only onSurfaceTextureUpdated
-                        // is allowed to confirm a real presented frame.
-                        hasVideoOutput=event.voutCount>0
-                    }
-                    VlcPlayer.Event.Buffering->{
-                        // A buffering callback is not proof of progress.
-                        // Leave lastHealthy unchanged so a persistent freeze
-                        // triggers same-engine recovery after the stall timeout.
-                    }
-                    VlcPlayer.Event.Stopped, VlcPlayer.Event.EndReached->handler.post{
-                        if(active==index && vlcPlayer===vlc && !failed){
-                            failed=true
-                            handleEngineFailure(index,screen)
-                        }
-                    }
-                    VlcPlayer.Event.EncounteredError->handler.post{
-                        if(active==index && vlcPlayer===vlc && !failed){
-                            failed=true
+                        VlcPlayer.Event.Playing->{
+                            started=true
+                            vlcStartedAt=android.os.SystemClock.elapsedRealtime()
+                            lastHealthy=vlcStartedAt
+                            lastMediaTime=try{vlc.time}catch(_:Exception){-1L}
+                            // Preserve the previously working confirmation point:
+                            // LibVLC's Playing event means its selected URL/engine
+                            // has actually started, unlike an HTTP reachability probe.
+                            rememberWorking(c)
+                            handler.postDelayed({
+                                if(vlcPlayer===vlc && active==index && !failed)
+                                    applyVlcAudioTrackPreference(c,vlc)
+                            },700L)
+                            handler.postDelayed({
+                                if(vlcPlayer===vlc && active==index && !failed &&
+                                    android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
+                                    recoveryAttempts.remove(c.url)
+                            },60000L)
+                            autoBufferHealthy()
                             handler.removeCallbacks(watchdog)
-                            handleEngineFailure(index,screen)
                         }
-                    }
+                        VlcPlayer.Event.TimeChanged,VlcPlayer.Event.PositionChanged->{
+                            lastHealthy=android.os.SystemClock.elapsedRealtime()
+                            lastMediaTime=try{vlc.time}catch(_:Exception){lastMediaTime}
+                        }
+                        VlcPlayer.Event.Vout->{
+                            hasVideoOutput=event.voutCount>0
+                            HomeTvDiagnostics.i("HomeTV","LibVLC video output changed for "+c.name+
+                                " vout="+event.voutCount)
+                        }
+                        VlcPlayer.Event.Buffering->{
+                            // Buffering is not proof of forward progress.
+                        }
+                        VlcPlayer.Event.Stopped,VlcPlayer.Event.EndReached->{
+                            if(!failed){
+                                failed=true
+                                HomeTvDiagnostics.w("HomeTV","LibVLC stopped for "+c.name+" event="+eventType)
+                                handleEngineFailure(index,screen)
+                            }
+                        }
+                        VlcPlayer.Event.EncounteredError->{
+                            if(!failed){
+                                failed=true
+                                HomeTvDiagnostics.e("HomeTV","LibVLC encountered a decoder/stream error for "+c.name)
+                                handler.removeCallbacks(watchdog)
+                                handleEngineFailure(index,screen)
+                            }
+                        }
                     }
                 }
             }
-            // Match Media3's live startup grace; avoid switching away from a
-            // LibVLC stream before a slow IPTV transport has time to stabilise.
             val startupLimit=HomeTvPolicies.startupTimeoutMs(c.mediaType,streamKind(c.url))
             handler.postDelayed(watchdog,startupLimit)
             val media=VlcMedia(core,Uri.parse(c.url))
@@ -6921,17 +6912,12 @@ class MainActivity: Activity() {
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
             media.addOption(":network-caching="+cache)
             media.addOption(":live-caching="+cache)
-            // LibVLC adaptive HLS/DASH quality: do not cap Auto/Best
-            // Available at a low resolution. Fixed presets provide an upper
-            // resolution preference when the stream exposes variants.
             val quality=qualityMode(index)
-            // Auto/Best Available never impose a low-resolution ceiling. Explicit
-            // presets are the only modes allowed to cap the adaptive rendition.
             HomeTvPolicies.libVlcAdaptiveOptions(quality).forEach{media.addOption(it)}
             vlc.media=media
             media.release()
             vlc.play()
-            handler.postDelayed({if(vlcPlayer===vlc)applyVideoSize()},1000)
+            handler.postDelayed({if(vlcPlayer===vlc && active==index)applyVideoSize()},1000)
         }catch(e:Exception){
             HomeTvDiagnostics.e("HomeTV","LibVLC startup failed",e)
             showBanner("LibVLC error: "+(e.message?:"unknown"),true)
@@ -7458,45 +7444,39 @@ class MainActivity: Activity() {
                 else->-1
             }
             if(digit>=0){enterChannelDigit(digit);return true}
-            if(channelDigits.isNotEmpty() && (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode==KeyEvent.KEYCODE_ENTER || event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER)){
-                tuneTypedChannel();return true
-            }
-            // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
-            // Let an open channel drawer handle its own list navigation.
+            // A drawer owns normal DPAD_CENTER / ENTER handling. Do not synthesize
+            // performItemClick here: ListView's native key handling maintains its
+            // selected row and invokes the click listener with the correct adapter
+            // position. Intercept only LEFT/RIGHT transitions that the player surface
+            // would otherwise consume as seek commands.
             val channelDrawer=videoScreen?.findViewWithTag<View>("channel_drawer")
             val settingsDrawer=videoScreen?.findViewWithTag<View>("settings_drawer")
             val navigationDrawer=videoScreen?.findViewWithTag<View>("left_navigation")
             val drawer=channelDrawer ?: settingsDrawer ?: navigationDrawer
             val drawerOpen=drawer!=null
             if(drawerOpen){
-                // Route DPAD input to the visible drawer before SurfaceView/PlayerView.
-                // Otherwise the player can consume LEFT/RIGHT as seek commands and
-                // the focused ListView may never receive the OK activation.
-                fun findList(view:View):ListView?{
-                    if(view is ListView)return view
-                    if(view is android.view.ViewGroup){
-                        for(i in 0 until view.childCount){
-                            findList(view.getChildAt(i))?.let{return it}
-                        }
-                    }
-                    return null
-                }
-                val list=drawer?.let{findList(it)}
-                when(event.keyCode){
-                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            val position=list?.selectedItemPosition ?: -1
-                            if(list!=null && position in 0 until list.count){
-                                list.performItemClick(list.getChildAt(position-list.firstVisiblePosition),position,list.getItemIdAtPosition(position))
-                            }else if(list!=null && list.count>0){
-                                list.setSelection(0)
-                                list.post{
-                                    if(list.count>0)list.performItemClick(list.getChildAt(0),0,list.getItemIdAtPosition(0))
-                                }
+                if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0 &&
+                    (event.keyCode==KeyEvent.KEYCODE_BUTTON_A || event.keyCode==KeyEvent.KEYCODE_BUTTON_SELECT)){
+                    fun findList(view:View):ListView?{
+                        if(view is ListView)return view
+                        if(view is android.view.ViewGroup){
+                            for(i in 0 until view.childCount){
+                                findList(view.getChildAt(i))?.let{return it}
                             }
                         }
-                        return true
+                        return null
                     }
+                    val list=drawer?.let{findList(it)}
+                    if(list!=null && list.count>0){
+                        val selected=list.selectedItemPosition
+                            .takeIf{it in 0 until list.count}
+                            ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                            ?:0
+                        list.performItemClick(null,selected,list.getItemIdAtPosition(selected))
+                    }
+                    return true
+                }
+                when(event.keyCode){
                     KeyEvent.KEYCODE_DPAD_LEFT->{
                         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
                             when{
@@ -7518,6 +7498,13 @@ class MainActivity: Activity() {
                         return true
                     }
                 }
+            }
+            // A typed channel number must not steal OK from an open menu.
+            if(!drawerOpen && channelDigits.isNotEmpty() &&
+                (event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
+                 event.keyCode==KeyEvent.KEYCODE_ENTER ||
+                 event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER)){
+                tuneTypedChannel();return true
             }
             if(!drawerOpen){
                 val media=channels.getOrNull(active)?.mediaType
