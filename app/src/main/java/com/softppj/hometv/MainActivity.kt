@@ -7463,7 +7463,62 @@ class MainActivity: Activity() {
             }
             // Dispatch before PlayerView/SurfaceView can consume remote DPAD events.
             // Let an open channel drawer handle its own list navigation.
-            val drawerOpen=videoScreen?.findViewWithTag<View>("channel_drawer")!=null || videoScreen?.findViewWithTag<View>("settings_drawer")!=null || videoScreen?.findViewWithTag<View>("left_navigation")!=null
+            val channelDrawer=videoScreen?.findViewWithTag<View>("channel_drawer")
+            val settingsDrawer=videoScreen?.findViewWithTag<View>("settings_drawer")
+            val navigationDrawer=videoScreen?.findViewWithTag<View>("left_navigation")
+            val drawer=channelDrawer ?: settingsDrawer ?: navigationDrawer
+            val drawerOpen=drawer!=null
+            if(drawerOpen){
+                // Route DPAD input to the visible drawer before SurfaceView/PlayerView.
+                // Otherwise the player can consume LEFT/RIGHT as seek commands and
+                // the focused ListView may never receive the OK activation.
+                fun findList(view:View):ListView?{
+                    if(view is ListView)return view
+                    if(view is android.view.ViewGroup){
+                        for(i in 0 until view.childCount){
+                            findList(view.getChildAt(i))?.let{return it}
+                        }
+                    }
+                    return null
+                }
+                val list=drawer?.let{findList(it)}
+                when(event.keyCode){
+                    KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER,KeyEvent.KEYCODE_NUMPAD_ENTER->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            val position=list?.selectedItemPosition ?: -1
+                            if(list!=null && position in 0 until list.count){
+                                list.performItemClick(list.getChildAt(position-list.firstVisiblePosition),position,list.getItemIdAtPosition(position))
+                            }else if(list!=null && list.count>0){
+                                list.setSelection(0)
+                                list.post{
+                                    if(list.count>0)list.performItemClick(list.getChildAt(0),0,list.getItemIdAtPosition(0))
+                                }
+                            }
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            when{
+                                channelDrawer!=null->{videoScreen?.removeView(channelDrawer);showLeftNavigation()}
+                                settingsDrawer!=null->videoScreen?.removeView(settingsDrawer)
+                                navigationDrawer!=null->videoScreen?.removeView(navigationDrawer)
+                            }
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT->{
+                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
+                            when{
+                                navigationDrawer!=null->{videoScreen?.removeView(navigationDrawer);showOverlayList()}
+                                channelDrawer!=null->videoScreen?.removeView(channelDrawer)
+                                settingsDrawer!=null->videoScreen?.removeView(settingsDrawer)
+                            }
+                        }
+                        return true
+                    }
+                }
+            }
             if(!drawerOpen){
                 val media=channels.getOrNull(active)?.mediaType
                 // Live-TV directional keys are navigation, even when a stream
