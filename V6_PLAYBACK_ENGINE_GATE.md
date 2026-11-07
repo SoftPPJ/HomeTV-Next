@@ -44,3 +44,14 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 - Cloudflare configuration inspection found the `hometv-license-next` Worker deployed at 100% traffic, with `LICENSE_SIGNING_PRIVATE_JWK` present as a secret binding and `UPSTREAM_BASE` configured to the existing V6 licensing Worker. No secret value was read. A live signed validation was not attempted because no test licence/device credentials were supplied.
 - Android TV behavior is still unverified and remains the user's test. Do not infer freeze-free playback or original stream quality from source checks.
 
+
+
+## Cross-version review and final LibVLC watchdog correction — 7 November 2026
+
+The Next engine stack supersedes the V6 snapshot's older Media3 1.5.1 / LibVLC 3.5.1 / Jellyfin FFmpeg 1.5.0+1 stack. Next is deliberately a two-player architecture; NextLib FFmpeg remains a decoder extension under Media3, not a third engine.
+
+The final source audit corrected two LibVLC confirmation/watchdog gaps:
+- The 20-second video-frame watchdog now runs even when the user's Auto-reconnect setting is OFF. Detection and diagnostics remain active; the established-channel recovery path still respects Auto-reconnect and does not silently change the selected URL or engine.
+- A LibVLC Playing event no longer confirms a video stream before a real TextureView frame is presented. Audio-only confirmation requires a known track list and startup progress.
+
+Unit tests now cover video-frame-required confirmation and audio-only confirmation timing. The new source-only CI run must pass before this gate is considered source-verified.
