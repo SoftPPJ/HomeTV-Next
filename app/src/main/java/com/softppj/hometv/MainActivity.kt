@@ -7617,7 +7617,7 @@ class MainActivity: Activity() {
                         list.requestFocus()
                         if(list.selectedItemPosition !in 0 until list.count)
                             list.setSelection(selected)
-                        list.dispatchKeyEvent(KeyEvent(event,KeyEvent.KEYCODE_DPAD_CENTER))
+                        list.dispatchKeyEvent(KeyEvent(event.action,KeyEvent.KEYCODE_DPAD_CENTER))
                         return true
                     }
                     // DPAD navigation must reach the ListView. Some remotes expose
@@ -7627,7 +7627,7 @@ class MainActivity: Activity() {
                         val list=drawerList(openDrawer) ?: return true
                         list.requestFocus()
                         val translated=HomeTvPolicies.drawerNavigationKey(event.keyCode)!!
-                        list.dispatchKeyEvent(KeyEvent(event,translated))
+                        list.dispatchKeyEvent(KeyEvent(event.action,translated))
                         return true
                     }
                     HomeTvPolicies.shouldDeferDrawerNavigation(event.keyCode)->return false
