@@ -139,8 +139,8 @@ Release rule: do not describe the app as fully implemented or production-ready u
 
 ## Final source-only check and licence gateway configuration — 7 November 2026
 
-- Latest code commit `031e78c2af0beb90f65875b346a20944f142c557` passed [GitHub Actions run 42341597071](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42341597071). The workflow resolved the Media3/NextLib/LibVLC versions, compiled Kotlin and passed the unit tests.
-- Dependency resolution confirmed Media3 1.11.1, NextLib Media3 extension 1.11.1-0.16.0, and LibVLC 3.7.7.
+- Earlier source-only run [42341597071](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42341597071) passed Kotlin compilation and unit tests. Its dependency-insight commands did not assert the exact NextLib artifact, so it is not treated as final dependency verification.
+- NextLib is now pinned to the published 1.11.1-0.16.0 release, and CI now fails unless it resolves exactly Media3 1.11.1, LibVLC 3.7.7 and NextLib 1.11.1-0.16.0. The latest run must pass before this is marked complete.
 - The source-check workflow has no APK assembly or upload steps. This run produced no APK artifact. No release or prerelease was created.
 - Cloudflare account inspection confirmed `hometv-license-next` is deployed with 100% traffic, has a `LICENSE_SIGNING_PRIVATE_JWK` secret binding, and its `UPSTREAM_BASE` points to the existing V6 licence Worker. Secret contents were not accessed. A live validation still requires a valid test licence/device pair and remains unverified.
 - **Remaining:** Android TV playback and quality tests are user-owned; do not claim the freeze is definitively fixed until observed on the TV. No APK should be assembled until the user explicitly authorizes packaging.
