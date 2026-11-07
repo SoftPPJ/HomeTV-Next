@@ -46,6 +46,13 @@ class HomeTvPoliciesTest {
         assertTrue(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_MEDIA_REWIND))
         assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_DPAD_RIGHT))
         assertTrue(HomeTvPolicies.isRemoteRightKey(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_MEDIA_REWIND))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD))
+        assertEquals(android.view.KeyEvent.KEYCODE_DPAD_UP,
+            HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_DPAD_UP))
+        assertNull(HomeTvPolicies.drawerNavigationKey(android.view.KeyEvent.KEYCODE_BUTTON_A))
         assertFalse(HomeTvPolicies.isRemoteLeftKey(android.view.KeyEvent.KEYCODE_DPAD_UP))
     }
 
