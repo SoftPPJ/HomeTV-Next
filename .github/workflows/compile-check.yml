@@ -51,6 +51,8 @@ jobs:
           set -euo pipefail
           DEST="app/build/robolectric-deps"
           mkdir -p "$DEST"
+          DEPS_FILE="$DEST/robolectric-deps.properties"
+          : > "$DEPS_FILE"
           # API 28 is pinned by M3uParserTest, SignedLicenseCacheTest and
           # YouTubeStreamResolverTest. API 32 is the app target SDK and is
           # used by Robolectric tests without an explicit @Config SDK.
@@ -72,8 +74,14 @@ jobs:
             fi
             echo "$EXPECTED  $DEST/$ARTIFACT" | sha256sum --check
             test -s "$DEST/$ARTIFACT"
+            # PropertiesDependencyResolver maps the full Maven coordinate
+            # directly to this verified file, avoiding filename/path lookup
+            # differences in LocalDependencyResolver.
+            printf 'org.robolectric\\:android-all-instrumented\\:%s=%s/%s\\n' "$VERSION" "$PWD/$DEST" "$ARTIFACT" >> "$DEPS_FILE"
           done
+          cat "$DEPS_FILE"
+          test "$(wc -l < "$DEPS_FILE")" -eq "${#VERSIONS[@]}"
           ls -lh "$DEST"
-          echo "All pinned Robolectric SDK artifacts are verified."
+          echo "All pinned Robolectric SDK artifacts are verified and mapped."
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
