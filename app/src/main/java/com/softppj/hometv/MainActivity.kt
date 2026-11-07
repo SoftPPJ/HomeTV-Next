@@ -3921,7 +3921,6 @@ class MainActivity: Activity() {
         }
     }
     private fun showSideDialog(dialog:AlertDialog,side:Int=Gravity.RIGHT){
-        dialog.show()
         // Some TV remotes report OK as BUTTON_A/BUTTON_SELECT rather than DPAD_CENTER.
         // Also commit single-choice settings on the first OK press instead of merely
         // previewing the highlighted row and leaving the user on an unfocused OK button.
@@ -3955,6 +3954,7 @@ class MainActivity: Activity() {
             }
             true
         }
+        dialog.show()
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
             window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
