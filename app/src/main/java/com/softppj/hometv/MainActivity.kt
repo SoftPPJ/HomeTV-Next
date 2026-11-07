@@ -971,15 +971,21 @@ class MainActivity: Activity() {
         val c=channels[index]
         val key=channelKey(c)
         if(!failureSearches.add(key))return
-        val candidates=alternateIndices(index).filter{
-            it!=index && channels[it].url!=c.url
-        }.take(12)
+        // Probe every distinct alternate URL with Media3 first. A small bounded
+        // pool avoids serial delays without creating an unbounded number of decoders.
+        val candidates=alternateIndices(index).asSequence()
+            .filter{it!=index && channels[it].url!=c.url}
+            .distinctBy{channels[it].url}
+            .filter{candidate->
+                val url=channels[candidate].url.lowercase(java.util.Locale.ROOT)
+                (url.startsWith("http://") || url.startsWith("https://")) &&
+                    !url.contains("youtube.com") && !url.contains("youtu.be")
+            }.take(12).toList()
         if(candidates.isEmpty()){failureSearches.remove(key);return}
         val sourceUrl=c.url
-        var position=0
         fun stillCurrent():Boolean=
             active in channels.indices && channelKey(channels[active])==key &&
-            channels[active].url==sourceUrl && licenseReady && !isFinishing
+                channels[active].url==sourceUrl && licenseReady && !isFinishing
         fun done(){failureSearches.remove(key)}
         fun offer(candidate:Int,engine:String){
             done()
@@ -992,6 +998,7 @@ class MainActivity: Activity() {
                     if(!stillCurrent() || key !in recoveryPending)return@setPositiveButton
                     val target=channels[candidate]
                     recoveryPending.remove(key)
+                    // Persist the new URL + engine only after explicit confirmation.
                     prefs.edit().putString("manual_url_"+key,target.url)
                         .putString("manual_engine_"+key,engine)
                         .remove("working_url_"+key).remove("confirmed_engine_"+key).apply()
@@ -1016,55 +1023,114 @@ class MainActivity: Activity() {
                 addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
             }
             handler.postDelayed({
-                if(alternativePrompt===dialog) dismissAlternativePrompt(key)
+                if(alternativePrompt===dialog)dismissAlternativePrompt(key)
             },8000L)
         }
-        fun next(){
-            if(!stillCurrent()){done();return}
-            if(position>=candidates.size){done();return}
-            val candidate=candidates[position++]
-            val target=channels[candidate]
-            // Use a separate, muted Media3 instance: do not touch the live player.
-            var probe:ExoPlayer?=null
-            var finished=false
-            var watchdog:Runnable?=null
-            fun finish(working:Boolean){
-                if(finished)return
-                finished=true
-                watchdog?.let{handler.removeCallbacks(it)}
-                try{probe?.release()}catch(_:Exception){}
-                probe=null
-                if(working)offer(candidate,"Media3")
-                else handler.post{probeAlternativeVlc(candidate, target, ::offer, ::next)}
+
+        val pending=java.util.ArrayDeque<Int>()
+        candidates.forEach{pending.addLast(it)}
+        val activeProbes=mutableMapOf<Int,ExoPlayer>()
+        val watchdogs=mutableMapOf<Int,Runnable>()
+        val completed=mutableSetOf<Int>()
+        var media3Finished=0
+        var resolved=false
+        var vlcPosition=0
+
+        fun stopMedia3Probes(){
+            watchdogs.values.forEach{handler.removeCallbacks(it)}
+            watchdogs.clear()
+            activeProbes.values.toList().forEach{probe->
+                try{probe.stop()}catch(_:Exception){}
+                try{probe.release()}catch(_:Exception){}
             }
-            try{
-                val factory=DefaultHttpDataSource.Factory()
-                    .setAllowCrossProtocolRedirects(true)
-                    .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
-                    .setDefaultRequestProperties(target.headers)
-                val exo=ExoPlayer.Builder(this)
-                    .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
-                probe=exo
-                exo.volume=0f
-                exo.addListener(object:Player.Listener{
-                    override fun onIsPlayingChanged(isPlaying:Boolean){
-                        if(isPlaying)finish(true)
-                    }
-                    override fun onPlaybackStateChanged(state:Int){
-                        if(state==Player.STATE_ENDED)finish(false)
-                    }
-                    override fun onPlayerError(error:PlaybackException){finish(false)}
-                })
-                watchdog=Runnable{finish(false)}
-                handler.postDelayed(watchdog!!,7000L)
-                exo.setMediaItem(mediaItemForStream(target.url))
-                exo.prepare()
-                exo.play()
-            }catch(_:Exception){finish(false)}
+            activeProbes.clear()
         }
-        handler.post{next()}
+
+        lateinit var launchMoreMedia3:()->Unit
+        lateinit var launchNextVlc:()->Unit
+
+        launchNextVlc={
+            if(resolved)return@launchNextVlc
+            if(!stillCurrent()){resolved=true;done();return@launchNextVlc}
+            if(vlcPosition>=candidates.size){resolved=true;done();return@launchNextVlc}
+            val candidate=candidates[vlcPosition++]
+            android.util.Log.i("HomeTV","Alternative probe: LibVLC "+(vlcPosition)+"/"+candidates.size+" for "+c.name)
+            probeAlternativeVlc(candidate,channels[candidate],::offer,launchNextVlc)
+        }
+
+        fun finishMedia3(candidate:Int,working:Boolean){
+            if(resolved || !completed.add(candidate))return
+            watchdogs.remove(candidate)?.let{handler.removeCallbacks(it)}
+            activeProbes.remove(candidate)?.let{probe->
+                try{probe.stop()}catch(_:Exception){}
+                try{probe.release()}catch(_:Exception){}
+            }
+            media3Finished++
+            if(working && stillCurrent()){
+                resolved=true
+                android.util.Log.i("HomeTV","Alternative probe found Media3 playback for "+channels[candidate].name)
+                stopMedia3Probes()
+                offer(candidate,"Media3")
+                return
+            }
+            if(!stillCurrent()){
+                resolved=true
+                stopMedia3Probes()
+                done()
+                return
+            }
+            launchMoreMedia3()
+            if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size){
+                // Only after every candidate has failed Media3 do we try LibVLC.
+                android.util.Log.i("HomeTV","All alternate Media3 probes failed; starting LibVLC checks for "+c.name)
+                launchNextVlc()
+            }
+        }
+
+        launchMoreMedia3={
+            if(resolved || !stillCurrent())return@launchMoreMedia3
+            while(activeProbes.size<3 && pending.isNotEmpty()){
+                val candidate=pending.removeFirst()
+                val target=channels[candidate]
+                try{
+                    val factory=DefaultHttpDataSource.Factory()
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(3500).setReadTimeoutMs(4500)
+                        .setDefaultRequestProperties(target.headers)
+                    val exo=ExoPlayer.Builder(this)
+                        .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).build()
+                    activeProbes[candidate]=exo
+                    exo.volume=0f
+                    exo.addListener(object:Player.Listener{
+                        override fun onIsPlayingChanged(isPlaying:Boolean){
+                            if(isPlaying)handler.post{finishMedia3(candidate,true)}
+                        }
+                        override fun onPlaybackStateChanged(state:Int){
+                            if(state==Player.STATE_ENDED)handler.post{finishMedia3(candidate,false)}
+                        }
+                        override fun onPlayerError(error:PlaybackException){
+                            handler.post{finishMedia3(candidate,false)}
+                        }
+                    })
+                    val watchdog=Runnable{finishMedia3(candidate,false)}
+                    watchdogs[candidate]=watchdog
+                    handler.postDelayed(watchdog,7000L)
+                    exo.setMediaItem(mediaItemForStream(target.url))
+                    exo.prepare()
+                    exo.play()
+                    android.util.Log.i("HomeTV","Alternative probe: Media3 "+(media3Finished+activeProbes.size)+"/"+candidates.size+" for "+c.name)
+                }catch(e:Exception){
+                    HomeTvDiagnostics.w("HomeTV","Alternative Media3 probe failed for "+target.name,e)
+                    handler.post{finishMedia3(candidate,false)}
+                }
+            }
+            if(pending.isEmpty() && activeProbes.isEmpty() && media3Finished>=candidates.size && !resolved){
+                launchNextVlc()
+            }
+        }
+        if(!stillCurrent()){done();return}
+        launchMoreMedia3()
     }
-    // Isolated LibVLC compatibility probe; never borrows the foreground player.
     private fun probeAlternativeVlc(
         candidate:Int,target:Channel,
         offer:(Int,String)->Unit,next:()->Unit
