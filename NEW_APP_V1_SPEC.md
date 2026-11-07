@@ -57,7 +57,7 @@
 - Keep the premium cinematic Android TV interface and remote-first navigation.
 - Support HLS, DASH/MPD, SmoothStreaming, direct MP4, and WebTV sources where technically supported.
 - Preserve original broadcast quality; do not silently downscale.
-- Keep Media3 as the primary engine, LibVLC fallback, and evaluate/retain the third FFmpeg/IJK-compatible route only where library/API/licensing and device compatibility are verified.
+- Keep Media3 as the primary engine and LibVLC as the second/fallback engine. FFmpeg is only a Media3 decoder extension, not a third player; IJKPlayer is not part of this app.
 - Never silently switch a user's manually selected working URL/engine. Offer confirmed alternatives without automatic switching.
 - Keep connection-loss feedback, bounded reconnect behaviour, per-channel settings, favourites, continue watching, diagnostics, and safe-start protection.
 - Test startup, navigation, and playback against large playlists and malformed/unavailable streams.
