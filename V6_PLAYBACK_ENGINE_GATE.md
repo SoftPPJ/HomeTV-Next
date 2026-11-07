@@ -8,7 +8,7 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 
 - **AndroidX Media3:** 1.11.1 across ExoPlayer, HLS, DASH, RTSP, SmoothStreaming, UI and video effects.
 - **Media3 FFmpeg decoder extension:** NextLib 1.11.1-0.17.0, aligned to Media3 1.11.1. HomeTvRenderersFactory subclasses NextRenderersFactory so native platform renderers retain priority and FFmpeg renderers are available as extension fallback; it is not a separate player engine. The extension is GPL-3.0 and distribution must retain the applicable notices/source obligations.
-- **LibVLC Android:** 3.7.7 (the build dependency and both CI version assertions are pinned to this release).
+- **LibVLC Android:** 3.5.1 (the build dependency and both CI version assertions are pinned to this release).
 - **Build toolchain:** Android Gradle Plugin 8.13.2, Kotlin 2.4.21, Gradle 8.13, compile SDK 36, Java 17.
 
 ## Quality policy
@@ -39,7 +39,7 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 ## Latest source-only verification — 7 November 2026
 
 - Commit `031e78c2af0beb90f65875b346a20944f142c557` passed GitHub Actions run [42341597071](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42341597071): dependency-insight commands, Kotlin compilation and all unit tests. That run did not assert the exact NextLib artifact version, so it is not treated as final dependency verification.
-- The dependency is pinned to the published NextLib release 1.11.1-0.17.0. The intended LibVLC 3.7.7 version is specified here; verify the Gradle pin and workflow assertions match before treating a build as final.
+- The dependency is pinned to the published NextLib release 1.11.1-0.17.0. LibVLC is pinned to 3.5.1 in Gradle and both workflow assertions; keep these pins aligned.
 - No APK assembly, APK upload, release or prerelease occurred in this run. The run has no uploaded artifacts.
 - Cloudflare configuration inspection found the `hometv-license-next` Worker deployed at 100% traffic, with `LICENSE_SIGNING_PRIVATE_JWK` present as a secret binding and `UPSTREAM_BASE` configured to the existing V6 licensing Worker. No secret value was read. A live signed validation was not attempted because no test licence/device credentials were supplied.
 - Android TV behavior is still unverified and remains the user's test. Do not infer freeze-free playback or original stream quality from source checks.
@@ -48,7 +48,7 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 
 ## Cross-version review and final LibVLC watchdog correction — 7 November 2026
 
-The Next engine stack supersedes the V6 snapshot's older Media3 1.5.1 / LibVLC 3.5.1 / Jellyfin FFmpeg 1.5.0+1 stack. Next is deliberately a two-player architecture; NextLib FFmpeg remains a decoder extension under Media3, not a third engine.
+The Next engine stack retains its current Media3 and NextLib architecture while restoring LibVLC to 3.5.1, matching the previously supplied APK. Next is deliberately a two-player architecture; NextLib FFmpeg remains a decoder extension under Media3, not a third engine.
 
 The final source audit corrected two LibVLC confirmation/watchdog gaps:
 - The 20-second video-frame watchdog now runs even when the user's Auto-reconnect setting is OFF. Detection and diagnostics remain active; the established-channel recovery path still respects Auto-reconnect and does not silently change the selected URL or engine.
