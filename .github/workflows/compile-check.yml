@@ -83,3 +83,26 @@ jobs:
           echo "All pinned Robolectric SDK artifacts are downloaded and verified."
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify APK identity and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+          test -s "$APK"
+          ls -lh "$APK"
+          BUILD_TOOLS="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | grep -F "package: name='com.softppj.myhometv.next'"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | grep -F "application-label:'My Home TV Next'"
+          sha256sum "$APK" | tee "$APK.sha256"
+      - name: Upload verified APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeTV-Next-V1-debug-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk
+            app/build/outputs/apk/debug/HomeTV-Next-V1-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
