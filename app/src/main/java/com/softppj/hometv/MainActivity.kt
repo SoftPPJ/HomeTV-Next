@@ -4427,7 +4427,7 @@ class MainActivity: Activity() {
             .remove(pictureCustomKey(c,"saturation")).apply()
         if(active==index){
             if(vlcPlayer!=null)restartLibVlcForPicturePreset(index,c)
-            else player?.let{applyMedia3PicturePreset(it,c)}
+            else player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
         }
         showBanner(c.name+" picture mode: "+mode)
     }
