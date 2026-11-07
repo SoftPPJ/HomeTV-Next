@@ -6849,7 +6849,7 @@ class MainActivity: Activity() {
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
-                    if(started && !failed && prefs.getBoolean("auto_reconnect",true)){
+                    if(started && vlc.isPlaying && !failed && prefs.getBoolean("auto_reconnect",true)){
                         val now=android.os.SystemClock.elapsedRealtime()
                         val hasVideoTrack=try{vlc.videoTracks?.any{it.id>=0}==true}catch(_:Exception){false}
                         val videoExpected=hasVideoOutput || hasVideoTrack
