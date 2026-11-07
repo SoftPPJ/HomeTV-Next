@@ -3490,7 +3490,16 @@ class MainActivity: Activity() {
         // while a foreground channel is playing; old HTTP checks are ignored
         // by the generation guard.
         probeQueue.clear()
+        // Cancel probes from the previous generation before resetting counters.
+        probeWatchdogs.values.forEach{handler.removeCallbacks(it)}
+        probeWatchdogs.clear()
+        probePlayers.toList().forEach{probe->
+            try{probe.stop()}catch(_:Exception){}
+            try{probe.release()}catch(_:Exception){}
+        }
+        probePlayers.clear()
         probeInFlight=0
+        stopVlcProbe()
         vlcProbeQueue.clear()
         // An OFF toggle must not build and sort a huge probe queue.
         if(!prefs.getBoolean("background_url_checks",false))return
