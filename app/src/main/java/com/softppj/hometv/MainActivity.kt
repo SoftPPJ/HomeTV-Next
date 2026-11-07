@@ -6763,14 +6763,10 @@ class MainActivity: Activity() {
                 "--avcodec-hw=any",
                 "--no-video-title-show"
             )
-            val pictureMode=selectedPicturePreset(c)
-            if(pictureMode!="Standard"){
-                val picture=selectedPictureValues(c)
-                options.add("--video-filter=adjust")
-                options.add("--brightness="+picture.brightness)
-                options.add("--contrast="+picture.contrast)
-                options.add("--saturation="+picture.saturation)
-            }
+            val picture=selectedPictureValues(c)
+            options.addAll(HomeTvPolicies.libVlcPictureOptions(
+                selectedPicturePreset(c),picture.brightness,picture.contrast,picture.saturation
+            ))
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
@@ -6825,8 +6821,9 @@ class MainActivity: Activity() {
                             vlcFrameConfirmed=true
                             rememberWorking(c)
                         }
-                        val stalled=if(videoExpected)videoFrameAge>20000L
-                            else now-lastHealthy>20000L
+                        val stalled=HomeTvPolicies.isVideoOutputStalled(
+                            vlc.isPlaying,videoExpected,videoFrameAge,now-lastHealthy
+                        )
                         if(stalled){
                             failed=true
                             autoBufferStalled()
@@ -6918,22 +6915,9 @@ class MainActivity: Activity() {
             // Available at a low resolution. Fixed presets provide an upper
             // resolution preference when the stream exposes variants.
             val quality=qualityMode(index)
-            val height=when(quality){
-                "Data Saver (360p)"->360
-                "Standard (480p)"->480
-                "HD (720p)"->720
-                "Full HD (1080p)"->1080
-                else->0
-            }
-            if(height>0){
-                media.addOption(":adaptive-maxheight="+height)
-                media.addOption(":adaptive-logic=highest")
-            }else if(quality=="Auto" || quality=="Best Available"){
-                // Auto keeps the full source-resolution range and selects the
-                // highest available HLS/DASH variant instead of defaulting to
-                // a conservative low-resolution rendition in LibVLC.
-                media.addOption(":adaptive-logic=highest")
-            }
+            // Auto/Best Available never impose a low-resolution ceiling. Explicit
+            // presets are the only modes allowed to cap the adaptive rendition.
+            HomeTvPolicies.libVlcAdaptiveOptions(quality).forEach{media.addOption(it)}
             vlc.media=media
             media.release()
             vlc.play()
