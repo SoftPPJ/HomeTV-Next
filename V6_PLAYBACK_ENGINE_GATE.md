@@ -7,7 +7,7 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 ## Current engine stack
 
 - **AndroidX Media3:** 1.11.1 across ExoPlayer, HLS, DASH, RTSP, SmoothStreaming, UI and video effects.
-- **Media3 FFmpeg decoder extension:** 1.9.0+1. It is loaded after Android's native renderers, with decoder fallback enabled; it is not a separate player engine.
+- **Media3 FFmpeg decoder extension:** NextLib 1.11.1-0.17.0, aligned to Media3 1.11.1. HomeTvRenderersFactory subclasses NextRenderersFactory so native platform renderers retain priority and FFmpeg renderers are available as extension fallback; it is not a separate player engine. The extension is GPL-3.0 and distribution must retain the applicable notices/source obligations.
 - **LibVLC Android:** 3.7.7.
 - **Build toolchain:** Android Gradle Plugin 8.13.2, Kotlin 2.2.10, Gradle 8.13, compile SDK 36, Java 17.
 
