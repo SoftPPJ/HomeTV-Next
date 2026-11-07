@@ -4347,15 +4347,10 @@ class MainActivity: Activity() {
         }
     }
     @UnstableApi
-    private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel,clearNative:Boolean=false){
-        // Standard at initial startup leaves Media3's untouched native surface.
-        // When returning from a non-standard preset, explicitly clear the old
-        // effect chain so it cannot remain active behind the Standard label.
-        if(selectedPicturePreset(c)=="Standard"){
-            if(clearNative)try{exo.setVideoEffects(emptyList())}
-            catch(e:Exception){HomeTvDiagnostics.w("HomeTV","Could not clear Media3 picture effects",e)}
-            return
-        }
+    private fun applyMedia3PicturePreset(exo:ExoPlayer,c:Channel){
+        // Standard means native Media3 rendering. Preset changes restart the
+        // channel so this is decided before prepare(), not on a live TV decoder.
+        if(selectedPicturePreset(c)=="Standard")return
         try{
             exo.setVideoEffects(media3PictureEffects(c))
         }catch(e:Exception){
@@ -4363,61 +4358,34 @@ class MainActivity: Activity() {
             HomeTvDiagnostics.w("HomeTV","Media3 picture adjustment unavailable; native video rendering retained",e)
         }
     }
-    private fun restartLibVlcForPicturePreset(index:Int,c:Channel){
-        if(index !in channels.indices || active!=index || vlcPlayer==null ||
+    private var picturePreviewRestartTask:Runnable?=null
+    private fun restartCurrentChannelForPicturePreset(index:Int,c:Channel){
+        if(index !in channels.indices || active!=index || videoScreen==null ||
             channelKey(channels[index])!=channelKey(c))return
+        picturePreviewRestartTask?.let{handler.removeCallbacks(it)}
         val generation=playbackGeneration
-        // VLC's Android MediaPlayer API does not expose the desktop adjust-filter
-        // setters consistently. The filter is configured on the LibVLC instance,
-        // so rebuild only this channel's VLC session after the user commits a preset.
-        handler.postDelayed({
-            if(active==index && playbackGeneration==generation && vlcPlayer!=null)
+        // Recreate the decoder with the selected preset before prepare(). This
+        // avoids changing a live GL/filter pipeline while a TV decoder is active.
+        val task=Runnable{
+            if(active==index && playbackGeneration==generation && videoScreen!=null &&
+                channels.getOrNull(index)?.let{channelKey(it)==channelKey(c)}==true){
+                picturePreviewRestartTask=null
                 playIndex(index)
-        },250L)
-    }
-    private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
-        // Use runtime setters when a LibVLC Android build exposes them. The
-        // committed setting is also applied through the native adjust filter
-        // when the LibVLC instance is recreated, covering builds without setters.
-        val preset=selectedPictureValues(c)
-        try{
-            val methods=vlc.javaClass.methods
-            val enable=methods.firstOrNull{
-                it.name=="setVideoAdjustEnabled" &&
-                    it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType))
             }
-            if(enable!=null){
-                enable.invoke(vlc,selectedPicturePreset(c)!="Standard")
-                listOf(
-                    "setVideoAdjustBrightness" to preset.brightness,
-                    "setVideoAdjustContrast" to preset.contrast,
-                    "setVideoAdjustSaturation" to preset.saturation
-                ).forEach{(name,value)->
-                    methods.firstOrNull{
-                        it.name==name && it.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
-                    }?.invoke(vlc,value)
-                }
-            }
-        }catch(e:Exception){
-            HomeTvDiagnostics.w("HomeTV","LibVLC live picture preview unavailable; committed preset will apply on restart",e)
         }
+        picturePreviewRestartTask=task
+        handler.postDelayed(task,650L)
     }
     private fun previewPictureChoice(index:Int,c:Channel,mode:String){
         previewPictureChannelKey=channelKey(c)
         previewPictureMode=mode
-        if(active==index){
-            vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-            player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
-        }
+        if(active==index)restartCurrentChannelForPicturePreset(index,c)
     }
     private fun clearPicturePreview(index:Int,c:Channel){
         if(previewPictureChannelKey==channelKey(c)){
             previewPictureChannelKey=null
             previewPictureMode=null
-            if(active==index){
-                vlcPlayer?.let{applyLibVlcPicturePreset(it,c)}
-                player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
-            }
+            if(active==index)restartCurrentChannelForPicturePreset(index,c)
         }
     }
     private fun applyPictureChoice(index:Int,c:Channel,mode:String){
@@ -4425,10 +4393,7 @@ class MainActivity: Activity() {
         prefs.edit().putString(picturePresetKey(c),mode)
             .remove(pictureCustomKey(c,"brightness")).remove(pictureCustomKey(c,"contrast"))
             .remove(pictureCustomKey(c,"saturation")).apply()
-        if(active==index){
-            if(vlcPlayer!=null)restartLibVlcForPicturePreset(index,c)
-            else player?.let{applyMedia3PicturePreset(it,c,clearNative=true)}
-        }
+        if(active==index)restartCurrentChannelForPicturePreset(index,c)
         showBanner(c.name+" picture mode: "+mode)
     }
     private fun configureManualPicture(activeIndex:Int,c:Channel){
@@ -4454,10 +4419,7 @@ class MainActivity: Activity() {
                     .putInt(pictureCustomKey(c,"brightness"),brightness.progress)
                     .putInt(pictureCustomKey(c,"contrast"),contrast.progress)
                     .putInt(pictureCustomKey(c,"saturation"),saturation.progress).apply()
-                if(active==activeIndex){
-                    if(vlcPlayer!=null)restartLibVlcForPicturePreset(activeIndex,c)
-                    else player?.let{applyMedia3PicturePreset(it,c)}
-                }
+                if(active==activeIndex)restartCurrentChannelForPicturePreset(activeIndex,c)
                 showBanner(c.name+" custom picture settings saved")
             }.setNeutralButton("Reset"){_,_->applyPictureChoice(activeIndex,c,"Standard")}
             .setNegativeButton("Cancel",null).create()
@@ -6814,7 +6776,6 @@ class MainActivity: Activity() {
             vlcCore=core
             vlcPlayer=vlc
             try{vlc.volume=(channelVolumeGain(c)*100).toInt().coerceIn(0,200)}catch(_:Exception){}
-            applyLibVlcPicturePreset(vlc,c)
             // TextureView frame callbacks let HomeTV detect the real video output,
             // not just an advancing audio/media clock.
             val surface=TextureView(this)
