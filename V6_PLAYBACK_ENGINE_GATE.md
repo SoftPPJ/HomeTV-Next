@@ -7,9 +7,9 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 ## Current engine stack
 
 - **AndroidX Media3:** 1.11.1 across ExoPlayer, HLS, DASH, RTSP, SmoothStreaming, UI and video effects.
-- **Media3 FFmpeg decoder extension:** NextLib 1.11.1-0.16.0, aligned to Media3 1.11.1. HomeTvRenderersFactory subclasses NextRenderersFactory so native platform renderers retain priority and FFmpeg renderers are available as extension fallback; it is not a separate player engine. The extension is GPL-3.0 and distribution must retain the applicable notices/source obligations.
+- **Media3 FFmpeg decoder extension:** NextLib 1.11.1-0.17.0, aligned to Media3 1.11.1. HomeTvRenderersFactory subclasses NextRenderersFactory so native platform renderers retain priority and FFmpeg renderers are available as extension fallback; it is not a separate player engine. The extension is GPL-3.0 and distribution must retain the applicable notices/source obligations.
 - **LibVLC Android:** 3.7.7.
-- **Build toolchain:** Android Gradle Plugin 8.13.2, Kotlin 2.2.10, Gradle 8.13, compile SDK 36, Java 17.
+- **Build toolchain:** Android Gradle Plugin 8.13.2, Kotlin 2.4.21, Gradle 8.13, compile SDK 36, Java 17.
 
 ## Quality policy
 
@@ -39,7 +39,7 @@ This file replaces the older V6 engine plan. HomeTV-Next is a two-engine player.
 ## Latest source-only verification — 7 November 2026
 
 - Commit `031e78c2af0beb90f65875b346a20944f142c557` passed GitHub Actions run [42341597071](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42341597071): dependency-insight commands, Kotlin compilation and all unit tests. That run did not assert the exact NextLib artifact version, so it is not treated as final dependency verification.
-- The dependency is now pinned to the published NextLib release 1.11.1-0.16.0. The current source-only workflow explicitly asserts Media3 1.11.1, LibVLC 3.7.7 and NextLib 1.11.1-0.16.0; the new run is the final version check.
+- The dependency is now pinned to the published NextLib release 1.11.1-0.17.0. The current source-only workflow explicitly asserts Media3 1.11.1, LibVLC 3.7.7 and NextLib 1.11.1-0.17.0; the new run is the final version check.
 - No APK assembly, APK upload, release or prerelease occurred in this run. The run has no uploaded artifacts.
 - Cloudflare configuration inspection found the `hometv-license-next` Worker deployed at 100% traffic, with `LICENSE_SIGNING_PRIVATE_JWK` present as a secret binding and `UPSTREAM_BASE` configured to the existing V6 licensing Worker. No secret value was read. A live signed validation was not attempted because no test licence/device credentials were supplied.
 - Android TV behavior is still unverified and remains the user's test. Do not infer freeze-free playback or original stream quality from source checks.
