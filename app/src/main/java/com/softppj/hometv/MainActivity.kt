@@ -17,6 +17,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.AudioAttributes
@@ -6565,6 +6566,49 @@ class MainActivity: Activity() {
             handler.postDelayed(startupTimeout,startupLimit)
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
+            // Detect the specific failure where Media3 keeps audio advancing but
+            // the video decoder stops outputting frames. STATE_READY/isPlaying
+            // alone cannot detect a frozen picture.
+            var media3PlayStartedAt=0L
+            var lastRenderedVideoFrames=-1
+            var lastVideoFrameProgressAt=0L
+            var videoFreezeHandled=false
+            val videoFrameWatchdog=object:Runnable{
+                override fun run(){
+                    if(player!==exo || active!=index || videoScreen!==screen)return
+                    val now=android.os.SystemClock.elapsedRealtime()
+                    if(exo.isPlaying && exo.videoFormat!=null){
+                        if(media3PlayStartedAt==0L)media3PlayStartedAt=now
+                        val counters:DecoderCounters?=exo.videoDecoderCounters
+                        if(counters!=null){
+                            counters.ensureUpdated()
+                            val rendered=counters.renderedOutputBufferCount
+                            if(rendered>lastRenderedVideoFrames){
+                                lastRenderedVideoFrames=rendered
+                                lastVideoFrameProgressAt=now
+                            }else if(lastVideoFrameProgressAt>0L &&
+                                now-lastVideoFrameProgressAt>=20000L && !videoFreezeHandled){
+                                videoFreezeHandled=true
+                                HomeTvDiagnostics.e("HomeTV","Media3 video frame output stalled while playback continued: "+c.name+
+                                    " renderedFrames="+rendered+" positionMs="+exo.currentPosition)
+                                handleEngineFailure(index,screen)
+                                return
+                            }
+                        }
+                        // Also catch audio-only progress before the first video frame.
+                        if(lastVideoFrameProgressAt==0L && media3PlayStartedAt>0L &&
+                            now-media3PlayStartedAt>=20000L && !videoFreezeHandled){
+                            videoFreezeHandled=true
+                            HomeTvDiagnostics.e("HomeTV","Media3 audio advanced without an initial video frame: "+c.name+
+                                " positionMs="+exo.currentPosition)
+                            handleEngineFailure(index,screen)
+                            return
+                        }
+                    }
+                    handler.postDelayed(this,5000L)
+                }
+            }
+            handler.postDelayed(videoFrameWatchdog,5000L)
             exo.addListener(object:Player.Listener{
                 override fun onTracksChanged(tracks:androidx.media3.common.Tracks){
                     if(player===exo && active==index)applyAudioTrackPreference(c,exo)
