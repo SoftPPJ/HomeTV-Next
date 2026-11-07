@@ -6893,8 +6893,10 @@ class MainActivity: Activity() {
                                     " playedAudioBuffers="+audioBuffers+" videoTrack="+hasVideoTrack+
                                     " audioTrack="+hasAudioTrack+" vout="+hasVideoOutput)
                             }
-                            if(!confirmed && !hasVideoTrack && hasAudioTrack &&
-                                now-vlcStartedAt>=1500L &&
+                            if(!confirmed && HomeTvPolicies.isKnownAudioOnly(
+                                    videoTracks?.count{it.id>=0},
+                                    audioTracks?.count{it.id>=0}
+                                ) && now-vlcStartedAt>=1500L &&
                                 (audioBuffers>0 || mediaTime>0L)){
                                 confirmed=true
                                 rememberWorking(c)
@@ -7597,10 +7599,7 @@ class MainActivity: Activity() {
                     // Let Android's focused ListView handle DPAD navigation itself.
                     // Intercepting DPAD_LEFT/RIGHT here prevented its own key listeners
                     // from receiving the event and made selection appear unresponsive.
-                    event.keyCode in setOf(
-                        KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN,
-                        KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT
-                    )->return false
+                    HomeTvPolicies.shouldDeferDrawerNavigation(event.keyCode)->return false
                     HomeTvPolicies.isRemoteLeftKey(event.keyCode)->return true
                     HomeTvPolicies.isRemoteRightKey(event.keyCode)->return true
                 }
