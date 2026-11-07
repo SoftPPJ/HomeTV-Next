@@ -33,7 +33,7 @@ jobs:
         run: |
           gradle :app:dependencyInsight --dependency media3-exoplayer --configuration debugRuntimeClasspath --no-daemon
           gradle :app:dependencyInsight --dependency libvlc-all --configuration debugRuntimeClasspath --no-daemon
-          gradle :app:dependencyInsight --dependency media3-ffmpeg-decoder --configuration debugRuntimeClasspath --no-daemon
+          gradle :app:dependencyInsight --dependency nextlib-media3ext --configuration debugRuntimeClasspath --no-daemon
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
       - name: Run unit tests
