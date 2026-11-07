@@ -43,7 +43,7 @@ jobs:
           set -euo pipefail
           gradle :app:dependencies --configuration debugRuntimeClasspath --no-daemon --console=plain > playback-dependencies.txt
           grep -Fq 'androidx.media3:media3-exoplayer:1.11.1' playback-dependencies.txt
-          grep -Fq 'org.videolan.android:libvlc-all:3.7.7' playback-dependencies.txt
+          grep -Fq 'org.videolan.android:libvlc-all:3.5.1' playback-dependencies.txt
           grep -Fq 'io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.17.0' playback-dependencies.txt
       - name: Compile Kotlin
         run: gradle :app:compileDebugKotlin --no-daemon --stacktrace
