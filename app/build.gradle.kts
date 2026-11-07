@@ -31,10 +31,11 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
-        // Robolectric's Android framework jar is prefetched by CI through curl
-        // and resolved locally. This avoids MavenArtifactFetcher TLS/network
-        // failures that bypass Gradle's dependency cache and retry handling.
+        // CI prefetches every SDK used by the Robolectric tests. Explicitly
+        // enable offline resolution so Robolectric never falls back to a
+        // one-shot MavenArtifactFetcher request.
         unitTests.all {
+            it.systemProperty("robolectric.offline", "true")
             it.systemProperty(
                 "robolectric.dependency.dir",
                 layout.buildDirectory.dir("robolectric-deps").get().asFile.absolutePath
