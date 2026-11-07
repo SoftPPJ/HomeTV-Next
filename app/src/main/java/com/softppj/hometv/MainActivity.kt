@@ -4546,7 +4546,7 @@ class MainActivity: Activity() {
     private fun chooseSideAction(side:String){
         val actions=arrayOf("Channel list","Channel settings","Previous channel","Next channel","Fit / Fill","Do nothing")
         val current=prefs.getString("side_"+side,if(side=="left")"Channel list" else "Channel settings")
-        AlertDialog.Builder(this).setTitle("Remote "+side+" button")
+        val dialog=AlertDialog.Builder(this).setTitle("Remote "+side+" button")
             .setSingleChoiceItems(actions,actions.indexOf(current)){dialog,index->
                 prefs.edit().putString("side_"+side,actions[index]).apply()
                 dialog.dismiss();settings()
