@@ -1,5 +1,8 @@
 # My Home TV V6 — implementation and release gates
 
+> Historical V6 checklist retained for cross-version traceability. It is not the live Next V1 task list. Current Next V1 scope/status is in `NEW_APP_V1_SPEC.md` and `NEW_APP_V1_PROGRESS.md`; see the cross-version audit at the end of this file.
+
+
 Status: IN PROGRESS. This document is a checklist, not evidence of implementation.
 Source base: my-home-tv-web. Development branch: my-home-tv-v6-development.
 Build V6 only after feature review, compilation and regression tests.
@@ -152,10 +155,10 @@ Release rule: do not describe the app as fully implemented or production-ready u
 Compared against the preserved `HomeTV-V6/my-home-tv-v6-development` snapshot and the original `HomeTV` V6 development, stability, feature-completion and stabilization-integration branches.
 
 - The Next branch is a separate implementation. It independently contains the major cumulative V6 areas: cache-first startup, active-playlist refresh, large-playlist indexing, per-playlist numbering, two-digit left navigation and playlist selector, playlist lock/deletion, backup/restore, EPG, diagnostics, safe startup, signed lease cache, YouTube native-HLS attempt/WebView fallback and the cinematic home.
-- Next intentionally has two players only: Media3 primary and LibVLC secondary (LibVLC first for RTMP/VLC-only protocols). NextLib FFmpeg is a Media3 decoder extension; IJKPlayer is not included.
+- Next intentionally has two players only: Media3 primary and LibVLC secondary (LibVLC first for RTMP/VLC-only protocols). NextLib FFmpeg is a Media3 decoder extension; IJKPlayer is not included. Per the user's 6 November instruction, Next uses `TV.m3u` directly; the V6 `Master.m3u` integration is intentionally excluded.
 - Next upgrades the V6 snapshot's Media3 1.5.1 / LibVLC 3.5.1 / Jellyfin FFmpeg 1.5.0+1 to Media3 1.11.1 / LibVLC 3.7.7 / NextLib 1.11.1-0.17.0.
 - Default stream-quality and aspect-ratio dialogs return to Settings after selection. Per-channel picture presets and custom adjustments are present.
-- Final audit fixed LibVLC freeze monitoring when Auto-reconnect is OFF and prevented a Playing event from confirming a video before an actual presented frame. Added tests for the confirmation policy.
+- Final audit fixed LibVLC freeze monitoring when Auto-reconnect is OFF and prevented a Playing event from confirming a video before an actual presented frame. Added tests for the confirmation policy. GitHub Actions run [42343307469](https://github.com/SoftPPJ/HomeTV-Next/actions/runs/42343307469) passed on commit `42a1c4d893d78e697b365b50935dfc497db66eb6` (exact dependency verification, Kotlin compilation and unit tests).
 
 ### Outstanding release gates
 - Latest source-only CI must pass after the final LibVLC changes.
