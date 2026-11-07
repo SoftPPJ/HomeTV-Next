@@ -3,12 +3,10 @@ package com.softppj.hometv
 import androidx.media3.common.C
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.BaseAudioProcessor
-import androidx.media3.common.util.UnstableApi
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
-@OptIn(UnstableApi::class)
 internal class ChannelGainAudioProcessor(initialGain:Float = 1f):BaseAudioProcessor(){
     @Volatile var gain:Float=initialGain.coerceIn(0f,2f)
     private var encoding:Int=C.ENCODING_PCM_16BIT
