@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.DecoderCounters
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.common.AudioAttributes
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -6609,6 +6610,25 @@ class MainActivity: Activity() {
                 }
             }
             handler.postDelayed(videoFrameWatchdog,5000L)
+            exo.addAnalyticsListener(object:AnalyticsListener{
+                override fun onRenderedFirstFrame(
+                    eventTime:AnalyticsListener.EventTime,
+                    output:Any,
+                    renderTimeMs:Long
+                ){
+                    if(player===exo && active==index){
+                        val now=android.os.SystemClock.elapsedRealtime()
+                        lastVideoFrameProgressAt=now
+                        exo.videoDecoderCounters?.let{counters->
+                            counters.ensureUpdated()
+                            lastRenderedVideoFrames=counters.renderedOutputBufferCount
+                        }
+                        // Do not mark a Media3 source as working merely because its
+                        // audio starts; require an actual rendered video frame.
+                        rememberWorking(c)
+                    }
+                }
+            })
             exo.addListener(object:Player.Listener{
                 override fun onTracksChanged(tracks:androidx.media3.common.Tracks){
                     if(player===exo && active==index)applyAudioTrackPreference(c,exo)
@@ -6617,7 +6637,14 @@ class MainActivity: Activity() {
                     if(isPlaying && player===exo && active==index){
                         startupWatchdog?.let{handler.removeCallbacks(it)}
                         startupWatchdog=null
-                        rememberWorking(c)
+                        // Audio-only entries can be confirmed after track selection
+                        // settles. Video streams are confirmed by onRenderedFirstFrame.
+                        if(exo.videoFormat==null){
+                            handler.postDelayed({
+                                if(player===exo && active==index && exo.isPlaying && exo.videoFormat==null)
+                                    rememberWorking(c)
+                            },2500L)
+                        }
                     }
                 }
                 override fun onPlaybackStateChanged(state:Int){
