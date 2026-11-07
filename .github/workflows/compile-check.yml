@@ -77,7 +77,7 @@ jobs:
             # PropertiesDependencyResolver maps the full Maven coordinate
             # directly to this verified file, avoiding filename/path lookup
             # differences in LocalDependencyResolver.
-            printf 'org.robolectric\\:android-all-instrumented\\:%s=%s/%s\\n' "$VERSION" "$PWD/$DEST" "$ARTIFACT" >> "$DEPS_FILE"
+            printf 'org.robolectric\\:android-all-instrumented\\:%s=%s/%s\n' "$VERSION" "$PWD/$DEST" "$ARTIFACT" >> "$DEPS_FILE"
           done
           cat "$DEPS_FILE"
           test "$(wc -l < "$DEPS_FILE")" -eq "${#VERSIONS[@]}"
