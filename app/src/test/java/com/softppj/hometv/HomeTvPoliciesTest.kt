@@ -23,6 +23,22 @@ class HomeTvPoliciesTest {
         assertEquals(2,index.perPlaylistNumbers[HomeTvPolicies.channelKey(channels[1])])
     }
 
+    @Test fun libVlcReceivesSupportedPlaylistHttpHeaders(){
+        assertEquals(
+            listOf(
+                ":http-user-agent=HomeTV-Test",
+                ":http-referrer=https://ref.example/",
+                ":http-origin=https://origin.example"
+            ),
+            HomeTvPolicies.libVlcHttpHeaderOptions(mapOf(
+                "User-Agent" to "HomeTV-Test",
+                "Referer" to "https://ref.example/",
+                "Origin" to "https://origin.example"
+            ))
+        )
+        assertTrue(HomeTvPolicies.libVlcHttpHeaderOptions(mapOf("Origin" to "bad\r\nheader")).isEmpty())
+    }
+
     @Test fun reachabilityRejectsHtmlAndErrors() {
         assertTrue(HomeTvPolicies.isReachableHttpResponse(200, "application/vnd.apple.mpegurl"))
         assertFalse(HomeTvPolicies.isReachableHttpResponse(200, "text/html"))
