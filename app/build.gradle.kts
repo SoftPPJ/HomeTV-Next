@@ -34,10 +34,29 @@ android {
         // Robolectric's documented local dependency directory resolver looks
         // up android-all-instrumented-<version>.jar in this verified folder.
         unitTests.all {
-            it.systemProperty(
-                "robolectric.dependency.dir",
-                layout.buildDirectory.dir("robolectric-deps").get().asFile.absolutePath
-            )
+            val robolectricSdkDir =
+                layout.buildDirectory.dir("robolectric-deps").get().asFile.absoluteFile
+            it.systemProperty("robolectric.dependency.dir", robolectricSdkDir.absolutePath)
+            // Pass the property explicitly to the forked test JVM as well. This avoids
+            // relying on Gradle's test-system-property forwarding with AGP-managed tests.
+            it.jvmArgs("-Drobolectric.dependency.dir=${robolectricSdkDir.absolutePath}")
+            it.doFirst {
+                check(robolectricSdkDir.isDirectory) {
+                    "Robolectric SDK directory does not exist: $robolectricSdkDir"
+                }
+                val expected = listOf(
+                    "android-all-instrumented-9-robolectric-4913185-2-i7.jar",
+                    "android-all-instrumented-12.1-robolectric-8229987-i7.jar"
+                )
+                expected.forEach { filename ->
+                    val sdkJar = File(robolectricSdkDir, filename)
+                    check(sdkJar.isFile && sdkJar.canRead()) {
+                        "Robolectric SDK jar is missing or unreadable: $sdkJar"
+                    }
+                }
+                println("Robolectric dependency directory: $robolectricSdkDir")
+                println("Verified Robolectric SDK jars: ${expected.joinToString()}")
+            }
         }
     }
 }
