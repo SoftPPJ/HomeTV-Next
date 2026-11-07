@@ -82,4 +82,39 @@ internal object HomeTvPolicies {
         val index = ((currentIndex % values.size) + values.size) % values.size
         return values[index] to ((index + 1) % values.size)
     }
+
+    /** Keep Auto/Best Available uncapped; only explicit user quality presets set a height ceiling. */
+    fun libVlcAdaptiveOptions(quality: String): List<String> = when (quality) {
+        "Data Saver (360p)" -> listOf(":adaptive-maxheight=360", ":adaptive-logic=highest")
+        "Standard (480p)" -> listOf(":adaptive-maxheight=480", ":adaptive-logic=highest")
+        "HD (720p)" -> listOf(":adaptive-maxheight=720", ":adaptive-logic=highest")
+        "Full HD (1080p)" -> listOf(":adaptive-maxheight=1080", ":adaptive-logic=highest")
+        "Auto", "Best Available" -> listOf(":adaptive-logic=highest")
+        else -> emptyList()
+    }
+
+    /** VLC's adjust filter is configured on the LibVLC instance, before the player opens a stream. */
+    fun libVlcPictureOptions(
+        mode: String,
+        brightness: Float,
+        contrast: Float,
+        saturation: Float
+    ): List<String> = if (mode == "Standard") emptyList() else listOf(
+        "--video-filter=adjust",
+        "--brightness=$brightness",
+        "--contrast=$contrast",
+        "--saturation=$saturation"
+    )
+
+    fun isVideoOutputStalled(
+        isPlaying: Boolean,
+        videoExpected: Boolean,
+        videoFrameAgeMs: Long,
+        mediaProgressAgeMs: Long,
+        timeoutMs: Long = 20_000L
+    ): Boolean {
+        if (!isPlaying) return false
+        return if (videoExpected) videoFrameAgeMs >= timeoutMs
+        else mediaProgressAgeMs >= timeoutMs
+    }
 }
