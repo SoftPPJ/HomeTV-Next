@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.softppj.hometv"
-    compileSdk = 35
+    compileSdk = 36
     buildFeatures { buildConfig = true }
 
     defaultConfig {
@@ -36,17 +36,17 @@ android {
 }
 
 dependencies {
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-dash:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-rtsp:1.5.1")
-    implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.5.1")
-    implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-rtsp:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
     // OpenGL video effects used by the optional Media3 picture presets.
-    implementation("androidx.media3:media3-effect:1.5.1")
+    implementation("androidx.media3:media3-effect:1.11.1")
     // GPLv3 decoder; retain only with appropriate distribution/licensing compliance.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
-    implementation("org.videolan.android:libvlc-all:3.5.1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
+    implementation("org.videolan.android:libvlc-all:3.7.7")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
