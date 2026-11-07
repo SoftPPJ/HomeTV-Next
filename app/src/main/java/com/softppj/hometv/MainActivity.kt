@@ -2112,7 +2112,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private fun chooseBufferProfile(){
         val returnToSettings=settingsScreenVisible
@@ -2135,7 +2135,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     // Stream routing is independent of the user-selected engine and never
     // overrides a confirmed working URL/engine or a manual engine selection.
@@ -2216,7 +2216,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private fun channelOptions(i:Int){
         if(i !in channels.indices)return
@@ -3922,15 +3922,45 @@ class MainActivity: Activity() {
     }
     private fun showSideDialog(dialog:AlertDialog,side:Int=Gravity.RIGHT){
         dialog.show()
+        // Some TV remotes report OK as BUTTON_A/BUTTON_SELECT rather than DPAD_CENTER.
+        // Also commit single-choice settings on the first OK press instead of merely
+        // previewing the highlighted row and leaving the user on an unfocused OK button.
+        dialog.setOnKeyListener{_,keyCode,event->
+            if(event.action!=KeyEvent.ACTION_DOWN || event.repeatCount!=0 ||
+                !HomeTvPolicies.isRemoteSelectKey(keyCode))return@setOnKeyListener false
+            val list=dialog.listView
+            val focused=dialog.window?.currentFocus
+            if(focused is Button){
+                HomeTvDiagnostics.i("RemoteInput","Dialog button activated key="+keyCode+
+                    " text="+focused.text)
+                focused.performClick()
+                return@setOnKeyListener true
+            }
+            if(list==null || !list.hasFocus())return@setOnKeyListener false
+            val selected=list.selectedItemPosition
+                .takeIf{it in 0 until list.count}
+                ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                ?:0
+            if(selected !in 0 until list.count)return@setOnKeyListener false
+            HomeTvDiagnostics.i("RemoteInput","Dialog list activated key="+keyCode+
+                " selected="+selected+" choiceMode="+list.choiceMode)
+            list.performItemClick(
+                list.getChildAt(selected-list.firstVisiblePosition),
+                selected,list.getItemIdAtPosition(selected)
+            )
+            val positive=dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            if(list.choiceMode==ListView.CHOICE_MODE_SINGLE &&
+                positive!=null && positive.visibility==View.VISIBLE && positive.isEnabled){
+                positive.performClick()
+            }
+            true
+        }
         dialog.window?.let{window->
             window.setGravity(side or Gravity.CENTER_VERTICAL)
             window.setLayout((resources.displayMetrics.widthPixels*0.44f).toInt().coerceAtLeast(320),WindowManager.LayoutParams.WRAP_CONTENT)
             window.setDimAmount(0.06f)
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(informationColor(0x202B3A)))
             dialog.listView?.apply{
-                // Preserve the dialog's native choice mode. Single-choice setting
-                // dialogs need CHOICE_MODE_SINGLE for DPAD focus to track previews;
-                // ordinary action lists remain in their default non-choice mode.
                 selector=android.graphics.drawable.StateListDrawable().apply{
                     addState(intArrayOf(android.R.attr.state_pressed),
                         android.graphics.drawable.ColorDrawable(0xFF267CC1.toInt()))
@@ -3943,8 +3973,6 @@ class MainActivity: Activity() {
                 }
                 isFocusable=true
                 isFocusableInTouchMode=true
-                // AlertDialog list rows must own DPAD focus so OK activates the
-                // highlighted setting instead of falling through to playback.
                 post{requestFocus()}
             }
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -4133,7 +4161,7 @@ class MainActivity: Activity() {
                 override fun onNothingSelected(parent:android.widget.AdapterView<*>?){}
             }
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
 
     private fun audioTracks(){
@@ -4519,7 +4547,8 @@ class MainActivity: Activity() {
             .setSingleChoiceItems(actions,actions.indexOf(current)){dialog,index->
                 prefs.edit().putString("side_"+side,actions[index]).apply()
                 dialog.dismiss();settings()
-            }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).create()
+        showSideDialog(dialog)
     }
     private fun updateClock(){
         clockTask?.let{handler.removeCallbacks(it)}
@@ -5789,7 +5818,7 @@ class MainActivity: Activity() {
             if(index==null || index==active)applyQuality()
             if(returnToSettings)settings()
         }
-        dialog.show()
+        showSideDialog(dialog)
     }
     private val screenModes=arrayOf("Fit","Fill / Crop","Stretch","16:9","4:3","21:9","1:1","Original","Zoom 110%","Zoom 125%","Zoom 150%")
     private var previewScreenMode:String?=null
