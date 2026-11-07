@@ -106,6 +106,16 @@ internal object HomeTvPolicies {
         "--saturation=$saturation"
     )
 
+    /** Video streams need a presented frame; audio-only streams need known tracks and startup progress. */
+    fun shouldConfirmVlcPlayback(
+        videoExpected: Boolean,
+        framePresented: Boolean,
+        videoTracksKnown: Boolean,
+        playbackAgeMs: Long,
+        minimumAudioOnlyAgeMs: Long = 1_500L
+    ): Boolean = if (videoExpected) framePresented
+        else videoTracksKnown && playbackAgeMs >= minimumAudioOnlyAgeMs
+
     fun isVideoOutputStalled(
         isPlaying: Boolean,
         videoExpected: Boolean,
