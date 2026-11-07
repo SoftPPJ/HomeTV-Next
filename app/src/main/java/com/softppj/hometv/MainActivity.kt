@@ -6809,6 +6809,7 @@ class MainActivity: Activity() {
             var failed=false
             var hasVideoOutput=false
             var vlcStartedAt=0L
+            var vlcFrameConfirmed=false
             var lastHealthy=android.os.SystemClock.elapsedRealtime()
             val stallCheck=object:Runnable{
                 override fun run(){
@@ -6819,6 +6820,10 @@ class MainActivity: Activity() {
                         val videoExpected=hasVideoOutput || hasVideoTrack
                         val videoFrameAge=if(lastVlcVideoFrameAt>0L)now-lastVlcVideoFrameAt
                             else now-vlcStartedAt
+                        if(videoExpected && lastVlcVideoFrameAt>0L && !vlcFrameConfirmed){
+                            vlcFrameConfirmed=true
+                            rememberWorking(c)
+                        }
                         val stalled=if(videoExpected)videoFrameAge>20000L
                             else now-lastHealthy>20000L
                         if(stalled){
