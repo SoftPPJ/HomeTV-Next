@@ -45,7 +45,7 @@ dependencies {
     // OpenGL video effects used by the optional Media3 picture presets.
     implementation("androidx.media3:media3-effect:1.11.1")
     // GPLv3 decoder; retain only with appropriate distribution/licensing compliance.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.9.0+1")
+    implementation("io.github.anilbeesetti:nextlib-media3ext:1.11.1-0.17.0")
     implementation("org.videolan.android:libvlc-all:3.7.7")
 
     testImplementation("junit:junit:4.13.2")
