@@ -4371,16 +4371,10 @@ class MainActivity: Activity() {
         },250L)
     }
     private fun applyLibVlcPicturePreset(vlc:VlcPlayer,c:Channel){
-        val mode=selectedPicturePreset(c)
-        val preset=selectedPictureValues(c)
-        try{
-            val clazz=vlc.javaClass
-            clazz.getMethod("setVideoAdjustEnabled",Boolean::class.javaPrimitiveType).invoke(vlc,mode!="Standard")
-            mapOf("setVideoAdjustBrightness" to preset.brightness,"setVideoAdjustContrast" to preset.contrast,
-                "setVideoAdjustSaturation" to preset.saturation).forEach{(method,value)->
-                try{clazz.getMethod(method,Float::class.javaPrimitiveType).invoke(vlc,value)}catch(_:Exception){}
-            }
-        }catch(e:Exception){HomeTvDiagnostics.w("HomeTV","LibVLC picture adjustment unavailable",e)}
+        // LibVLC 3.x applies the adjust video filter at LibVLC-instance creation.
+        // A committed preset rebuilds only this channel's LibVLC session with
+        // --video-filter=adjust and its brightness/contrast/saturation options.
+        // Do not reflectively call methods absent from some Android LibVLC builds.
     }
     private fun previewPictureChoice(index:Int,c:Channel,mode:String){
         previewPictureChannelKey=channelKey(c)
