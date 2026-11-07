@@ -7471,6 +7471,17 @@ class MainActivity: Activity() {
             if(openDrawer!=null){
                 when{
                     HomeTvPolicies.isRemoteSelectKey(event.keyCode)->{
+                        // DPAD_CENTER / ENTER must reach the focused ListView so
+                        // Android can use its real focused/selected adapter row.
+                        // Synthesizing a click here used a stale selected position on
+                        // some Android TV remotes and could activate the wrong row.
+                        if(event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
+                            event.keyCode==KeyEvent.KEYCODE_ENTER ||
+                            event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER){
+                            return false
+                        }
+                        // A few remotes report OK as BUTTON_A / BUTTON_SELECT instead
+                        // of a DPAD key. Those keycodes are not handled by ListView.
                         if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
                             val list=drawerList(openDrawer)
                             if(list!=null && list.count>0){
@@ -7478,13 +7489,14 @@ class MainActivity: Activity() {
                                     .takeIf{it in 0 until list.count}
                                     ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
                                     ?:0
+                                list.requestFocus()
                                 list.setSelection(selected)
-                                val child=list.getChildAt(selected-list.firstVisiblePosition)
-                                list.performItemClick(child,selected,list.getItemIdAtPosition(selected))
+                                list.performItemClick(
+                                    list.getChildAt(selected-list.firstVisiblePosition),
+                                    selected,list.getItemIdAtPosition(selected)
+                                )
                             }
                         }
-                        // Consume both halves so the player surface cannot interpret
-                        // the same remote press as a seek or playback command.
                         return true
                     }
                     HomeTvPolicies.isRemoteLeftKey(event.keyCode)->{
