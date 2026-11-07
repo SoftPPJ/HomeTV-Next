@@ -121,3 +121,18 @@ Release rule: do not describe the app as fully implemented or production-ready u
 - Android TV playback, picture quality and remote-control testing are assigned to the user; these gates will remain pending until results are reported.
 
 **Release status: NOT READY.** Source presence is not evidence of successful compilation or device acceptance.
+
+
+## HomeTV-Next engine modernization — 7 November 2026
+
+- Updated AndroidX Media3 modules to 1.11.1, LibVLC to 3.7.7, the Media3 FFmpeg decoder extension to 1.9.0+1, Android Gradle Plugin to 8.13.2, Kotlin to 2.2.10, Gradle to 8.13 and compile SDK to 36.
+- Media3 remains primary. LibVLC remains the second engine and the first choice for RTMP/VLC-only protocols. FFmpeg is a Media3 decoder extension only; IJKPlayer is not included.
+- LibVLC Auto/Best Available now request the highest adaptive rendition without a resolution cap. Only explicit user quality presets impose a height ceiling. Automatic hardware decoding is enabled and no stream re-encoding is introduced.
+- LibVLC picture presets are installed through VLC's native adjust filter at LibVLC instance creation. Media3 presets are installed before prepare. Selecting/previewing a preset restarts only the current channel after a short debounce so the decoder is not reconfigured mid-stream.
+- Added Media3 rendered-frame monitoring and one native-rendering recovery attempt for a non-standard preset before confirmed-engine recovery.
+- LibVLC now renders through TextureView so SurfaceTexture frame updates can be monitored. The watchdog distinguishes video-frame stalls from audio-only playback and ignores intentionally paused playback.
+- Added unit tests for LibVLC uncapped Auto/Best Available, explicit quality caps, picture-filter options, paused playback and video-frame stall decisions.
+- Updated source-only CI to verify resolved engine dependencies, compile Kotlin and run unit tests. APK assembly/upload steps are disabled until the user authorizes packaging after all remaining updates.
+- Source-level feature checks also confirm the cinematic home, backup/restore, signed-lease cache, hidden-channel scan, 20k-row channel-index test, active-only cached playlist refresh, EPG matching, YouTube native-to-WebView fallback and playlist lock/deletion paths are present.
+- **Still pending:** final source audit, latest source-only CI result, live Worker/signing end-to-end verification where applicable, and Android TV tests (owned by the user). No device-test result is inferred from source or CI.
+
