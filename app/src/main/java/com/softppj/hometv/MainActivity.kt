@@ -6531,6 +6531,7 @@ class MainActivity: Activity() {
             activeChannelGainProcessor=gainProcessor
             val renderersFactory=HomeTvRenderersFactory(this,gainProcessor)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+                .setEnableDecoderFallback(true)
             val exo=ExoPlayer.Builder(this,renderersFactory)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(factory)).setLoadControl(loadControl).build()
             exo.setAudioAttributes(AudioAttributes.DEFAULT,true)
@@ -6567,13 +6568,32 @@ class MainActivity: Activity() {
             handler.postDelayed(startupTimeout,startupLimit)
             var wasReady=false
             var bufferingRecoveryTask:Runnable?=null
-            // Detect the specific failure where Media3 keeps audio advancing but
-            // the video decoder stops outputting frames. STATE_READY/isPlaying
-            // alone cannot detect a frozen picture.
+            // Detect video output stalls independently of the audio clock.
+            // Some Android TV decoders keep audio moving while the picture freezes.
             var media3PlayStartedAt=0L
             var lastRenderedVideoFrames=-1
             var lastVideoFrameProgressAt=0L
             var videoFreezeHandled=false
+            var pictureEffectRecoveryAttempted=false
+            fun recoverNativeMedia3Video(now:Long):Boolean{
+                if(pictureEffectRecoveryAttempted || selectedPicturePreset(c)=="Standard")return false
+                pictureEffectRecoveryAttempted=true
+                return try{
+                    val position=exo.currentPosition
+                    // GL picture effects can expose decoder/surface bugs on some TV chipsets.
+                    // Retry the exact same URL on Media3's native video surface first.
+                    exo.setVideoEffects(emptyList())
+                    exo.seekTo(position)
+                    exo.play()
+                    lastRenderedVideoFrames=-1
+                    lastVideoFrameProgressAt=now
+                    HomeTvDiagnostics.w("HomeTV","Media3 picture-effect pipeline stalled; retrying native rendering for "+c.name)
+                    true
+                }catch(e:Exception){
+                    HomeTvDiagnostics.w("HomeTV","Native Media3 rendering recovery failed for "+c.name,e)
+                    false
+                }
+            }
             val videoFrameWatchdog=object:Runnable{
                 override fun run(){
                     if(player!==exo || active!=index || videoScreen!==screen)return
@@ -6584,24 +6604,26 @@ class MainActivity: Activity() {
                         if(counters!=null){
                             counters.ensureUpdated()
                             val rendered=counters.renderedOutputBufferCount
-                            if(rendered>lastRenderedVideoFrames){
+                            // Counters can reset when MediaCodec is recreated; any
+                            // change is progress, not only an increase.
+                            if(rendered!=lastRenderedVideoFrames){
                                 lastRenderedVideoFrames=rendered
                                 lastVideoFrameProgressAt=now
-                            }else if(lastVideoFrameProgressAt>0L &&
-                                now-lastVideoFrameProgressAt>=20000L && !videoFreezeHandled){
-                                videoFreezeHandled=true
-                                HomeTvDiagnostics.e("HomeTV","Media3 video frame output stalled while playback continued: "+c.name+
-                                    " renderedFrames="+rendered+" positionMs="+exo.currentPosition)
-                                handleEngineFailure(index,screen)
-                                return
                             }
                         }
-                        // Also catch audio-only progress before the first video frame.
-                        if(lastVideoFrameProgressAt==0L && media3PlayStartedAt>0L &&
-                            now-media3PlayStartedAt>=20000L && !videoFreezeHandled){
-                            videoFreezeHandled=true
-                            HomeTvDiagnostics.e("HomeTV","Media3 audio advanced without an initial video frame: "+c.name+
+                        val noVideoFrameYet=lastVideoFrameProgressAt==0L &&
+                            now-media3PlayStartedAt>=20000L
+                        val videoFramesStopped=lastVideoFrameProgressAt>0L &&
+                            now-lastVideoFrameProgressAt>=20000L
+                        if((noVideoFrameYet || videoFramesStopped) && !videoFreezeHandled){
+                            HomeTvDiagnostics.e("HomeTV","Media3 video frame output stalled while playback continued: "+c.name+
+                                " renderedFrames="+(counters?.renderedOutputBufferCount ?: -1)+
                                 " positionMs="+exo.currentPosition)
+                            if(recoverNativeMedia3Video(now)){
+                                handler.postDelayed(this,5000L)
+                                return
+                            }
+                            videoFreezeHandled=true
                             handleEngineFailure(index,screen)
                             return
                         }
@@ -6738,17 +6760,43 @@ class MainActivity: Activity() {
     private fun startVlc(c:Channel,index:Int,screen:FrameLayout){
         try{
             val cache=bufferValues()[0].coerceAtLeast(300)
-            val options=arrayListOf("--network-caching="+cache,"--live-caching="+cache,"--http-reconnect","--no-video-title-show")
+            // Keep hardware decoding automatic and full-resolution output enabled.
+            // The adaptive stream selector below is capped only by an explicit user preset.
+            val options=arrayListOf(
+                "--network-caching="+cache,
+                "--live-caching="+cache,
+                "--http-reconnect",
+                "--avcodec-hw=any",
+                "--no-video-title-show"
+            )
             val core=LibVLC(this,options)
             val vlc=VlcPlayer(core)
             vlcCore=core
             vlcPlayer=vlc
             try{vlc.volume=(channelVolumeGain(c)*100).toInt().coerceIn(0,200)}catch(_:Exception){}
             applyLibVlcPicturePreset(vlc,c)
-            val surface=SurfaceView(this)
+            // TextureView frame callbacks let HomeTV detect the real video output,
+            // not just an advancing audio/media clock.
+            val surface=TextureView(this)
             screen.addView(surface,0,FrameLayout.LayoutParams(-1,-1))
             vlc.vlcVout.setVideoView(surface)
             vlc.vlcVout.attachViews()
+            val vlcSurfaceListener=surface.surfaceTextureListener
+            var lastVlcVideoFrameAt=0L
+            surface.surfaceTextureListener=object:TextureView.SurfaceTextureListener{
+                override fun onSurfaceTextureAvailable(texture:android.graphics.SurfaceTexture,width:Int,height:Int){
+                    vlcSurfaceListener?.onSurfaceTextureAvailable(texture,width,height)
+                }
+                override fun onSurfaceTextureSizeChanged(texture:android.graphics.SurfaceTexture,width:Int,height:Int){
+                    vlcSurfaceListener?.onSurfaceTextureSizeChanged(texture,width,height)
+                }
+                override fun onSurfaceTextureDestroyed(texture:android.graphics.SurfaceTexture):Boolean=
+                    vlcSurfaceListener?.onSurfaceTextureDestroyed(texture) ?: true
+                override fun onSurfaceTextureUpdated(texture:android.graphics.SurfaceTexture){
+                    vlcSurfaceListener?.onSurfaceTextureUpdated(texture)
+                    lastVlcVideoFrameAt=android.os.SystemClock.elapsedRealtime()
+                }
+            }
             surface.post{
                 if(vlcPlayer===vlc){
                     val w=screen.width.takeIf{it>0} ?: resources.displayMetrics.widthPixels
@@ -6759,17 +6807,29 @@ class MainActivity: Activity() {
             }
             var started=false
             var failed=false
+            var hasVideoOutput=false
+            var vlcStartedAt=0L
             var lastHealthy=android.os.SystemClock.elapsedRealtime()
             val stallCheck=object:Runnable{
                 override fun run(){
                     if(vlcPlayer!==vlc || active!=index || videoScreen!==screen)return
-                    if(started && !failed && prefs.getBoolean("auto_reconnect",true) &&
-                        android.os.SystemClock.elapsedRealtime()-lastHealthy>20000L){
-                        failed=true
-                        autoBufferStalled()
-                        HomeTvDiagnostics.w("HomeTV","LibVLC stalled for "+c.name)
-                        handleEngineFailure(index,screen)
-                        return
+                    if(started && !failed && prefs.getBoolean("auto_reconnect",true)){
+                        val now=android.os.SystemClock.elapsedRealtime()
+                        val hasVideoTrack=try{vlc.videoTracks?.any{it.id>=0}==true}catch(_:Exception){false}
+                        val videoExpected=hasVideoOutput || hasVideoTrack
+                        val videoFrameAge=if(lastVlcVideoFrameAt>0L)now-lastVlcVideoFrameAt
+                            else now-vlcStartedAt
+                        val stalled=if(videoExpected)videoFrameAge>20000L
+                            else now-lastHealthy>20000L
+                        if(stalled){
+                            failed=true
+                            autoBufferStalled()
+                            HomeTvDiagnostics.w("HomeTV","LibVLC "+(if(videoExpected)"video frames" else "media clock")+
+                                " stalled for "+c.name+" vout="+hasVideoOutput+
+                                " frameAgeMs="+videoFrameAge+" mediaTimeMs="+vlc.time)
+                            handleEngineFailure(index,screen)
+                            return
+                        }
                     }
                     handler.postDelayed(this,5000)
                 }
@@ -6801,14 +6861,24 @@ class MainActivity: Activity() {
                                 android.os.SystemClock.elapsedRealtime()-lastHealthy<12000L)
                                 recoveryAttempts.remove(c.url)
                         },60000L)
-                        rememberWorking(c)
+                        vlcStartedAt=android.os.SystemClock.elapsedRealtime()
+                        lastHealthy=vlcStartedAt
+                        handler.postDelayed({
+                            if(vlcPlayer===vlc && active==index && !failed &&
+                                (lastVlcVideoFrameAt>0L || !hasVideoOutput))
+                                rememberWorking(c)
+                        },1500L)
                         autoBufferHealthy()
-                        lastHealthy=android.os.SystemClock.elapsedRealtime()
                         handler.removeCallbacks(watchdog)
                     }
                     VlcPlayer.Event.TimeChanged, VlcPlayer.Event.PositionChanged->{
-                        // Only advancing playback events count as progress.
-                        lastHealthy=android.os.SystemClock.elapsedRealtime()
+                        // This is used only for audio-only streams. Video health is
+                        // determined from TextureView's actual frame-update callbacks.
+                        if(!hasVideoOutput)lastHealthy=android.os.SystemClock.elapsedRealtime()
+                    }
+                    VlcPlayer.Event.Vout->{
+                        hasVideoOutput=event.voutCount>0
+                        if(hasVideoOutput)lastVlcVideoFrameAt=android.os.SystemClock.elapsedRealtime()
                     }
                     VlcPlayer.Event.Buffering->{
                         // A buffering callback is not proof of progress.
@@ -6837,6 +6907,7 @@ class MainActivity: Activity() {
             c.headers["User-Agent"]?.let{media.addOption(":http-user-agent="+it)}
             c.headers["Referer"]?.let{media.addOption(":http-referrer="+it)}
             media.addOption(":network-caching="+cache)
+            media.addOption(":live-caching="+cache)
             // LibVLC adaptive HLS/DASH quality: do not cap Auto/Best
             // Available at a low resolution. Fixed presets provide an upper
             // resolution preference when the stream exposes variants.
