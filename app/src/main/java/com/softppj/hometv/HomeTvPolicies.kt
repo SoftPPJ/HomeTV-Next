@@ -100,6 +100,16 @@ internal object HomeTvPolicies {
         else -> emptyList()
     }
 
+    /** Apply the HTTP headers supported by the bundled LibVLC 3.x HTTP access module. */
+    fun libVlcHttpHeaderOptions(headers:Map<String,String>):List<String> = buildList {
+        headers["User-Agent"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
+            ?.let{add(":http-user-agent="+it)}
+        headers["Referer"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
+            ?.let{add(":http-referrer="+it)}
+        headers["Origin"]?.takeIf{it.isNotBlank() && '\r' !in it && '\n' !in it}
+            ?.let{add(":http-origin="+it)}
+    }
+
     /** VLC's adjust filter is configured on the LibVLC instance, before the player opens a stream. */
     fun libVlcPictureOptions(
         mode: String,
