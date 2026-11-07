@@ -51,12 +51,12 @@ jobs:
           set -euo pipefail
           DEST="app/build/robolectric-deps"
           mkdir -p "$DEST"
-          # API 28 is pinned by M3uParserTest, SignedLicenseCacheTest and
-          # YouTubeStreamResolverTest. API 32 is the app target SDK and is
-          # used by Robolectric tests without an explicit @Config SDK.
+          # API 28 is pinned by selected tests; API 32 is the app target SDK.
+          # Robolectric 4.14.1 also resolves API 35 for tests using its default SDK.
           VERSIONS=(
             "9-robolectric-4913185-2-i7"
             "12.1-robolectric-8229987-i7"
+            "15-robolectric-12650502-i7"
           )
           for VERSION in "${VERSIONS[@]}"; do
             ARTIFACT="android-all-instrumented-$VERSION.jar"
@@ -77,6 +77,7 @@ jobs:
           # LocalDependencyResolver before the test JVM starts.
           test -s "$DEST/android-all-instrumented-9-robolectric-4913185-2-i7.jar"
           test -s "$DEST/android-all-instrumented-12.1-robolectric-8229987-i7.jar"
+          test -s "$DEST/android-all-instrumented-15-robolectric-12650502-i7.jar"
           ls -lh "$DEST"
           echo "All pinned Robolectric SDK artifacts are downloaded and verified."
       - name: Run unit tests
