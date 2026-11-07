@@ -52,6 +52,13 @@ internal object HomeTvPolicies {
             ?: enabled.firstOrNull{it in available}
     }
 
+    /** Give live IPTV a longer first-frame grace; HLS/DASH VOD also need segment startup time. */
+    fun startupTimeoutMs(mediaType: String, streamKind: String): Long = when {
+        mediaType == "live" -> 30_000L
+        streamKind == "hls" || streamKind == "dash" || streamKind == "smooth" -> 25_000L
+        else -> 15_000L
+    }
+
     fun shouldAttemptNativeYoutube(
         eligibleVideo: Boolean,
         alreadyAttempted: Boolean,
