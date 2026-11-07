@@ -7605,37 +7605,31 @@ class MainActivity: Activity() {
             if(openDrawer!=null){
                 when{
                     HomeTvPolicies.isRemoteSelectKey(event.keyCode)->{
-                        // DPAD_CENTER / ENTER must reach the focused ListView so
-                        // Android can use its real focused/selected adapter row.
-                        // Synthesizing a click here used a stale selected position on
-                        // some Android TV remotes and could activate the wrong row.
-                        if(event.keyCode==KeyEvent.KEYCODE_DPAD_CENTER ||
-                            event.keyCode==KeyEvent.KEYCODE_ENTER ||
-                            event.keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER){
-                            return false
-                        }
-                        // A few remotes report OK as BUTTON_A / BUTTON_SELECT instead
-                        // of a DPAD key. Those keycodes are not handled by ListView.
-                        if(event.action==KeyEvent.ACTION_DOWN && event.repeatCount==0){
-                            val list=drawerList(openDrawer)
-                            if(list!=null && list.count>0){
-                                val selected=list.selectedItemPosition
-                                    .takeIf{it in 0 until list.count}
-                                    ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
-                                    ?:0
-                                list.requestFocus()
-                                list.setSelection(selected)
-                                list.performItemClick(
-                                    list.getChildAt(selected-list.firstVisiblePosition),
-                                    selected,list.getItemIdAtPosition(selected)
-                                )
-                            }
-                        }
+                        // Route every supported OK mapping through the focused ListView.
+                        // Some TV remotes send BUTTON_A / BUTTON_SELECT, which Android's
+                        // ListView does not interpret as an activation key by itself.
+                        val list=drawerList(openDrawer) ?: return false
+                        if(list.count<=0)return true
+                        val selected=list.selectedItemPosition
+                            .takeIf{it in 0 until list.count}
+                            ?:list.checkedItemPosition.takeIf{it in 0 until list.count}
+                            ?:0
+                        list.requestFocus()
+                        if(list.selectedItemPosition !in 0 until list.count)
+                            list.setSelection(selected)
+                        list.dispatchKeyEvent(KeyEvent(event,KeyEvent.KEYCODE_DPAD_CENTER))
                         return true
                     }
-                    // Let Android's focused ListView handle DPAD navigation itself.
-                    // Intercepting DPAD_LEFT/RIGHT here prevented its own key listeners
-                    // from receiving the event and made selection appear unresponsive.
+                    // DPAD navigation must reach the ListView. Some remotes expose
+                    // LEFT/RIGHT as media transport keys; translate those while a
+                    // drawer is open so they never seek or get swallowed.
+                    HomeTvPolicies.drawerNavigationKey(event.keyCode)!=null->{
+                        val list=drawerList(openDrawer) ?: return true
+                        list.requestFocus()
+                        val translated=HomeTvPolicies.drawerNavigationKey(event.keyCode)!!
+                        list.dispatchKeyEvent(KeyEvent(event,translated))
+                        return true
+                    }
                     HomeTvPolicies.shouldDeferDrawerNavigation(event.keyCode)->return false
                     HomeTvPolicies.isRemoteLeftKey(event.keyCode)->return true
                     HomeTvPolicies.isRemoteRightKey(event.keyCode)->return true
