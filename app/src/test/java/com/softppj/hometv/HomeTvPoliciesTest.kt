@@ -121,6 +121,14 @@ class HomeTvPoliciesTest {
         )
     }
 
+    @Test fun libVlcVideoConfirmationRequiresARealPresentedFrame() {
+        assertFalse(HomeTvPolicies.shouldConfirmVlcPlayback(true,false,true,5_000L))
+        assertTrue(HomeTvPolicies.shouldConfirmVlcPlayback(true,true,true,5_000L))
+        assertFalse(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,false,5_000L))
+        assertFalse(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,true,1_000L))
+        assertTrue(HomeTvPolicies.shouldConfirmVlcPlayback(false,false,true,1_500L))
+    }
+
     @Test fun videoFreezePolicyUsesPresentedFramesAndIgnoresPausedPlayback() {
         assertFalse(HomeTvPolicies.isVideoOutputStalled(false,true,30_000L,30_000L))
         assertFalse(HomeTvPolicies.isVideoOutputStalled(true,true,5_000L,30_000L))
